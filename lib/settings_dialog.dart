@@ -473,6 +473,54 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
           ],
         ),
 
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.contrast_rounded, size: 22, color: accentColor),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'High-Contrast Black & White Mode',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    Text(
+                      'Monochrome high-contrast display for sunlight glare & accessibility',
+                      style: TextStyle(fontSize: 12, color: subtextColor),
+                    ),
+                  ],
+                ),
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: settings.highContrastMonochromeNotifier,
+                builder: (context, isBw, _) {
+                  return Switch(
+                    value: isBw,
+                    activeTrackColor: accentColor,
+                    onChanged: (val) {
+                      settings.toggleHighContrastMonochrome(val);
+                      widget.onSettingsChanged?.call();
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 26),
         _buildSubhead('GIS CARTOGRAPHY STYLE'),
         const SizedBox(height: 10),
@@ -1163,6 +1211,53 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                                   activeTrackColor: accentColor,
                                   onChanged: (val) {
                                     settings.toggleTheme(val);
+                                  },
+                                ),
+                              ],
+                            ),
+                            Divider(color: borderColor, height: 20),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.contrast_rounded,
+                                  color: accentColor,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'High-Contrast Black & White',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: textColor,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Monochrome display for sunlight visibility & anti-glare',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: subtextColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                ValueListenableBuilder<bool>(
+                                  valueListenable:
+                                      settings.highContrastMonochromeNotifier,
+                                  builder: (context, isBw, _) {
+                                    return Switch(
+                                      value: isBw,
+                                      activeTrackColor: accentColor,
+                                      onChanged: (val) {
+                                        settings.toggleHighContrastMonochrome(val);
+                                        widget.onSettingsChanged?.call();
+                                      },
+                                    );
                                   },
                                 ),
                               ],

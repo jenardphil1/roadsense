@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_settings.dart';
 
 /// RoadSense AI — Enterprise Clean UI Design System
 /// Flat, structured, high-legibility palette inspired by Linear, Supabase, and Notion.
@@ -9,8 +10,8 @@ class AppDesign {
   static const Color borderLight = Color(0xFFE2E8F0);
 
   // Deep Obsidian Navy for high-contrast map overlays & telemetry HUD
-  static const Color bgDark = Color(0xFF0B111E);
-  static const Color surfaceDark = Color(0xFF131D2E);
+  static const Color bgDark = Color(0xFF080D1A);
+  static const Color surfaceDark = Color(0xFF0F172A);
   static const Color borderDark = Color(0xFF1E293B);
 
   // High-Legibility Typography Contrast
@@ -23,24 +24,68 @@ class AppDesign {
   static const Color textMutedDark = Color(0xFF64748B);
 
   // Luminous Semantic Action & Severity Tokens
-  static const Color accentLight = Color(0xFF2563EB); // Electric Royal Blue
-  static const Color accentDark = Color(0xFF38BDF8);  // Sky Cyan / Luminous Azure
+  static const Color accentLight = Color(0xFF0284C7); // Tactical Azure Sky
+  static const Color accentDark = Color(0xFF00D2FF);  // Luminous Cyan / Precision Telemetry
   static const Color danger = Color(0xFFEF4444);      // High Severity Pothole (Vivid Red)
   static const Color warning = Color(0xFFF97316);     // Medium Severity Pothole (Vivid Orange)
   static const Color caution = Color(0xFFEAB308);     // Low Severity Pothole (Amber Yellow)
   static const Color success = Color(0xFF10B981);     // Approved / Verified / Safe (Emerald)
 
-  // ── Context Helpers ───────────────────────────────────────────────────────
-  static Color bg(bool isDark) => isDark ? bgDark : bgLight;
-  static Color surface(bool isDark) => isDark ? surfaceDark : surfaceLight;
-  static Color border(bool isDark) => isDark ? borderDark : borderLight;
-  static Color textPrimary(bool isDark) =>
-      isDark ? textPrimaryDark : textPrimaryLight;
-  static Color textSecondary(bool isDark) =>
-      isDark ? textSecondaryDark : textSecondaryLight;
-  static Color textMuted(bool isDark) =>
-      isDark ? textMutedDark : textMutedLight;
-  static Color accent(bool isDark) => isDark ? accentDark : accentLight;
+  // ── DPWH Road Distress Classification Engineering Tokens ─────────────────
+  static const Color dpwhCode01 = Color(0xFFEF4444); // Pothole (Urgent 3-Day Fix)
+  static const Color dpwhCode02 = Color(0xFFF97316); // Alligator Crack (High 3-Day Fix)
+  static const Color dpwhCode05 = Color(0xFFEAB308); // Pavement Depression (30-Day Fix)
+  static const Color dpwhCode12 = Color(0xFF38BDF8); // Longitudinal/Transverse Crack (Routine Sealant)
+
+  // ── Context Helpers (With High-Contrast Black & White Support) ────────────
+  static Color bg(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+    }
+    return isDark ? bgDark : bgLight;
+  }
+
+  static Color surface(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFF121212) : const Color(0xFFF6F6F6);
+    }
+    return isDark ? surfaceDark : surfaceLight;
+  }
+
+  static Color border(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFF444444) : const Color(0xFFCCCCCC);
+    }
+    return isDark ? borderDark : borderLight;
+  }
+
+  static Color textPrimary(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
+    }
+    return isDark ? textPrimaryDark : textPrimaryLight;
+  }
+
+  static Color textSecondary(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFFAAAAAA) : const Color(0xFF555555);
+    }
+    return isDark ? textSecondaryDark : textSecondaryLight;
+  }
+
+  static Color textMuted(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFF777777) : const Color(0xFF888888);
+    }
+    return isDark ? textMutedDark : textMutedLight;
+  }
+
+  static Color accent(bool isDark) {
+    if (AppSettings.instance.isBlackAndWhite) {
+      return isDark ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
+    }
+    return isDark ? accentDark : accentLight;
+  }
 
   // ── Reusable Component Decorations ──────────────────────────────────────
   static BoxDecoration cardDecoration({

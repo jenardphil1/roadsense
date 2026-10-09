@@ -656,6 +656,39 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  /// Maps detection attributes to DPWH standard highway defect codes
+  static String getDpwhCode(String severity, [String tag = '']) {
+    final lowerTag = tag.toLowerCase();
+    if (lowerTag.contains('alligator') || lowerTag.contains('crocodile')) return 'CODE 02';
+    if (lowerTag.contains('depression') || lowerTag.contains('rut')) return 'CODE 05';
+    if (lowerTag.contains('crack') || lowerTag.contains('transverse') || lowerTag.contains('longitudinal')) return 'CODE 12';
+    switch (severity.toLowerCase()) {
+      case 'high':
+        return 'CODE 01';
+      case 'medium':
+        return 'CODE 02';
+      case 'low':
+      default:
+        return 'CODE 05';
+    }
+  }
+
+  /// Human-readable title for DPWH maintenance categorization
+  static String getDpwhDefectTitle(String code) {
+    switch (code) {
+      case 'CODE 01':
+        return 'Pothole (Urgent 3-Day)';
+      case 'CODE 02':
+        return 'Alligator Crack (High 3-Day)';
+      case 'CODE 05':
+        return 'Pavement Depression (30-Day)';
+      case 'CODE 12':
+        return 'Crack (Routine Sealant)';
+      default:
+        return 'Pothole';
+    }
+  }
+
   /// Evaluates the highest severity among all detected potholes in the image
   static String getOverallSeverity(List<Map<String, dynamic>> detections) {
     if (detections.isEmpty) return 'medium';
@@ -790,9 +823,13 @@ class _MyHomePageState extends State<MyHomePage> {
         final bottom = (box[3] as num).toDouble();
         final conf = box.length > 4 ? (box[4] as num).toDouble() : 0.0;
         final sev = getDetectionSeverity(det);
+        final dpwhCode = getDpwhCode(sev, det['tag'] as String? ?? '');
+        final defectType = getDpwhDefectTitle(dpwhCode);
         return {
           'severity': sev,
           'confidence': conf,
+          'dpwhCode': dpwhCode,
+          'defectType': defectType,
           'box': [left, top, right, bottom],
         };
       }).toList();
@@ -1001,6 +1038,7 @@ class _MyHomePageState extends State<MyHomePage> {
           box.length > 4 ? (box[4] as num).toDouble() * 100 : 0.0;
 
       final String severity = getDetectionSeverity(result);
+      final String dpwhCode = getDpwhCode(severity, result['tag'] as String? ?? '');
       final Color boxColor = getSeverityColor(severity);
       final String severityLabel = severity.toUpperCase();
 
@@ -1026,7 +1064,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
               child: Text(
-                '$severityLabel ${confidence > 0 ? "${confidence.toStringAsFixed(0)}%" : ""}',
+                '[$dpwhCode] $severityLabel ${confidence > 0 ? "(${confidence.toStringAsFixed(0)}%)" : ""}',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -1057,6 +1095,7 @@ class _MyHomePageState extends State<MyHomePage> {
     double confidence = box.length > 4 ? box[4] * 100 : 0.0;
 
     final String severity = getDetectionSeverity(result);
+    final String dpwhCode = getDpwhCode(severity, result['tag'] as String? ?? '');
     final Color boxColor = getSeverityColor(severity);
     final String severityLabel = severity.toUpperCase();
 
@@ -1082,7 +1121,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             child: Text(
-              "$severityLabel • ${confidence.toStringAsFixed(0)}%",
+              "[$dpwhCode] $severityLabel • ${confidence.toStringAsFixed(0)}%",
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12.0,
@@ -1339,8 +1378,8 @@ class _MyHomePageState extends State<MyHomePage> {
                                   right: 16,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                      horizontal: 18,
+                                      vertical: 10,
+                                      horizontal: 14,
                                     ),
                                     decoration: BoxDecoration(
                                       color: AppDesign.bg(true)
@@ -1365,16 +1404,40 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 color: AppDesign.danger,
                                               ),
                                             ),
-                                            const SizedBox(width: 10),
+                                            const SizedBox(width: 8),
                                             Text(
                                               recs != null && recs.isNotEmpty
                                                   ? '${recs.length} DETECTED'
                                                   : 'SCANNING...',
                                               style: const TextStyle(
                                                 color: Colors.white,
-                                                fontSize: 16,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w800,
-                                                letterSpacing: 1.5,
+                                                letterSpacing: 1.2,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF0284C7).withValues(alpha: 0.85),
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.directions_walk_rounded, color: Colors.white, size: 12),
+                                                  SizedBox(width: 3),
+                                                  Text(
+                                                    'ON FOOT',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 9,
+                                                      fontWeight: FontWeight.w800,
+                                                      letterSpacing: 0.5,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
@@ -1406,6 +1469,57 @@ class _MyHomePageState extends State<MyHomePage> {
                                     ),
                                   ),
                                 ),
+                                // Walking Survey Alignment Reticle (Center Guide)
+                                if (recs == null || recs.isEmpty)
+                                  Center(
+                                    child: IgnorePointer(
+                                      child: Container(
+                                        width: 220,
+                                        height: 220,
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: Colors.white.withValues(alpha: 0.28),
+                                            width: 1.5,
+                                          ),
+                                          borderRadius: BorderRadius.circular(16),
+                                        ),
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 8),
+                                              child: Text(
+                                                'ALIGN ROAD SURFACE',
+                                                style: TextStyle(
+                                                  color: Colors.white.withValues(alpha: 0.7),
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 1,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(
+                                              Icons.control_camera_rounded,
+                                              color: Colors.white.withValues(alpha: 0.25),
+                                              size: 32,
+                                            ),
+                                            Padding(
+                                              padding: const EdgeInsets.only(bottom: 8),
+                                              child: Text(
+                                                'WALK & HOLD STEADY',
+                                                style: TextStyle(
+                                                  color: Colors.white.withValues(alpha: 0.7),
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 1,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                               ],
                             );
                           },
@@ -1431,13 +1545,13 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                     ),
                     onPressed: _captureFromStream,
-                    icon: const Icon(Icons.camera_alt_rounded, size: 30),
+                    icon: const Icon(Icons.camera_alt_rounded, size: 28),
                     label: const Text(
-                      'CAPTURE',
+                      'CAPTURE DISTRESS',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 20,
                         fontWeight: FontWeight.w900,
-                        letterSpacing: 2,
+                        letterSpacing: 1.5,
                       ),
                     ),
                   ),

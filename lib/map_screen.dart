@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+﻿import 'dart:math' as math;
 import 'dart:math' show cos, sin, sqrt, atan2;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1284,8 +1284,12 @@ class MapScreenState extends State<MapScreen>
                 : '';
             final String routeHazardPrompt =
                 (_routePoints.isNotEmpty && pendingPotholes.isNotEmpty)
-                    ? 'Warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. ${pendingPotholes.length} hazard${pendingPotholes.length == 1 ? '' : 's'} remaining on route.'
-                    : 'Warning! Pothole nearby in ${absoluteMin.round()} meters.';
+                    ? (_travelMode == OsrmTravelMode.bike
+                        ? 'Motorcycle warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. Ride with caution. ${pendingPotholes.length} hazard${pendingPotholes.length == 1 ? '' : 's'} remaining on route.'
+                        : 'Warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. ${pendingPotholes.length} hazard${pendingPotholes.length == 1 ? '' : 's'} remaining on route.')
+                    : (_travelMode == OsrmTravelMode.bike
+                        ? 'Motorcycle alert! Pothole nearby in ${absoluteMin.round()} meters. Slow down.'
+                        : 'Warning! Pothole nearby in ${absoluteMin.round()} meters.');
             _tts.speak(routeHazardPrompt);
             PotholeNotifier.instance.showPotholeAlert(
               '${absoluteMin.round()} m',
@@ -1815,8 +1819,12 @@ class MapScreenState extends State<MapScreen>
   /// Cycles between all available alternative and navigation routes
   void _cycleRoutes() {
     if (_alternativeRoutes.isEmpty) return;
+    HapticFeedback.mediumImpact();
     final nextIndex = (_selectedRouteIndex + 1) % _alternativeRoutes.length;
     _selectActiveRoute(nextIndex);
+    if (!kIsWeb && _travelMode == OsrmTravelMode.bike) {
+      _tts.speak('Route ${nextIndex + 1} of ${_alternativeRoutes.length} selected.');
+    }
   }
 
   Future<void> _updatePotholesOnActiveRoute() async {
@@ -5889,10 +5897,10 @@ class MapScreenState extends State<MapScreen>
                               // Route Switcher / Cycle Controller
                               if (_alternativeRoutes.length > 1) ...[
                                 Container(
-                                  height: 40,
+                                  height: 48,
                                   decoration: BoxDecoration(
                                     color: AppDesign.accent(isDark),
-                                    borderRadius: BorderRadius.circular(20),
+                                    borderRadius: BorderRadius.circular(24),
                                     boxShadow: [
                                       BoxShadow(
                                         color: AppDesign.accent(isDark)
@@ -5914,14 +5922,18 @@ class MapScreenState extends State<MapScreen>
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            const Icon(
-                                              Icons.alt_route_rounded,
+                                            Icon(
+                                              _travelMode == OsrmTravelMode.bike
+                                                  ? Icons.two_wheeler_rounded
+                                                  : Icons.alt_route_rounded,
                                               color: Colors.white,
-                                              size: 17,
+                                              size: 19,
                                             ),
-                                            const SizedBox(width: 5),
+                                            const SizedBox(width: 6),
                                             Text(
-                                              'Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.length}',
+                                              _travelMode == OsrmTravelMode.bike
+                                                  ? 'Moto Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.length}'
+                                                  : 'Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.length}',
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 12,
@@ -8195,9 +8207,15 @@ class MapScreenState extends State<MapScreen>
     if (!kIsWeb) {
       if (activePotholeCount > 0) {
         final stepPrompt = _routeSteps.isNotEmpty ? ' ${_routeSteps.first.instruction}' : '';
-        _tts.speak(
-          'Navigation started. Caution: $activePotholeCount pothole hazard${activePotholeCount == 1 ? '' : 's'} detected on your route.$stepPrompt',
-        );
+        if (_travelMode == OsrmTravelMode.bike) {
+          _tts.speak(
+            'Motorcycle navigation started. Caution: $activePotholeCount pothole hazard${activePotholeCount == 1 ? '' : 's'} detected on your route. Ride carefully.$stepPrompt',
+          );
+        } else {
+          _tts.speak(
+            'Navigation started. Caution: $activePotholeCount pothole hazard${activePotholeCount == 1 ? '' : 's'} detected on your route.$stepPrompt',
+          );
+        }
       } else {
         final stepPrompt = _routeSteps.isNotEmpty ? ' ${_routeSteps.first.instruction}' : '';
         _tts.speak('Navigation started. Route is clear of reported pothole hazards.$stepPrompt');
@@ -9108,13 +9126,13 @@ class MapScreenState extends State<MapScreen>
           ),
           _buildModeTab(
             mode: OsrmTravelMode.bike,
-            label: 'Bike',
-            icon: Icons.directions_bike_rounded,
+            label: 'Motorcycle',
+            icon: Icons.two_wheeler_rounded,
             isDark: isDark,
           ),
           _buildModeTab(
             mode: OsrmTravelMode.foot,
-            label: 'Foot',
+            label: 'Walk',
             icon: Icons.directions_walk_rounded,
             isDark: isDark,
           ),
@@ -9145,7 +9163,7 @@ class MapScreenState extends State<MapScreen>
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: isSelected
                 ? (isDark ? const Color(0xFF27272A) : Colors.white)

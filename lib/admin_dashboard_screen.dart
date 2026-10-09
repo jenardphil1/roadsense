@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1506,6 +1506,287 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ],
             ),
           ),
+
+          const SizedBox(height: 24),
+
+          // Pothole Distress Weather Radar
+          _buildPotholeWeatherReport(allDocs),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPotholeWeatherReport(List<QueryDocumentSnapshot> docs) {
+    final isDark = AppSettings.instance.isDarkMode;
+
+    final List<AdminPotholeItem> items = [];
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final lat = (data['latitude'] as num?)?.toDouble();
+      final lng = (data['longitude'] as num?)?.toDouble();
+      if (lat != null && lng != null && lat.isFinite && lng.isFinite) {
+        items.add(AdminPotholeItem(
+          id: doc.id,
+          location: LatLng(lat, lng),
+          data: data,
+        ));
+      }
+    }
+
+    final clusters = _clusterAdminPotholes(items, radiusMeters: 300.0);
+    clusters.sort((a, b) => b.items.length.compareTo(a.items.length));
+
+    final int maxClusterSize = clusters.isNotEmpty ? clusters.first.items.length : 0;
+    final int severeStormCount = clusters.where((c) => c.items.length >= 6).length;
+    final int showerCount = clusters.where((c) => c.items.length >= 3 && c.items.length < 6).length;
+
+    final String weatherHeadline;
+    final String weatherSubhead;
+    final IconData weatherIcon;
+    final Color weatherColor;
+    final String stormCategory;
+
+    if (maxClusterSize >= 6) {
+      weatherHeadline = 'SEVERE POTHOLE STORM ACTIVE';
+      weatherSubhead = '$severeStormCount High-Density Swarm Cluster(s) Detected • Severe Risk for 2-Wheelers & Traffic';
+      weatherIcon = Icons.thunderstorm_rounded;
+      weatherColor = const Color(0xFFEF4444);
+      stormCategory = 'CATEGORY 3 DISTRESS GALE';
+    } else if (maxClusterSize >= 3) {
+      weatherHeadline = 'MODERATE DISTRESS SHOWERS';
+      weatherSubhead = '$showerCount Road Cluster(s) Active • Drive with Caution in Concentrated Zones';
+      weatherIcon = Icons.grain_rounded;
+      weatherColor = const Color(0xFFF59E0B);
+      stormCategory = 'CATEGORY 1 SQUALL';
+    } else {
+      weatherHeadline = 'CLEAR PAVEMENT CONDITIONS';
+      weatherSubhead = 'Potholes are isolated and scattered • No high-density clusters detected';
+      weatherIcon = Icons.wb_sunny_rounded;
+      weatherColor = const Color(0xFF10B981);
+      stormCategory = 'CALM ROAD CONDITIONS';
+    }
+
+    final topClusters = clusters.take(4).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _surface(isDark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: weatherColor.withValues(alpha: isDark ? 0.35 : 0.25),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: weatherColor.withValues(alpha: 0.05),
+            blurRadius: 18,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: Weather Bar
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: weatherColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: weatherColor.withValues(alpha: 0.3)),
+                ),
+                child: Icon(weatherIcon, color: weatherColor, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'ROAD WEATHER RADAR',
+                          style: TextStyle(
+                            color: weatherColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: weatherColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            stormCategory,
+                            style: TextStyle(
+                              color: weatherColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      weatherHeadline,
+                      style: TextStyle(
+                        color: WebDesign.textPrimary(isDark),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      weatherSubhead,
+                      style: TextStyle(
+                        color: WebDesign.textSecondary(isDark),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '${clusters.length}',
+                      style: TextStyle(
+                        color: WebDesign.textPrimary(isDark),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      'CLUSTERS',
+                      style: TextStyle(
+                        color: WebDesign.textSecondary(isDark),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          if (topClusters.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Divider(color: _border(isDark).withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
+            Text(
+              'Active Hazard Weather Fronts (Density Hotspots within 300m)',
+              style: TextStyle(
+                color: WebDesign.textPrimary(isDark),
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 700;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: topClusters.map((cluster) {
+                    final int count = cluster.items.length;
+                    final isSevere = count >= 6;
+                    final isShower = count >= 3 && count < 6;
+                    final frontColor = isSevere
+                        ? const Color(0xFFEF4444)
+                        : (isShower ? const Color(0xFFF59E0B) : const Color(0xFF3B82F6));
+                    final frontTitle = isSevere
+                        ? 'Severe Storm Front ($count Potholes)'
+                        : (isShower
+                            ? 'Distress Shower ($count Potholes)'
+                            : 'Minor Cluster ($count Potholes)');
+
+                    return Container(
+                      width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _border(isDark)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: frontColor.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isSevere ? Icons.thunderstorm_rounded : Icons.cloud_queue_rounded,
+                              color: frontColor,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  frontTitle,
+                                  style: TextStyle(
+                                    color: WebDesign.textPrimary(isDark),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Center: ${cluster.center.latitude.toStringAsFixed(4)}, ${cluster.center.longitude.toStringAsFixed(4)}',
+                                  style: TextStyle(
+                                    color: WebDesign.textSecondary(isDark),
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: frontColor,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            ),
+                            icon: const Icon(Icons.radar_rounded, size: 16),
+                            label: const Text('Radar Scan', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              _locatePotholeOnMap(
+                                cluster.center,
+                                cluster.singleItem.id,
+                                cluster.singleItem.data,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
         ],
       ),
     );

@@ -48,6 +48,10 @@ class AppSettings {
     themeModeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
   }
 
+  void toggleHighContrastMonochrome(bool enabled) {
+    highContrastMonochromeNotifier.value = enabled;
+  }
+
   void toggleShowPotholes(bool show) {
     showPotholesNotifier.value = show;
   }
