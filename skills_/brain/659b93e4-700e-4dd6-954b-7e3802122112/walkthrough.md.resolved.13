@@ -1,0 +1,22 @@
+# Storefront Refinement: Compact UI & Live Pricing
+
+The storefront has been fully transformed into a high-density, professional TCG catalog.
+
+## 1. Compact Listing UI
+We've redesigned the card listings in all set views (Pokémon and Magic) to be more minimalist and compact.
+- **Tight Layout**: Reduced padding and adjusted image sizes to fit more cards on the screen without clutter.
+- **Modern Typography**: Bold names and subtle meta-data labels for a premium feel.
+- **Removed Labels**: Per your request, the **"Catalog Only"** text has been removed from the individual card listings in the set view to achieve a cleaner look.
+
+## 2. Unified Live Pricing
+Real-time market data is now integrated directly into the new compact layout.
+- **Set Listing Pages**: Every card fetches its actual live market price from Scryfall (Magic) or TCGDex (Pokémon).
+- **Accurate Results**: No more placeholders or generic 5% calculations.
+- **Split-Card Support**: Special handling for multi-face cards ensures "N/A" results are minimized by using naming fallbacks.
+
+## 3. Navigation & Search
+- **Breadcrumbs**: Full TCGPlayer-style breadcrumb navigation is present on all views.
+- **Search Integration**: Detailed card views still allow users to "Add to Cart" while maintaining the live price comparison.
+
+---
+**Your storefront is now a sleek, data-driven, and highly professional TCG catalog!** 🚀

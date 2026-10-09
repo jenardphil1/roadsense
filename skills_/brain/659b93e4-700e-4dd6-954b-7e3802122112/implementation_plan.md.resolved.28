@@ -1,0 +1,38 @@
+# Implementation Plan - Automatic Inventory Restock on Cancellation
+
+This plan outlines the steps to ensure that when an order's status is changed to **"Cancelled"**, the products from that order are automatically returned to your inventory.
+
+## User Review Required
+
+> [!IMPORTANT]
+> - **Restocking Logic**: The system will only restock items if the status is changed from a non-cancelled status to "Cancelled".
+> - **Multi-Category Support**: This will handle Pokémon, Magic, Lorcana, One Piece, and Custom products.
+> - **Re-activation**: If a "Cancelled" order is moved back to another status (like "To Pay"), the system will re-deduct the stock to prevent overselling.
+
+## Proposed Changes
+
+We will modify the `Order_model` to handle the inventory logic during status updates.
+
+### Core Order Logic
+#### [MODIFY] [Order_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php)
+- Update `update_order_status($order_id, $status)`:
+    1. Fetch the order's current status and its items.
+    2. Check if the status is changing TO or FROM "Cancelled".
+    3. If changing **to** "Cancelled", loop through items and **increment** their respective stock counts.
+    4. If changing **from** "Cancelled" to something else, loop through items and **decrement** their stock counts.
+    5. Perform the status update in the `orders` table.
+
+## Verification Plan
+
+### Automated/Manual Testing
+1. **Cancellation Test**:
+    - Place a test order for 1 card.
+    - Verify stock goes down by 1.
+    - Go to Admin -> View Order and set status to "Cancelled".
+    - Verify stock returns to its original value.
+2. **Re-activation Test**:
+    - Take the cancelled order and change it back to "To Pay".
+    - Verify stock goes down again.
+3. **Double-Cancellation Prevention**:
+    - Change a "Cancelled" order to "Cancelled" again.
+    - Verify stock does NOT increment twice.

@@ -1,0 +1,32 @@
+# Walkthrough - Enhanced Customer Profiles
+
+I have upgraded the customer account system to include full profile editing and shipping information storage.
+
+## Features Implemented
+
+### 👤 Profile Sidebar Expansion
+The profile sidebar now displays:
+- **Phone Number**: Customers can link their phone for order updates.
+- **Shipping Address**: A dedicated section for Street, City, State, and Zip code.
+- **Visual Cues**: If information is missing, the UI shows a subtle, italicized "No address saved" hint to encourage users to complete their profile.
+
+### 📝 Integrated Edit Profile Modal
+I've added a sleek **"Edit Profile"** button that opens a professional modal window.
+- **Live Updates**: Users can update their name and address without leaving the page.
+- **Form Validation**: Ensures first and last names are present before saving.
+- **Session Sync**: The moment a user clicks "Save Changes," their session is updated so their name changes instantly in the top navigation and profile header.
+
+### 🛡️ Automatic Database Management
+I've added a "self-healing" database logic to the `Customer_model`.
+- The system automatically detects if the `phone`, `address`, `city`, `state`, or `zip_code` columns are missing from your database and creates them if needed.
+- This ensures the feature works immediately without needing manual SQL commands.
+
+## Files Modified
+- **[Customer_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Customer_model.php)**: Added auto-column creation and update methods.
+- **[Customer.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Customer.php)**: Added `update_profile_action` and refreshed profile data fetching.
+- **[profile.php](file:///f:/UniServerZ/www/coolex_shop/application/views/customer/profile.php)**: Revamped the UI with the new fields and the Edit Modal.
+
+## Verification
+- **Profile Load**: Verified that it pulls fresh data from the DB each time.
+- **Update Action**: Verified that saving the form updates the database and the session immediately.
+- **UI Responsiveness**: The modal is fully responsive and fits the "Trainer" aesthetic of the store.

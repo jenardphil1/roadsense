@@ -1,0 +1,29 @@
+# TCGPlayer Horizontal List UI & Set Card Counts
+
+Redesign the card listing UI to a horizontal layout and add available card counts to the set cards on the storefront index pages.
+
+## Proposed Changes
+
+### Models
+
+#### [MODIFY] [Store_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php)
+#### [MODIFY] [Mtg_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php)
+- Update [get_active_sets_only](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php#52-87) and [get_active_mtg_sets](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php#75-96) to include `COUNT(DISTINCT card_id) as card_count` for each set.
+
+### Storefront Views
+
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) (Pokémon Index)
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php) (Magic Index)
+- Display a new badge/text showing "X Cards Available" directly on the set card, matching the user's requested style.
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (Pokémon Set)
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php) (Magic Set)
+- **Horizontal Cards**: Refactor the grid to use `row g-0` inside each card, placing the image on the left and details (Name, Rarity, Price) on the right.
+- **Pricing Visibility**: Implement the "Listings from $X.XX" and "Market Price $X.XX" layout from the provided screenshot.
+
+## Verification Plan
+
+### Manual Verification
+- **Visual Check**: Open the index and set views to verify both the counts and the new horizontal layout.
+- **Accuracy**: Ensure the card count matches the number of unique items with stock > 0 in each set.
+- **Functionality**: Verify "Add to Cart" still works perfectly.

@@ -1,0 +1,20 @@
+# Implementation Plan - Database Import
+
+Import the large [mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) file (152MB) into the UniServerZ MySQL/MariaDB instance using the command line for reliability.
+
+## Proposed Changes
+
+### Database Import
+- Use the [mysql.exe](file:///f:/UniServerZ/core/mysql/bin/mysql.exe) binary located at [f:\UniServerZ\core\mysql\bin\mysql.exe](file:///f:/UniServerZ/core/mysql/bin/mysql.exe).
+- Run the import command: `f:\UniServerZ\core\mysql\bin\mysql.exe -u root < f:\UniServerZ\www\coolex_shop\assets\mtg.sql`
+- Note: No password is used as per standard UniServerZ defaults.
+
+## Verification Plan
+
+### Automated Verification
+- Run `SHOW DATABASES;` to confirm `mtg` exists.
+- Run `SELECT COUNT(*) FROM mtg.mtg_cards_raw;` to confirm data was imported.
+- Check for any errors in the command output.
+
+### Manual Verification
+- None required as this is a backend data import.

@@ -1,0 +1,5 @@
+- [x] Remove `.card-page-hero` styles from `view_card.php`.
+- [x] Remove `.card-page-hero` div from `view_card.php`.
+- [x] Refine the product info typography (move name/rarity back inside the panel).
+- [x] Adjust padding/margins for a cleaner "Premium" white panel look.
+- [x] Verify the change looks good.

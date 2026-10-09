@@ -1,0 +1,24 @@
+# Walkthrough: Merchandise Condition Field
+
+I have successfully added the "Condition" field to your custom merchandise system. You can now specify if an item is Brand New, Like New, or Used, and this information will be displayed to your customers.
+
+## Changes Made
+
+### 1. Database Upgrade
+I updated `Custom_model.php` with a "self-healing" script. It automatically adds the `product_condition` column to your database, so you don't have to worry about manual SQL commands.
+
+### 2. Admin Enhancements
+- **Add Product Improved**: The "Add Merchandise" form now includes a dropdown to select the product condition.
+- **New Edit System**: I implemented a complete **"Edit Details"** page for custom merchandise (which was previously missing). You can now fully manage and update your custom product catalog.
+
+### 3. Storefront UI
+The custom product detail page now pulls the real condition from the database and displays it in the "Product Specifications" grid.
+
+## How to use:
+1. Go to **Admin > Custom Inventory**.
+2. Click **Add Merchandise** to see the new dropdown.
+3. Click **Edit Details** on any existing item to change its condition or description.
+4. View the product in the **Public Store** to see the updated specifications.
+
+> [!TIP]
+> Setting a clear condition (e.g., "Like New") helps build trust with your customers and reduces return requests!

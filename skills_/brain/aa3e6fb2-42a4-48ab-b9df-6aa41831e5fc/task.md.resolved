@@ -1,0 +1,4 @@
+- `[x]` Implement Start Navigation UI flow (Preview state -> Start state)
+- `[x]` Add pothole route filtration logic in `_fetchRoute`
+- `[x]` Update `_checkPotholeProximity` to respect `_isNavigatingRun` and `_potholesOnRoute`
+- `[x]` Test proximity edge cases (free-driving vs active navigation)

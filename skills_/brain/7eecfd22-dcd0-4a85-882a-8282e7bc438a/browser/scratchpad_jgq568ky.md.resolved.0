@@ -1,0 +1,11 @@
+# Task: Verify Ecommerce-style Landing Page
+
+## Plan
+- [ ] Open `http://localhost:81/coolex_shop/index.php/Store`.
+- [ ] Verify "Best Sellers" section.
+- [ ] Verify category banners.
+- [ ] Capture screenshot of the top half of the page.
+- [ ] Verify layout and visibility.
+
+## Observations
+- 

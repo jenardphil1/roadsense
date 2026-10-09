@@ -1,0 +1,66 @@
+# Implementation Plan - Modernizing Store and Admin UI
+
+This plan outlines the steps to overhaul the design of Set pages, Card pages, and the Admin Dashboard using the established "Coolex Aesthetic" (Glassmorphism, Outfit Typography, Vibrant Red Accents).
+
+## User Review Required
+
+> [!IMPORTANT]
+> This change will modify the layout of the Admin Dashboard and Inventory pages. While the functionality remains identical, the visual appearance will shift from a standard data-grid look to a more premium, card-based aesthetic.
+
+## Proposed Changes
+
+### 1. Global CSS Audit & Enhancement
+#### [MODIFY] [modern.css](file:///f:/UniServerZ/www/coolex_shop/assets/css/modern.css)
+- Ensure all color variables (`--primary-red`, `--dark-bg`, etc.) are correctly defined.
+- Add utility classes for "Tiny Uppercase Eyebrows" and "Premium Shadows".
+- Refine `.glass-card` to match the exact radius (`1.25rem`) and shadow profile.
+
+---
+
+### 2. Store: Set & Card Pages
+Apply the design system to all TCG category views to ensure a unified customer experience.
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (and other set views)
+- Update headers to use `font-weight: 800` and `Outfit` font.
+- Refine card grid spacing (`g-4`) and internal card padding.
+- Modernize the "No Stock" empty state.
+
+#### [MODIFY] [view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php) (and other card views)
+- Clean up the image gallery layout.
+- Use "Eyebrow" labels for metadata (Rarity, Set, Price).
+- Standardize the "Add to Cart" form with `.modern-btn-primary`.
+- Improve the "Card Details" spec table with a cleaner card layout.
+
+---
+
+### 3. Admin: Dashboard & Inventory
+Rebuild the admin experience to feel like a premium management suite.
+
+#### [MODIFY] [admin/index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/index.php) (Dashboard)
+- Replace custom `.stat-card` and `.cat-card` with the global `.glass-card`.
+- Update background to `#f8f9fa`.
+- Use the "Good morning" header pattern from the design system.
+
+#### [MODIFY] [admin/pokemon_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/pokemon_inventory.php) (and other inventory pages)
+- Wrap tables in `.glass-card`.
+- Modernize task buttons (Edit/Delete) to match the `.modern-btn-sm` style.
+- Standardize search bars and filters.
+
+#### [MODIFY] [admin/sidebar.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/sidebar.php)
+- Update colors to match the Red/Dark/White theme.
+- Enhance hover states with subtle glassmorphism effects.
+
+## Open Questions
+
+- Should we keep the "Live Market Price" feature prominently displayed in the admin inventory, or focus purely on shop prices for management?
+- Are there any specific admin-only pages (like Manage Orders) that you want prioritized for this redesign?
+
+## Verification Plan
+
+### Automated Tests
+- N/A (UI Changes)
+
+### Manual Verification
+1.  **Storefront:** Navigate through Pokémon, MTG, and One Piece sets/cards to ensure consistent padding and typography.
+2.  **Admin Panel:** Verify the dashboard stats are readable and the inventory tables are correctly contained within glass-cards.
+3.  **Responsive Check:** Ensure all grids collapse correctly on mobile (2 columns for cards, 1 column for admin stats).

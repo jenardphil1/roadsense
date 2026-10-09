@@ -1,0 +1,25 @@
+# Profile Page UI & Functionality Enhancements
+
+I have optimized the customer profile page by refining the user interface and fixing the underlying issues that prevented profile updates from being processed reliably.
+
+## Changes Made
+
+### 🎨 UI & Layout Refinement
+- **Compact Button Design**: Added a new `.modern-btn-sm` class to `modern.css` to prevent buttons from feeling "oversized" in the header and modal footers. 
+- **Balanced Proportions**: Updated the "Edit Profile", "Sign Out", and "Save Changes" buttons to use the smaller variant, creating a more professional and aligned look.
+- **Improved Feedback**: Added an error alert block to the profile page. This ensures that if an update fails (e.g., validation rules), the customer receives clear instructions on what to fix.
+
+### ⚙️ Logic & Security Fixes
+- **Comprehensive Validation**: Updated the `Customer` controller's `update_profile_action` to explicitly validate/sanitize `city`, `state`, and `zip_code` fields.
+- **Session Sync**: Verified the session-refresh logic to ensure that once a profile is updated, the changes are immediately reflected in the header and UI without needing a manual refresh.
+- **CSS Robustness**: Fixed a minor browser compatibility issue with the `line-clamp` property in the main stylesheet.
+
+## Verification Results
+
+### Manual Testing
+- **Scenario: Empty Name**: Leaving 'First Name' blank now correctly triggers an error message on the profile page explaining that the field is required.
+- **Scenario: Normal Update**: Changing address and phone number successfully updates the database and reflects immediately on the profile summary dashboard.
+- **Scenario: Layout**: Checked on mobile and desktop; the new smaller buttons maintain proper spacing and don't overflow their containers.
+
+> [!TIP]
+> You can now easily add your shipping address from the profile page, and it will be used as the default for future orders!

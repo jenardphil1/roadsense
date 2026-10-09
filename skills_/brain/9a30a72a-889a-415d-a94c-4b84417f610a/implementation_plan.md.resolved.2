@@ -1,0 +1,51 @@
+# Smart Route Optimization & 'Whole Road' Analysis
+
+This plan outlines the implementation of a comprehensive "Whole Road" analysis and a smart route optimizer that actively avoids high-pothole areas by requesting new paths from the mapping service.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **API Performance**: Requesting a route with many `avoid_polygons` can slow down the response time significantly. I will implement a clustering algorithm to group nearby potholes into single "exclusion zones" to keep the request efficient.
+> **Scan Radius**: For the "Whole Road" calculation, I will increase the search radius from 25m to 70m. This ensures that potholes on the same street (but different lanes) or at intersections are captured in the score.
+
+## Proposed Changes
+
+### Map Screen Component
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **'Whole Road' Score Calculation**:
+    - Update `_processRoutes` to use an expanded search radius (70m).
+    - Implement a "Road Health" indicator for each route (e.g., "Smooth", "Caution", "Poor").
+    - Calculate "Potholes per KM" to give a more relative score.
+
+- **Smart Optimization (Avoidance)**:
+    - **Clustering Logic**: Create a helper method `_getAvoidPolygons()` that:
+        1. Identifies potholes within the general "BBox" of the trip.
+        2. Groups potholes within 50-100m of each other.
+        3. Generates GeoJSON Polygons for these high-risk areas.
+    - **ORS Request Update**: Modify `_calculateRoute` to accept an optional `avoidPolygons` parameter.
+        - If present, include it in the `options.avoid_polygons` field of the ORS POST request.
+
+- **UI Updates**:
+    - **Optimization Button**: Add a "Smart Optimize" button (e.g., a magic wand or refresh icon) that appears when a destination is selected.
+    - **Enhanced Route Cards**: Display the calculated "Health" status of each route.
+    - **Avoidance Visualization**: Briefly show the "Avoid Areas" (semi-transparent red boxes) on the map during optimization so the user understands what is being avoided.
+
+---
+
+## Open Questions
+
+- **Optimization Trigger**: Should the app automatically try to find an optimized route *every* time you search, or only when you manually click "Optimize"?
+- **Polygon Type**: Should the avoided areas be small "dots" on the map, or should we group them into larger "high-risk blocks"?
+
+## Verification Plan
+
+### Automated Tests
+- Test clustering logic to ensure it doesn't generate too many polygons.
+- Verify ORS response when `avoid_polygons` is included.
+
+### Manual Verification
+- Search for a route known to have many potholes.
+- Click "Smart Optimize".
+- Verify that the resulting route is different and avoids the previously identified pothole locations.

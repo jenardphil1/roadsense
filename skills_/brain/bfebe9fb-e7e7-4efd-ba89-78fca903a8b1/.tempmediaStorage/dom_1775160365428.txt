@@ -1,0 +1,50 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+Track & Trace
+Shipping Rates
+Shipping Days
+Find Branches
+Local Rates
+International Rates
+Origin
+BULACAN
+arrow_drop_down
+BULACAN-SANTA-MARIA
+arrow_drop_down
+Item additional fee
+Destination
+AGUSAN-DEL-NORTE
+arrow_drop_down
+AGUSAN-DEL-NORTE-BUENAVISTA
+arrow_drop_down
+Item size
+KG
+Service type
+EZ
+arrow_drop_down
+Bag Specifications
+Small (<=3KG)
+close
+arrow_drop_down
+Service type
+EZ
+Weight
+1
+KG
+Shipping Fee
+PHP
+70.00
+Item additional fee
+0.00
+Total Amount
+PHP
+70.00
+Search
+Mobile
+Place Order
+Customer Service
+TOP
+
+</current_dom>

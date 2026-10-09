@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "32297924997",
+    "project_id": "pothole-app-b277b",
+    "storage_bucket": "pothole-app-b277b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32297924997:android:ae45416b428c26bcd42cec",
+        "android_client_info": {
+          "package_name": "com.example.my_flutter_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "32297924997-iplvd6srs74rqufukbe8u6d24eu4ig9h.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-Gui0UZizmZVUe3yTD5tXi0xhDSsEVLI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "32297924997-iplvd6srs74rqufukbe8u6d24eu4ig9h.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

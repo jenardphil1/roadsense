@@ -1,0 +1,19 @@
+# UI Standardization and Navigation Consistency Plan
+
+The goal is to unify the aesthetic of the Dashboard and Store landing pages and ensure consistent, lowercase URL routing across the application.
+
+## Proposed Changes
+
+### 1. Unified Landing Pages
+- **[MODIFY] dashboard/index.php**: Refactor to use the same premium Hero section and categorical card style as the Store landing page.
+- **[MODIFY] store/landing.php**: Ensure it matches the Dashboard's new unified style while maintaining its unique "Explore Collections" messaging.
+
+### 2. Navigation & Routing Consistency
+- **[MODIFY] templates/megamenu.php**: Convert all [Store/](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#3-91) links to `store/` (lowercase) to match defined routes and standard web practices.
+- **[MODIFY] templates/header.php**: Update search form and account links to use lowercase URLs.
+
+## Verification Plan
+
+### Manual Verification
+- Verify that clicking "Pokémon" or "Magic" in the mega menu leads to the correct lowercase `/store/pokemon` or `/store/magic` URL.
+- Compare the Dashboard and Store landing pages visually to ensure they share the same Hero and Card components.

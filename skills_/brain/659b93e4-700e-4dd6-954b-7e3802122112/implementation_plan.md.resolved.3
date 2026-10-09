@@ -1,0 +1,47 @@
+# MTG Database Schema Optimization Plan
+
+## Goal
+Refactor the [mtg](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#58-69) data to use appropriate column types, improve query performance, and integrate the data into the existing [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database defined in `new_db_backup.sql`.
+
+## Proposed Changes
+1. **Column Type Adjustments**
+   - Convert `text`, `flavorText`, `oracleText` to `TEXT` (already appropriate).
+   - Convert numeric fields (`defense`, `power`, `loyalty`, `manaValue`, `edhrecRank`, `edhrecSaltiness`) to `INT` or `DECIMAL` where needed.
+   - Convert boolean‑like fields (`isFullArt`, `isPromo`, `isReprint`, etc.) to `TINYINT(1)`.
+   - Convert `uuid` to `CHAR(36)` and set as primary key.
+   - Convert short string fields (`name`, `type`, `rarity`, `setCode`, `language`) to `VARCHAR(255)` with appropriate lengths.
+2. **Normalization**
+   - Create separate tables for many‑to‑many relationships:
+     * `mtg_card_colors` (card_uuid, color)
+     * `mtg_card_types` (card_uuid, type)
+     * `mtg_card_subtypes` (card_uuid, subtype)
+     * `mtg_card_keywords` (card_uuid, keyword)
+   - Extract [sets](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php#13-19) information into a `mtg_sets` table and reference via `set_id`.
+3. **Indexes**
+   - Add indexes on `name`, `setCode`, `rarity`, and foreign keys for the normalized tables.
+4. **Migration Script** (`db/migrations/migrate_mtg_into_pokemon.sql`)
+   - **Step 1:** Ensure the [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database is selected (`USE pokemon;`).
+   - **Step 2:** Create the optimized MTG tables inside this database (as listed above).
+   - **Step 3:** Populate the new tables from the existing `mtg_cards_raw` table (which currently resides in the separate [mtg](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#58-69) database) using `INSERT … SELECT` with appropriate casting.
+   - **Step 4:** Drop or rename the original `mtg_cards_raw` table after successful migration (e.g., `RENAME TABLE mtg_cards_raw TO mtg_cards_raw_backup;`).
+   - **Step 5:** Add foreign‑key constraints and indexes.
+5. **Verification**
+   - Run sample SELECT queries to ensure data integrity.
+   - Compare row counts before/after migration.
+   - Test existing application code paths that query MTG data; adjust queries if they reference the old [mtg](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#58-69) database.
+
+## Execution Steps (Git Workflow)
+1. `git checkout -b feature/mtg-schema-into-pokemon`
+2. Add the migration script to `db/migrations/`.
+3. Commit the script with a clear message.
+4. Push the branch to GitHub.
+5. Open a PR for review.
+
+## Import into SQLyog
+- Open SQLyog and connect to the local MySQL server.
+- Load the `new_db_backup.sql` file (which creates the [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database).
+- After the database is created, run the migration script `migrate_mtg_into_pokemon.sql` within the same connection (you can execute the script via the SQLyog query editor or the “File → Run SQL Script” menu).
+- Verify that the new MTG tables appear under the [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) schema and contain the expected data.
+
+## Next Action
+Please review the updated plan. If it meets your expectations, reply **"Approve"** and I will generate the actual SQL migration script file and commit it to the new branch.

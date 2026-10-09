@@ -1,0 +1,11 @@
+# Tasks: MTG Set Names Fix
+
+- [x] **Mtg_model Update**
+    - [x] Add `sync_mtg_sets_from_api` method to `Mtg_model.php` <!-- id: 1 -->
+- [x] **Admin Controller Update**
+    - [x] Add `sync_mtg_sets_ajax` endpoint to `Admin.php` <!-- id: 2 -->
+- [x] **UI Update**
+    - [x] Add "🔄 Sync Set Names" button to `admin/mtg_inventory.php` <!-- id: 3 -->
+    - [x] Add JS handler for the Sync button <!-- id: 4 -->
+- [x] **Verification**
+    - [x] Perform a sync and verify full names appear in the inventory table <!-- id: 5 -->

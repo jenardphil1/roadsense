@@ -1,0 +1,34 @@
+# Task: Navigation & Pothole Alerts Implementation
+
+## Phase 1: Setup & Data
+- [x] Add dependencies to `pubspec.yaml` (flutter_tts, http, sqflite, path)
+- [x] Create `lib/database_helper.dart` for SQLite management
+- [x] Update `PotholeMarker` model to support database serialization
+
+## Phase 2: Core Persistence
+- [x] Initialize database in `main.dart`
+- [x] Load existing potholes from DB on app startup
+- [x] Save new potholes to DB when detected
+
+## Phase 3: Proximity Alerts (50m, Voice)
+- [x] Initialize `FlutterTts` (English)
+- [x] Implement `Geolocator.getPositionStream()` logic in `MyHomePage`
+- [x] Add distance checking and voice alert triggering
+- [x] Ensure potholes are only announced once per session
+
+## Phase 4: Navigation (Point A to Point B)
+- [x] Add destination search UI to `MapScreen`
+- [x] Implement Geocoding (Nominatim API)
+- [x] Implement Routing (OSRM API)
+- [x] Render blue path on map using `PolylineLayer`
+
+## Phase 5: Search Suggestions & Advanced UI
+- [x] Implement Real-time search suggestions (Nominatim API)
+- [x] Create Suggestion List UI above search bar
+- [x] Add "Clear/Cancel" route functionality
+- [x] Add loading indicators for geocoding and routing
+
+## Phase 6: OpenRouteService (ORS) Migration
+- [ ] Implement ORS POST request in `_calculateRoute`
+- [ ] Update response parsing for ORS GeoJSON format
+- [ ] Test routing with the new API key

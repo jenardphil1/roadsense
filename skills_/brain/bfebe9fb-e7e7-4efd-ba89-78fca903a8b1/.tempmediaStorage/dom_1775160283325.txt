@@ -1,0 +1,87 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+J&T Express Rates
+Track & Trace
+Shipping Rates
+Shipping Days
+Find Branches
+Local Rates
+International Rates
+Origin
+[0] (266,537)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[1] (266,526)<div class='q-field__control relative-position row no-wrap' />
+		[2] (258,526)<div  />
+			[3] (258,526)<div  />
+				[4] (205,526)<span >BULACAN />
+				[5] (188,526)<input class='q-select__focus-target' id='f_1dc129c2-0135-4209-949c-040da2ab05d4' role='combobox' />
+		[6] (336,526)<div  />
+			[7] (338,526)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[8] (432,537)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[9] (432,526)<div class='q-field__control relative-position row no-wrap' />
+		[10] (424,526)<div  />
+			[11] (424,526)<div  />
+				[12] (398,526)<span >BULACAN-SANTA-MARIA />
+				[13] (354,526)<input class='q-select__focus-target' id='f_7aa985dd-73f9-4a26-9b25-412fff195ee9' role='combobox' />
+		[14] (503,526)<div  />
+			[15] (504,526)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[16] (574,537)<label class='el-checkbox customer-checked' />
+	[17] (524,539)<span  />
+		[18] (524,538)<span  />
+	[19] (562,537)<span >Item additional fee />
+Destination
+[20] (266,632)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[21] (266,621)<div class='q-field__control relative-position row no-wrap' />
+		[22] (258,621)<div  />
+			[23] (258,621)<div  />
+				[24] (197,621)<span >ABRA />
+				[25] (188,621)<input class='q-select__focus-target' id='f_f2e8f992-11b9-4d3b-b2f4-2310d0ae05e9' role='combobox' />
+		[26] (336,621)<div  />
+			[27] (338,621)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[28] (432,632)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[29] (432,621)<div class='q-field__control relative-position row no-wrap' />
+		[30] (424,621)<div  />
+			[31] (424,621)<div  />
+				[32] (382,621)<span >ABRA-DOLORES />
+				[33] (354,621)<input class='q-select__focus-target' id='f_74c6ce76-d073-42ec-902d-7006daac528a' role='combobox' />
+		[34] (503,621)<div  />
+			[35] (504,621)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[36] (574,632)<label class='el-checkbox customer-checked' />
+	[37] (524,634)<span  />
+		[38] (524,633)<span  />
+	[39] (545,632)<span >Item size />
+[40] (214,695)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard q-field--float q-field--with-bottom' />
+	[41] (208,685)<input class='q-field__native q-placeholder' id='f_360e0362-0177-4630-8e71-4b88f3fac730' />
+	KG
+Service type
+[42] (266,790)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[43] (266,780)<div class='q-field__control relative-position row no-wrap' />
+		[44] (258,780)<div  />
+			[45] (258,780)<div  />
+				[46] (192,780)<span >EZ />
+				[47] (188,780)<input class='q-select__focus-target' id='f_a33d1eb2-ed70-48a3-a0ef-f1119de958c6' role='combobox' />
+		[48] (336,780)<div  />
+			[49] (338,780)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Bag Specifications
+[50] (432,780)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--dense' />
+	[51] (432,780)<div class='q-field__control relative-position row no-wrap' />
+		[52] (426,780)<div  />
+			[53] (426,780)<div  />
+				[54] (354,780)<input class='q-select__focus-target' id='f_d105a33a-386c-4b3d-9e39-e20a6bd13666' role='combobox' />
+		[55] (504,780)<div  />
+			[56] (504,780)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Search
+[57] (967,607)<div  />
+	[58] (967,594)<img  />
+	[59] (967,642)<p >Mobile />
+[60] (967,710)<div  />
+	[61] (967,696)<img  />
+	[62] (967,744)<p >Place Order />
+[63] (967,825)<div  />
+	[64] (967,825)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[65] (967,800)<img  />
+		[66] (967,861)<p >Customer Service />
+[67] (967,927)<img  />
+
+</current_dom>

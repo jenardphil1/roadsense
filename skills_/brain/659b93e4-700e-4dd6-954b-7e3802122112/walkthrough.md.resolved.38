@@ -1,0 +1,37 @@
+# Walkthrough: USD to PHP Storefront Localization
+
+We have successfully migrated the entire CoolEx Shop from US Dollars ($) to Philippine Pesos (₱). This involved updating both static UI elements and dynamic price calculations from external APIs.
+
+## 1. Centralized Currency Helper
+We created `application/helpers/currency_helper.php` which is now autoloaded globally. It contains:
+- `format_php($amount, $is_usd)`: Formats numbers with the `₱` symbol. If `$is_usd` is true, it automatically multiplies the value by **56.00**.
+- `convert_to_php($amount)`: A helper for numerical calculations (e.g. in the Cart).
+
+## 2. Live Market Price Conversion
+The live market prices fetched via JavaScript for Pokémon and MTG are now converted to PHP in the browser:
+- **Pokémon TCGDex API**: Multiplying the `marketPrice` by 56 in `view_card.php` and `view_set.php`.
+- **MTG Scryfall API**: Multiplying the `usd` price by 56 in `view_mtg_card.php`.
+
+## 3. Cart & Checkout Systems
+The logic for totals and shipping has been updated:
+- **Shipping Fee**: Updated from $4.99 to **₱280.00** across `Cart.php`, `Checkout.php`, and all views.
+- **Cart Calculations**: The `Cart` controller now converts imported API prices to PHP immediately upon adding to the cart to ensure database integrity.
+
+## 4. Admin Panel & Custom Inventory
+The administrative interface is now fully localized:
+- **Inventory Labels**: All references to "Price ($)" have been updated to "Price (₱)".
+- **Add/Edit Forms**: Input group prefixes now show the Peso symbol.
+- **Dashboard Stats**: Revenue is calculated and displayed natively in PHP.
+
+## 5. Visual Verification
+Below is a summary of the UI changes made:
+
+| Component | Before | After |
+| :--- | :--- | :--- |
+| **Card Prices** | `$0.99` | `₱55.44` |
+| **Shipping** | `$4.99` | `₱280.00` |
+| **Admin Forms** | `Retail Price ($)` | `Retail Price (₱)` |
+| **GCash Page** | `Total: $XX.XX (convert to PHP)` | `Total: ₱XX.XX via GCash` |
+
+> [!TIP]
+> The exchange rate is fixed at **56.00** in `application/helpers/currency_helper.php`. You can easily adjust this single value in the future if the exchange rate changes significantly.

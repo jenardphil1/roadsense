@@ -1,0 +1,59 @@
+# Implementation Plan - Navigation & Pothole Alerts
+
+This plan outlines the steps to add real-time navigation (Point A to Point B) and proximity-based voice notifications to the Pothole Scanner app.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **External API Dependencies**: This implementation uses the **OSRM (Open Source Routing Machine)** for routing and **Nominatim (OpenStreetMap)** for geocoding. These are free, but require an internet connection and have usage limits. For high-volume production, a paid service like Google Maps or Mapbox might be better.
+
+> [!TIP]
+> **Safety First**: The proximity alert will use Text-to-Speech (TTS) to ensure the driver keeps their eyes on the road.
+
+## Proposed Changes
+
+### Dependencies & Setup
+
+#### [MODIFY] [pubspec.yaml](file:///c:/ssdd/flutter/pubspec.yaml)
+* Add `flutter_tts: ^4.2.2` for voice alerts.
+* Add `http: ^1.2.2` for routing and geocoding API calls.
+
+---
+
+### Proximity Alerts System
+
+#### [MODIFY] [main.dart](file:///c:/ssdd/flutter/lib/main.dart)
+* **Initialize TTS**: Setup `FlutterTts` in `initState`.
+* **Location Tracking**: Replace one-shot position fetching with `Geolocator.getPositionStream()`.
+* **Distance Logic**: 
+    * Add a state variable `Set<String> _announcedPotholes` to prevent repeated alerts for the same pothole.
+    * In the location stream listener:
+        * Calculate distance to every pothole in `_detectedPotholes`.
+        * If `distance < 20m` and not in `_announcedPotholes`, call `tts.speak()`.
+* **Visual Alert**: Add a floating overlay or banner that appears when a proximity alert is active.
+
+---
+
+### Navigation (Point A to Point B)
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+* **Search UI**: Add a `TextField` and "Go" button at the top of the map.
+* **Geocoding**: Implement `_searchDestination(String query)` to get coordinates from Nominatim.
+* **Routing**: Implement `_getRoute(LatLng destination)` to fetch the path from OSRM.
+* **Polyline Rendering**: Add a `PolylineLayer` to `FlutterMap` to draw the blue route line.
+* **Navigation Mode**: Highlight the route and keep the camera centered on the user's movement.
+
+## Open Questions
+
+1. **Voice Language**: Should the voice alerts be in English, or would you like to support other languages?
+2. **Alert Distance**: Is 20 meters the right distance, or should it adjust based on the car's speed (e.g., 50m if driving fast)?
+3. **Pothole Data**: Currently, the app only alerts for potholes detected *in this session*. Should we eventually load potholes from a database or shared file?
+
+## Verification Plan
+
+### Automated Tests
+* N/A (Manual verification required for GPS/Maps).
+
+### Manual Verification
+* **Proximity**: Use a "Mock Location" app on Android to simulate walking/driving within 20 meters of a pinned pothole and confirm the phone speaks the alert.
+* **Navigation**: Enter a destination (e.g., "Manila Cathedral"), confirm a blue line appears on the map, and verify it updates as the mock location moves.

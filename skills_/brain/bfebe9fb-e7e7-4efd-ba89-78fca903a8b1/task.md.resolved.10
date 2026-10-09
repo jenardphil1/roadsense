@@ -1,0 +1,8 @@
+- [x] **Unify 'Back to Set' Buttons**
+  - [x] Update `Store/view_set` (Pokémon)
+  - [x] Update `Store/view_mtg_set` (Magic)
+  - [x] Update `Store/view_lorcana_set` (Lorcana)
+  - [x] Update `Store/view_onepiece_set` (One Piece)
+  - [x] Update `Store/view_custom_category` (Custom Merch)
+- [x] **Verification**
+  - [x] Test every button to ensure no 404s and consistent styling.

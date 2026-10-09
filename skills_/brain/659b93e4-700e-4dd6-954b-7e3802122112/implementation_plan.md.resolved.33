@@ -1,0 +1,37 @@
+# Convert Currency from USD to PHP
+
+The goal is to update the entire application to use Philippine Peso (₱) instead of US Dollars ($), including converting the API prices (which are provided in USD) into PHP for display.
+
+## Proposed Changes
+
+1. **Exchange Rate Configuration**
+   - Implement a fixed exchange rate (e.g., $1 USD = ₱56 PHP) via a CodeIgniter configuration file or straightforward variable.
+   - For all API imported cards (Pokemon, MTG, Lorcana, One Piece), the price will be parsed, multiplied by 56, and displayed as `₱ xxx.xx`.
+
+2. **Store Views (API Cards)**
+   - Update `number_format($price, 2)` to `number_format($price * 56, 2)` inside:
+     - `application/views/store/view_card.php`
+     - `application/views/store/view_mtg_card.php`
+     - `application/views/store/view_lorcana_card.php`
+     - `application/views/store/view_onepiece_card.php`
+     - All `_set.php` and `_index.php` lists.
+
+3. **Custom Inventory & Admin**
+   - For custom products, we will replace the `$` symbol with `₱`. 
+   - I will assume you intend to type the price in **Peso** directly into the Admin panel for custom inventory. If this is true, we just change the `$` symbol to `₱` without multiplying by 56 for custom items.
+   - Manage Orders, Checkouts, and Carts will all use `₱` properly if you use them. We will update the Cart logic to reflect the correct subtotal in PHP.
+
+## Open Questions
+
+> [!WARNING]
+> Please confirm two things before I proceed:
+> 1. Is an exchange rate of **$1 = ₱56** perfectly fine for the API cards? Do you want to be able to change this number later?
+> 2. For **Custom Inventory** in the Admin panel, do you want to type the price in **PHP** manually (e.g., type `500` for ₱500)?
+> 3. Does the database currently have custom products stored in USD that need to be updated, or was it empty/test data anyway?
+
+## Verification Plan
+
+- Navigate to the frontend store and ensure all Pokemon/MTG/Lorcana imported cards show multiplied PHP values with the `₱` sign.
+- Add an item to the cart and verify the total multiplies and displays in PHP.
+- Navigate to the Payment page and confirm the checkout totals are correct.
+- Open the Admin dashboard and confirm Orders, Revenue, and Custom Inventory all display `₱`.

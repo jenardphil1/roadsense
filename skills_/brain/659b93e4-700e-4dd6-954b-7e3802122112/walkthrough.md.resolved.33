@@ -1,0 +1,29 @@
+# Walkthrough - Automatic Inventory Restock on Cancellation
+
+I have successfully implemented a professional inventory management feature that automatically handles stock levels when order statuses change.
+
+## Features Implemented
+
+### 🔄 Automatic Restock on Cancel
+When you change an order's status to **"Cancelled"** in the Admin panel:
+- The system now automatically identifies every card in that order.
+- It returns the quantities back to the correct inventory table (Pokémon, MTG, Lorcana, etc.).
+- This happens instantly, so the cards are immediately available for other customers to buy.
+
+### 🛡️ Smart "Re-Activation" Protection
+If you accidentally cancel an order and then move it back to **"To Pay"** or **"Paid"**:
+- The system is smart enough to **re-deduct** the stock.
+- This prevents "over-stocking" errors where you might accidentally have more cards listed than you physically own.
+
+### 🔒 Database Safety (Transactions)
+I've wrapped the entire update process in a **Database Transaction**.
+- This ensures that *either* both the order status and the stock are updated successfully, or *neither* are.
+- This prevents database corruption if the server crashes in the middle of an update.
+
+## Files Modified
+- **[Order_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php)**: Added `update_order_status` logic and a private helper `_handle_stock_restoration`.
+
+## Verification Results
+- **Cancellation**: Verified that stock increments correctly across different categories.
+- **Re-activation**: Verified that stock decrements again if a cancelled order is put back into rotation.
+- **No Double-Counting**: Verified that changing from "Cancelled" to "Cancelled" does nothing to the stock.

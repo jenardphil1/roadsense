@@ -1,0 +1,21 @@
+## Admin Sidebar Implementation (Visual Polish)
+The user wants a vertical sidebar on the left side of the admin panel.
+
+### 1. Components
+- **[NEW] [sidebar.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/sidebar.php)**: Vertical navigation component using Bootstrap 5 `nav-pills`.
+- **[MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/index.php)**: Update dashboard to use sidebar layout.
+- **[MODIFY] [manage_orders.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/manage_orders.php)**: Apply sidebar layout.
+- **[MODIFY] [pokemon_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/pokemon_inventory.php)**: Apply sidebar layout and modernize table styling.
+
+### 2. Layout Structure
+- Use `<div class="row">` with `<div class="col-md-3 col-lg-2">` for sidebar and `<div class="col-md-9 col-lg-10">` for content.
+- Sidebar will be sticky and styled with a dark theme or premium minimalist look.
+
+## Verification Plan
+
+### Automated Tests
+- Verify all links in the sidebar navigate to the correct admin segments.
+
+### Manual Verification
+- Verify the sidebar is responsive on mobile (collapses or stacks).
+- Check that the layout looks "premium" and consistent across all inventory pages.

@@ -1,0 +1,34 @@
+# Implementation Plan: MTG UI Modernization & Alignment
+
+This plan propagates the new "Premium Storefront" design system to the Magic: The Gathering (MTG) category, ensuring a consistent high-end user experience across all TCGs.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The MTG card detail page will be updated to match the Pokémon style: a clean white product panel with a large 80px gap between store prices and market data, unified 60px action buttons, and perfectly aligned breadcrumb navigation.
+
+## Proposed Changes
+
+### [Component] MTG Card Detail View
+
+#### [MODIFY] [view_mtg_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_card.php)
+-   **Structure**: Implement the `.product-container` white box with the premium shadow and padding.
+-   **Header Integration**: Move the card name, rarity, and set info into the white panel (removal of any dark/hero-like styles if present).
+-   **Action Bar**: Align the quantity stepper and "ADD TO CART" button on the same line with a unified `60px` height.
+-   **Pricing**: Implement the large `80px` gap between "Shop Price" and "Scryfall Market" data.
+-   **Breadcrumb**: Move outside the panel and wrap in `div.px-4.px-md-5` for global alignment.
+
+### [Component] Global MTG Navigation
+
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php)
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+-   **Breadcrumb Alignment**: Wrap the store breadcrumb in `div.px-4.px-md-5` to match the Pokémon storefront alignment.
+
+## Verification Plan
+
+### Automated Tests
+- I will verify the presence of `px-4 px-md-5` and the `80px` gap style in the modified files.
+
+### Manual Verification
+- **Visual Sync**: Compare the Pokémon card detail page with the MTG card detail page to ensure they feel like part of the same premium storefront.
+- **Navigation Test**: Click between MTG sets and cards to verify the breadcrumb doesn't "jump" horizontally.

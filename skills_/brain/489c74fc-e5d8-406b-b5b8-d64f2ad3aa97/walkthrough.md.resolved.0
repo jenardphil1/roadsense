@@ -1,0 +1,17 @@
+# Walkthrough - Database Import Success
+
+Successfully imported the 152MB [mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) file into the UniServerZ MariaDB instance.
+
+## Changes Made
+- Updated [f:\UniServerZ\core\mysql\my.ini](file:///f:/UniServerZ/core/mysql/my.ini) to increase `max_allowed_packet` from 32M to **128M** to support large SQL records.
+- Identified the database was running on port **3307** with credentials `root:root`.
+- Executed the import via command line using CMD redirection for reliability.
+
+## Verification Results
+- **Database Created**: `mtg`
+- **Tables Imported**: 
+  - `mtg_cards_raw`
+  - `store_inventory`
+- **Row Count**: `mtg_cards_raw` contains **109,043** records.
+
+The database is now fully updated and ready for use in the `coolex_shop` project.

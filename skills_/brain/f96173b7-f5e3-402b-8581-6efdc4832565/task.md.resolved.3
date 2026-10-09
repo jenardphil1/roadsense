@@ -1,0 +1,20 @@
+# Migration Task Checklist: Moving coolex_shop to Agila Hosting
+
+- `[x]` **Phase 1: Local Backup & Export**
+  - `[x]` Create SQL Dump of local `pokemon` database (432 MB)
+  - `[x]` Zip project files (excluding `.git`, logs, etc.) (327 MB)
+- `[ ]` **Phase 2: Domain Setup (Link Hostinger to Agila)**
+  - `[ ]` Update Name Servers in Hostinger dashboard
+- `[ ]` **Phase 3: Hosting Setup (HestiaCP)**
+  - `[x]` Create `coolex.shop` website in HestiaCP
+  - `[ ]` Upload `coolex_shop_upload.zip` and extract
+  - `[ ]` Create new MySQL database and user in HestiaCP
+  - `[ ]` Import `pokemon_backup.sql` to the new database
+- `[ ]` **Phase 4: Configuration & SSL**
+  - `[ ]` Update `application/config/database.php`
+  - `[ ]` Update `application/config/config.php` (set `base_url`)
+  - `[ ]` Enable Free SSL in HestiaCP
+- `[ ]` **Phase 5: Final Check**
+  - `[ ]` Verify that the homepage loads correctly
+  - `[ ]` Verify card searches work
+  - `[ ]` Verify admin login works

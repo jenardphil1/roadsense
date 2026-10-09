@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Implementation plan for Pothole Tracker App.\nProposed stack: Next.js + Vanilla CSS.\nKey libs: Leaflet for maps.\nFocus on mobile-first design and \"wow\" aesthetics.",
+  "updatedAt": "2026-02-01T13:03:59.641302800Z"
+}

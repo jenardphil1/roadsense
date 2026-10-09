@@ -1,0 +1,8 @@
+- [ ] Update `view_card.php` JavaScript to convert live market price to PHP.
+- [ ] Update `view_mtg_card.php` JavaScript to convert Scryfall live price to PHP.
+- [ ] Update `view_set.php` JavaScript to convert live market price to PHP (if applicable).
+- [ ] Update all Admin views to display `₱` instead of `$`.
+- [ ] Verify `Checkout/payment.php` for correct PHP symbol usage and instructions.
+- [ ] Verify `Cart/index.php` for correct PHP symbol usage.
+- [ ] Fix CI3 `set_message` lint error in `Customer.php`.
+- [ ] Clean up any remaining hardcoded `$` specifically next to price values.

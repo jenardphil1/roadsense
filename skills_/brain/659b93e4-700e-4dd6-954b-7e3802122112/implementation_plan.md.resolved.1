@@ -1,0 +1,42 @@
+# Multi-TCG Architecture Implementation
+
+To seamlessly expand your shop to support multiple Trading Card Games (like Magic, Yu-Gi-Oh!, etc.) without creating a messy tangle of physical folders, we will implement a dynamic MVC routing strategy using Database Categories.
+
+## User Review Required
+> [!IMPORTANT]
+> To support different card games without breaking your existing catalog, I am going to run a database upgrade script that adds a `game_category` column to your [sets](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php#13-19) table. All your current sets will be safely assigned default to `pokemon`.
+
+## Proposed Changes
+
+### Database Layer
+* Execute raw SQL to inject `game_category VARCHAR(50) DEFAULT 'pokemon'` into the [sets](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php#13-19) table.
+
+---
+
+### Models
+#### [MODIFY] [Store_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php)
+* Create `get_active_sets_by_category($game_category)` to filter the database query based on the active TCG.
+
+---
+
+### Controllers
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+* Map a new route `public function category($game_name)` that powers URLs like `/Store/category/pokemon` or `/Store/category/magic`.
+
+---
+
+### Views (Navigation & UI)
+#### [MODIFY] [header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php)
+* Refactor breadcrumb data flow to dynamically display the active game (e.g., *Magic: The Gathering* instead of *Pokémon*).
+#### [MODIFY] [megamenu.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/megamenu.php)
+* Rewire existing `site_url('Store')` dropdown buttons in the Pokemon dropdown to `site_url('Store/category/pokemon')` and the Magic ones to `site_url('Store/category/magic')`.
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php)
+* Dynamically generate the Breadcrumb and Page Header titles based on the active `game_category` queried from the controller.
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) & [view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+* Ensure the inner breadcrumbs properly reflect the Game Category of the respective product.
+
+## Verification Plan
+### Automated Verification
+* `php -r "..."` script to ensure database schema migration executes flawlessly.
+### Manual Verification
+* The user will navigate to `Store/category/pokemon` and `Store/category/magic` to visually verify segregation of TCG catalogs.

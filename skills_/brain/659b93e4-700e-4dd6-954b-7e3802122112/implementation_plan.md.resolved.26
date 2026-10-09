@@ -1,0 +1,43 @@
+# Implementation Plan - MTG Set Names Fix
+
+This plan outlines the steps to replace the 3-letter Magic set codes (e.g., "LEA", "M21") with their full descriptive names (e.g., "Limited Edition Alpha", "Core Set 2021") and fix the "Unknown Set" label in the admin inventory.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This fix requires connecting to the [Scryfall API](https://scryfall.com/docs/api) once to fetch the official set list. Only a single request is needed to sync all 600+ historical sets.
+
+## Proposed Changes
+
+### 1. Database & Model Update
+
+We need to ensure the `mtg_sets` table is fully populated and that the model is joining correctly. I will add a synchronization method to pull data from Scryfall.
+
+#### [MODIFY] [Mtg_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php)
+- Add `sync_sets_from_api($sets_data)`: A helper to loop through Scryfall data and `INSERT ... ON DUPLICATE KEY UPDATE` the `mtg_sets` table.
+- Ensure `get_mtg_inventory_by_set` and other methods consistently join with `mtg_sets`.
+
+### 2. Admin Controller Integration
+
+I will add a new AJAX endpoint to trigger the synchronization.
+
+#### [MODIFY] [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php)
+- Add `sync_mtg_sets_ajax()`: This will perform the `curl` request to `https://api.scryfall.com/sets`, parse the JSON, and call the model to save the names.
+
+### 3. UI Update (Admin Console)
+
+Add a "Sync" button to let the admin refresh the names if new sets are added in the future.
+
+#### [MODIFY] [mtg_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/mtg_inventory.php)
+- Add a "**🔄 Sync Set Names**" button in the controls header.
+- Add JavaScript logic to handle the sync request and reload the page on success.
+
+## Verification Plan
+
+### Automated Tests
+- I will verify the Scryfall API response format matches our expected structure.
+
+### Manual Verification
+- Navigate to **Admin > Magic Inventory**.
+- Verify that the "Select Set" dropdown now shows full names like "Alpha" instead of "LEA".
+- Verify that the "Unknown Set" badge in the table is replaced by the actual set name.

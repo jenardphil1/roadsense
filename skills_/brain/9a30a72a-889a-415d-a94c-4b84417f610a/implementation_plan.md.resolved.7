@@ -1,0 +1,47 @@
+# Cleanup: Dynamic Smart Optimization Button
+
+This plan transforms the current optimization flow into a single, cohesive "Optimization Toggle" button that displays pothole counts and allows for quick switching between standard and safe routes.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Consolidated UI**: I will move the pothole count information directly onto the **Floating Action Button**. This button will act as the primary control for comparing the standard path vs. the "Smart Optimized" path.
+> **Toggle Behavior**: Clicking the button while in "Standard" mode will trigger the Big Scan and switch to the "Safe" route. Clicking it again will return you to the fastest "Standard" route.
+
+## Proposed Changes
+
+### Logic Improvements
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **State Management**:
+    - Add `_isOptimizedView` boolean.
+    - Store `_baseRoutePoints` and `_optimizedRoutePoints` to allow instant toggling without re-hitting the API every time.
+
+- **Simplified Routing Flow**:
+    - Update `_processRoutes` to store the "Standard" result first.
+    - Update `_smartOptimizeRoute` to perform the scan and store the "Optimized" result separately.
+
+### UI Enhancements
+
+- **Dynamic Optimization Button**:
+    - Replace the static "Smart Optimize" button with a dynamic one:
+        - **Label (Standard Mode)**: `⚠️ Standard: [N] Potholes`
+        - **Label (Optimized Mode)**: `✨ Smart Route: [M] Potholes`
+    - Clicking it while in Optimized mode will toggle back to the Standard route (and vice versa).
+
+- **UI Cleanup**:
+    - I will keep the bottom route selection cards for users who want to see ALL alternatives, but the new button will provide the most direct "Pothole vs Speed" comparison.
+
+---
+
+## Open Questions
+
+- **Button Location**: Should we keep the button floating on the right, or would you prefer it centered at the top/bottom for better visibility?
+
+## Verification Plan
+
+### Manual Verification
+- Search for a destination -> See "Standard: X" on the button.
+- Click button -> See it change to "Smart Route: Y" and the map update.
+- Click again -> Switch back to standard.

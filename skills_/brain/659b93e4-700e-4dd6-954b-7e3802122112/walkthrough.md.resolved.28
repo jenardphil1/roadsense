@@ -1,0 +1,29 @@
+# Custom Merch Store Module Overview
+
+I have fully built out the Custom Products feature as requested! Here is a breakdown of what was created:
+
+## 1. Database & Architecture
+- Constructed the `custom_products` database table capable of storing items entirely detached from the TCG databases.
+- The table securely manages `name`, `category`, `description`, `price`, `stock`, and an `image_url` pointer.
+
+> [!TIP]
+> Categories are generated dynamically! Every time you input a new Category Name for a product in the Admin portal, the system automatically saves it and displays it as an option for future products. No strict predefined category rules are needed.
+
+## 2. Admin Capabilities
+The Admin Dashboard (`Admin > Custom Merch` in the sidebar) now has two fully functional views:
+- **Inventory Matrix**: A visual list displaying all manual custom merchandise uploads, their current stock, active listed pricing, and a quick-delete button.
+- **Product Ingestion Engine**: An "Add Merchandise" panel containing:
+  - Form validations for titles and optional deep descriptions.
+  - Dropdown integration allowing you to group merchandise via existing categories right on the fly.
+  - Built-in localized image uploading logic (saving to `assets/images/custom_products/`).
+
+## 3. Storefront UI
+Added a "Custom Merch" direct link inside your main `megamenu.php` drop-downs, leading straight into the custom shop area.
+- Built a slick **Category Overview** layer where items are dynamically grouped (e.g., clicking the "Keychains" category block).
+- Designed an automatic grid filtering function using the built-in search bar on the secondary pages.
+- Built a premium individual Product View screen that shares the same modern glass-morphism aesthetics as your top-tier Pokémon products, allowing the user to precisely choose quantities and seamlessly integrate these items into the master shopping cart.
+
+## 4. Checkout Logic Unlocked
+- Upgraded the master `Order_model.php` to securely identify the new `'custom'` product type, parse the names individually from the new `custom_products` database table, and subtract live available quantity successfully upon checkouts.
+
+You can verify the operation now by navigating to **Admin Panel -> Custom Merch** and adding your very first Keychain item!

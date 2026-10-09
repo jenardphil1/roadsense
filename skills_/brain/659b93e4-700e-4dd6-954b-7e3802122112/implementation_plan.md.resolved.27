@@ -1,0 +1,50 @@
+# Implementation Plan - Admin Management Links on Store Pages
+
+This plan outlines the steps to replace the "Open Import Tool" links on the public-facing store pages with direct "Manage Inventory" links for admins across all TCG categories.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The "Open Import Tool" links will be removed from the public store views. Instead, if an admin is logged in, they will see a "Manage Inventory" button that takes them directly to the corresponding administrative panel (e.g., `Admin/lorcana_inventory`).
+
+## Proposed Changes
+
+We will modify the "No stock available" and "Welcome" sections of the store index and set views for all four categories.
+
+### 1. Lorcana Views
+#### [MODIFY] [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php)
+- Replace `Lorcana_Import` link with `Admin/lorcana_inventory`.
+- Update text from "Open Import Tool" to "Manage Lorcana Inventory".
+
+#### [MODIFY] [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php)
+- Add the admin check in the `else` (no stock) block to provide a "Manage Inventory" link.
+
+### 2. Magic (MTG) Views
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php)
+- Add the admin check to provide a "Manage Magic Inventory" link when the registry is empty.
+
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- Add the admin link in the "No stock available" block.
+
+### 3. Pokémon Views
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php)
+- Add the admin link for Pokémon inventory management.
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+- Add the admin link in the "No stock available" block.
+
+### 4. One Piece Views
+#### [MODIFY] [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php)
+- Add the admin check to provide a "Manage One Piece Inventory" link.
+
+#### [MODIFY] [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php)
+- Add the admin link in the "No stock available" block.
+
+## Verification Plan
+
+### Manual Verification
+- Log in as an **Admin**.
+- Navigate to a set page with no stock (e.g., a brand new Lorcana set).
+- Verify the "Open Import Tool" text is gone and replaced by "Manage Inventory".
+- Click the link and verify it opens the correct Admin panel.
+- Log out and verify the link is hidden from public customers.

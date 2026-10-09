@@ -1,0 +1,50 @@
+# Refinement: Smart Optimization & Comparison UI
+
+This plan addresses the "far route" detour issue and ensures the pothole counter provides clear comparison feedback even when a route is perfectly smooth.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Dense-only Avoidance**: To prevent huge detours caused by single isolated potholes, the **Smart Optimize** feature will now only avoid clusters of **3 or more potholes**. Isolated potholes will be handled via visual alerts rather than regional re-routing.
+> **Comparison Visibility**: I will update the top navigation banner to always display the **total pothole count** for your selected path, so you can immediately see the "0" when comparing against rougher alternatives.
+
+## Proposed Changes
+
+### Logic Improvements
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **Optimization Sensitivity**:
+    - Update `_getAvoidancePolygons()` to filter out clusters with fewer than **3 potholes**.
+    - Limit the returned polygons to the **Top 10 highest-density areas** to keep the route reasonable.
+
+- **Persistent Pothole Summary**:
+    - Introduce a new state variable `_activeRoutePotholeSummary`.
+    - Update `_processRoutes` and `_selectAlternativeRoute` to calculate this summary (e.g., "5 Potholes found" or "Smooth Road (0 potholes)").
+    - Update the top banner to display this summary instead of generic "Select a route" text.
+
+### UI Enhancements
+
+- **Navigation Banner**:
+    - Ensure the top green/red card always shows the **total count** for the chosen route.
+    - If 0 potholes, display a "✨ Smooth Journey" label.
+
+- **Route Cards**:
+    - Make the "0" more prominent (e.g., Use a bright green "Smooth" badge).
+
+---
+
+## Open Questions
+
+- **Minimum Cluster Size**: Is 3 potholes a good threshold for a "block to avoid," or should it be lower (2)?
+
+## Verification Plan
+
+### Automated Tests
+- Verify clustering logic with simulated pothole sets.
+- Check ORS request body for `avoid_polygons` count.
+
+### Manual Verification
+- Route to a destination with scattered potholes.
+- Confirm "Smart Optimize" doesn't take an extreme detour for single potholes.
+- Verify the top banner displays "0 Potholes" for a smooth route.

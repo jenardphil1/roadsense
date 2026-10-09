@@ -1,0 +1,6 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Plan details adding a Start Navigation button state and pre-filtering pothole proximity checks to only those located directly on the user's active route line.",
+  "updatedAt": "2026-04-18T12:38:53.005993600Z",
+  "requestFeedback": true
+}

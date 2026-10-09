@@ -1,0 +1,21 @@
+# Add Name Echo
+
+## Goal Description
+Modify `Program.cs` to read input into a variable (specifically named `x` as requested or similar) and print it back to the console to show the name.
+
+## Proposed Changes
+
+### MyFirstProject
+
+#### [MODIFY] [Program.cs](file:///c:/Users/jenar/MyFirstProject/Program.cs)
+- Replace "Hello, World!" with:
+    - `Console.Write("Enter your name: ");` (Optional prompt for better UX)
+    - `string x = Console.ReadLine();`
+    - `Console.WriteLine(x);`
+
+## Verification Plan
+
+### Manual Verification
+- Run `dotnet run`.
+- Enter a name when prompted.
+- Verify the name is printed back.

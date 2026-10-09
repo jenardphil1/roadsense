@@ -1,0 +1,26 @@
+# Pokemon TCG UI Development
+
+## 1. Data Analysis
+- [x] Inspect the [sets](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php#10-19) folder to understand how set data is stored.
+- [x] Inspect the [cards](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php#24-50) folder to understand how card data is stored.
+
+## 2. Backend Implementation (CodeIgniter 3)
+- [x] Create [Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php) to read and parse the local JSON files.
+  - [x] Method to get all sets.
+  - [x] Method to get cards by set ID.
+- [x] Create [Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php) controller.
+  - [x] Index method to list all sets.
+  - [x] Cards method to view a specific set's cards.
+- [x] Configure [config/routes.php](file:///f:/UniServerZ/www/pokemon/application/config/routes.php).
+
+## 3. Frontend Implementation (CodeIgniter Views & UI)
+- [x] Set up an overarching application layout (header, footer).
+- [x] Create `sets_list` view.
+  - [x] Implement beautiful grid UI for displaying sets.
+- [x] Create `cards_list` view.
+  - [x] Implement grid UI to display cards with images, names, and details.
+- [x] Add rich CSS styling (glassmorphism/vibrant visuals) to wow the user.
+
+## 4. Polish & Verification
+- [x] Verify UI runs correctly.
+- [x] Test with different sets to ensure card data renders.

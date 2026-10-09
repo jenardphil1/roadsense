@@ -1,0 +1,7 @@
+- `[/]` Redesign Pokémon Card Grid UI (`view_set.php`)
+    - `[ ]` Update CSS styles to match `index.php` (Sets Page)
+    - `[ ]` Refactor Card HTML structure for consistency
+    - `[ ]` Standardize badges and typography
+    - `[ ]` Modernize price and action buttons
+- `[ ]` Verify UI alignment and functionality
+- `[ ]` Update walkthrough

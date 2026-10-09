@@ -1,0 +1,42 @@
+# Walkthrough: Website Successfully Deployed! 🚀
+
+I have successfully deployed your **Coolex Shop** to the internet using a **Cloudflare Quick Tunnel**. Your PC is now acting as a secure web server.
+
+## 🌐 Public Link
+You can access your website from anywhere in the world using this URL:
+
+> [!IMPORTANT]
+> **Primary URL:** [https://become-editorial-directive-certification.trycloudflare.com/coolex_shop/](https://become-editorial-directive-certification.trycloudflare.com/coolex_shop/)
+
+*Note: Since your local site is in the `/coolex_shop/` folder, you must include it in the URL.*
+
+---
+
+## 🛠️ How it was Setup
+1.  **Downloaded `cloudflared.exe`**: I downloaded the official Cloudflare tool to your project's `bin/` folder.
+2.  **Verified Local Server**: Confirmed that UniServerZ was active on **Port 81**.
+3.  **Initialized Tunnel**: Started a secure background process that bridges your local `localhost:81` to the public `trycloudflare.com` domain.
+
+---
+
+## ⚠️ Important Maintenance Notes
+
+### 1. Keeping the Site Online
+For your website to stay accessible, two things must remain running on your PC:
+1.  **UniServerZ (Apache & MySQL)**
+2.  **The Cloudflare Tunnel Process**
+
+If you restart your PC, you will need to restart the tunnel. You can do this by opening a PowerShell window in your project folder and running:
+```powershell
+.\bin\cloudflared.exe tunnel --url http://localhost:81
+```
+
+### 2. Temporary URL
+Since we don't have a domain name yet, this URL is **temporary**. If the tunnel process is stopped and restarted, a new random URL will be generated.
+
+> [!TIP]
+> **Want a Permanent Site?**
+> If you decide to get a domain (e.g., `.com`), I can help you link it to Cloudflare so your URL never changes.
+
+### 3. Verification
+I have confirmed the tunnel process is currently running and healthy in your background tasks.

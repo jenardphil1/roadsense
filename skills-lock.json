@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "skills": {
+    "api-security-testing": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/api-security-testing/SKILL.md",
+      "computedHash": "477a25e9b4d4412134637fe54ca43d33d28eff7bff6346bd0f2c655a4d6cca1e"
+    },
+    "application-security-testing": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/application-security-testing/SKILL.md",
+      "computedHash": "284512f7b648ee372a662712fe92eb1a04955198bacef94b23ff0fcc4f6f542e"
+    },
+    "ci-security-scanning-with-strix": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/ci-security-scanning-with-strix/SKILL.md",
+      "computedHash": "1a9d9b999278fa24860eee4dcf3bb33994991ad55b6ea4b0e62e048e6a06417a"
+    },
+    "find-security-vulnerabilities-in-code": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/find-security-vulnerabilities-in-code/SKILL.md",
+      "computedHash": "d6aaaf44bb35c4dedec775c47c7f814517356f534c374f15c884d94735b11d97"
+    },
+    "fix-security-vulnerabilities-with-strix": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/fix-security-vulnerabilities-with-strix/SKILL.md",
+      "computedHash": "2bb121ea7c1843742ef9a3ae786034ec220f49f5865f165a29c1ab8fcbe79dc9"
+    },
+    "honey": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey/SKILL.md",
+      "computedHash": "ecf79d2a0acebf253da88cfbf8e74bfc380576dc4378af747852cd138b911d29"
+    },
+    "honey-ccr": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-ccr/SKILL.md",
+      "computedHash": "66a6f02759d310520699f60a34f0e17f92ebcd75b4199c9858a151d2b1aa090b"
+    },
+    "honey-chat": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-chat/SKILL.md",
+      "computedHash": "859a4159a3cfddefe247b9a7726efc8265e238bfcb314ffc7440f41b196daff4"
+    },
+    "honey-compress": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-compress/SKILL.md",
+      "computedHash": "5c8becd144e2d69f6d6224841c0f290342f51e5be301e010c94dc714fe86e323"
+    },
+    "honey-debt": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-debt/SKILL.md",
+      "computedHash": "74eb72df512faa5b7399e147b31d3de11fcc2841f5f24c536e6f3e649e82af21"
+    },
+    "honey-design": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-design/SKILL.md",
+      "computedHash": "d60d0a6e7a6068f293b8ff992624c29d43669be146054efcf3bc1f616af30dc9"
+    },
+    "honey-eco": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-eco/SKILL.md",
+      "computedHash": "5f25a9ba775519322860a97979671d0b74f61520874ddb720972976f29b4fe5a"
+    },
+    "honey-gain": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-gain/SKILL.md",
+      "computedHash": "21d81fe4b9d856b7b408b765d66d6e9d13caaab654975591843a63a0d665b140"
+    },
+    "honey-hive": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-hive/SKILL.md",
+      "computedHash": "e5cd9425d4a88557cd8d42bf3e4a5f2b1c9b50d7e09ed54c2cf13bc82b6bf0db"
+    },
+    "honey-loop": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-loop/SKILL.md",
+      "computedHash": "49c869a9059a814535ed8f7dbd11510cce1fb8f9dc0e5459b68ab52416ad2f9b"
+    },
+    "honey-memory": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-memory/SKILL.md",
+      "computedHash": "3281aad648c97ee9836424871639f2daae4d5ad9285b03650e43bc0f0ffd4415"
+    },
+    "honey-px": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-px/SKILL.md",
+      "computedHash": "480f0d5481d45a19bd41a0d61591057b6b331b964e199d03cd3aafc069f41cf3"
+    },
+    "honey-review": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-review/SKILL.md",
+      "computedHash": "98f68232c027533c27eddf89dd8e7487ae115dae19ddacf69abb9ace5901d164"
+    },
+    "honey-superpowers": {
+      "source": "Green-PT/honey-for-devs",
+      "sourceType": "github",
+      "skillPath": "skills/honey-superpowers/SKILL.md",
+      "computedHash": "00ac546eb8f464651323e0c09b700f64ac7a2591d8966972c89d0e237fca49d1"
+    },
+    "managed-pentesting-with-strix": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/managed-pentesting-with-strix/SKILL.md",
+      "computedHash": "a95f715e62d91842511a85a5725417aaf9db08227ec7d7311bdfb7a51a04089f"
+    },
+    "owasp-top-10-testing": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/owasp-top-10-testing/SKILL.md",
+      "computedHash": "b2fb22a82a73a3f0613b7f806aabf0388dbb6b2101c4c219075efaf4e5034251"
+    },
+    "penetration-testing-with-strix": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/penetration-testing-with-strix/SKILL.md",
+      "computedHash": "9e6b38534b728c0c2ea7ceee52fb23357cba25a96da7b239ad7c2029270527eb"
+    },
+    "web-app-penetration-testing": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/web-app-penetration-testing/SKILL.md",
+      "computedHash": "ba189eeed0ca069d60c54e87f6f6523789b788fd57b8e10994397f8ad95af4be"
+    }
+  }
+}

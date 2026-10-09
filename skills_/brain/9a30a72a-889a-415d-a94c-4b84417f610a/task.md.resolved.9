@@ -1,0 +1,7 @@
+- [ ] Remove bottom route selection cards
+- [ ] Implement `_cycleRoutes()` logic to switch between all available paths via the action button
+- [ ] Integrate `_smartOptimizeRoute()` into the cycle flow
+- [ ] Update the Action Button UI to act as the primary route switcher
+- [ ] Verify vertical layout of action buttons is consistent
+- [ ] Display dynamic pothole counts and toggle between modes
+- [ ] Final UI cleanup and verification

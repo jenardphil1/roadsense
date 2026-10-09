@@ -1,0 +1,22 @@
+# Walkthrough: Refined Card Detail UI
+
+I have updated the individual Pokémon card detail page to improve focus and elegance by removing the "big red box" (Hero Banner) and refining the internal layout.
+
+## Changes Made
+
+### [Pokémon Card Detail](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+-   **Removed Hero Banner**: Deleted the over-saturated red gradient banner from the top of the page.
+-   **Header Integration**: Moved the card name (`<h1>`) and set information directly into the main white product panel.
+-   **Refined Typography**: 
+    - Increased card name font size to `clamp(2rem, 4vw, 2.8rem)` for a bold, high-end feel.
+    - Updated set/expansion info color to a softer grey (`#adb5bd`) for better hierarchy.
+-   **Panel Optimization**: Increased panel padding to `4rem` and added a more subtle, deep shadow (`box-shadow: 0 20px 60px rgba(0,0,0,0.04)`) to make the content "pop" without the need for a background banner.
+
+## Verification Results
+
+| Test | Status |
+|---|---|
+| Card Name Visibility | ✅ Perfectly legible within the main panel |
+| Breadcrumb Alignment | ✅ Remains at the top for navigation |
+| Responsive Layout | ✅ Name and Grid adjust fluidly to screen size |
+| Interactive Elements | ✅ Zoom and Quantity stepper still fully functional |

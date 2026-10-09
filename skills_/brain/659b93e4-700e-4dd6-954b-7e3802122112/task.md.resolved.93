@@ -1,0 +1,4 @@
+- [ ] Standardize `view_card.php`: Move breadcrumb out of panel, update spacing to `px-4 px-md-5`.
+- [ ] Standardize `view_set.php`: Update breadcrumb wrapper grid to `px-4 px-md-5`.
+- [ ] Standardize `index.php`: Update breadcrumb wrapper grid to `px-4 px-md-5`.
+- [ ] Verify that the breadcrumb "Store" starts at the exact same horizontal offset on all three pages.

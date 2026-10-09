@@ -1,0 +1,33 @@
+# Implementation Plan: Aligning Card UI with Sets Design
+
+The goal is to bring the visual excellence of the Sets Landing Page to the Individual Set View (Card Grid), ensuring a consistent, premium experience across the Pokémon TCG storefront.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The redesign will change the card grid layout in the Set View. I will maintain the current functionality (Store Price display and Add to Cart button) but skin them with the more modern design language used on the landing page.
+
+## Proposed Changes
+
+### Pokémon View
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+-   **CSS Styles:** 
+    -   Replace existing `.card-item` and `.card-img-container` styles with logic derived from `.set-card` and `.set-logo-box` in `index.php`.
+    -   Implement the `scale(1.1)` hover effect for images.
+    -   Standardize border-radius to `1rem` and use the subtle `rgba(0,0,0,0.06)` border.
+-   **HTML Structure:**
+    -   Update the card wrapper to use the standard design patterns.
+    -   Reformat the rarity badge to match the "Cards Count" badge style (pale red background with bold red text).
+    -   Modernize the price display and "ADD" button to feel more integrated into the card flow.
+-   **JavaScript:**
+    -   Ensure the live price fetching logic remains functional but is presented in the new layout if applicable.
+
+## Verification Plan
+
+### Manual Verification
+-   Navigate to the Pokémon TCG index: `store/pokemon`
+-   Click into any set (e.g., *Scarlet & Violet*).
+-   Compare the look and feel of the cards in the set with the sets on the landing page.
+-   Verify that the "ADD" button still works correctly.
+-   Verify that the layout is responsive on mobile (2 columns) and desktop (4-5 columns).

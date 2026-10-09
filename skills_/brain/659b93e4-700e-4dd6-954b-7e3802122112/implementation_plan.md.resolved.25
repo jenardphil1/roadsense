@@ -1,0 +1,52 @@
+# Implementation Plan - Set Names in Admin Inventory
+
+This plan outlines the changes required to display the **Set Name** for each card within the Admin Inventory management panels for Pokémon, Magic: The Gathering, Disney Lorcana, and One Piece. This will provide better clarity for administrators, especially when using the "View ALL Active/Stocked" filter.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The "Set" column will be added as a new column in the inventory tables. This may slightly compact other columns like "Card name" depending on the screen width.
+
+## Proposed Changes
+
+### Database Layer (Models)
+
+We need to update the fetching logic in each TCG model to include a `LEFT JOIN` with the corresponding sets table to retrieve the set name.
+
+#### [MODIFY] [Admin_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Admin_model.php)
+- Update `get_inventory_cards_by_set` to join `cards` with `sets` table.
+- Retrieve `sets.name_en` as `set_name`.
+
+#### [MODIFY] [Mtg_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php)
+- Update `get_mtg_inventory_by_set` to join `mtg_cards` with `mtg_sets`.
+- Retrieve `mtg_sets.setName` as `set_name`.
+
+#### [MODIFY] [Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php)
+- Update `get_lorcana_inventory_by_set` to join `lorcana_cards` with `lorcana_sets`.
+- Retrieve `lorcana_sets.name` as `set_name`.
+
+#### [MODIFY] [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php)
+- Update `get_all_onepiece_cards_by_set` to join `onepiece_cards` with `onepiece_sets`.
+- Retrieve `onepiece_sets.name` as `set_name`.
+
+---
+
+### UI Layer (Views)
+
+Each inventory view needs the table header updated and the JavaScript AJAX success callback modified to render the set name.
+
+#### [MODIFY] [pokemon_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/pokemon_inventory.php)
+#### [MODIFY] [mtg_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/mtg_inventory.php)
+#### [MODIFY] [lorcana_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/lorcana_inventory.php)
+#### [MODIFY] [onepiece_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/onepiece_inventory.php)
+
+- Add `<th>SET</th>` to the table header.
+- Update the `$.each` loop in the `<script>` section to include a `<td>` containing `card.set_name`.
+
+## Verification Plan
+
+### Manual Verification
+- Navigate to each Admin Inventory page (Pokémon, Magic, Lorcana, One Piece).
+- Select a specific set and verify the set name appears correctly in the table.
+- Select the "**🌟 View ALL Active/Stocked...**" option and verify that different set names appear for their respective cards in the single list.
+- Verify that the layout remains responsive and clean with the extra column.

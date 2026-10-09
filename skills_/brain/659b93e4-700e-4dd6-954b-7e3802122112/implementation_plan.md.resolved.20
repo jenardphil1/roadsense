@@ -1,0 +1,49 @@
+# Expanded Global Search (Sets + Cards)
+
+This plan expands the global search functionality to return individual cards alongside sets, ensuring users can find specific products directly from the header search bar.
+
+## Proposed Changes
+
+### [Models]
+
+#### [MODIFY] [Store_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php)
+- Add `search_active_pokemon_cards($query)` to find Pokémon cards in stock.
+
+#### [MODIFY] [Mtg_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php)
+- Add `search_active_mtg_cards($query)` to find Magic cards in stock.
+
+#### [MODIFY] [Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php)
+- Add `search_active_lorcana_cards($query)` to find Lorcana cards in stock.
+
+#### [MODIFY] [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php)
+- Add `search_active_onepiece_cards($query)` to find One Piece cards in stock.
+
+---
+
+### [Controller]
+
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+- Update [pokemon_index()](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#28-41), [magic_index()](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#62-76), [lorcana_index()](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#99-113), and [onepiece_index()](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#136-151) to:
+    - Call the new model search methods if a query is present.
+    - Pass the `matched_cards` result to the views.
+
+---
+
+### [Views]
+
+#### [MODIFY] [Store Index Views](file:///f:/UniServerZ/www/coolex_shop/application/views/store/)
+- Update [index.php](file:///f:/UniServerZ/www/coolex_shop/index.php) (Pokémon), [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php), [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php), and [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php) to:
+    - **Display a "Cards Found" section FIRST** (above sets) if card matches are returned.
+    - Display the "Sets Found" section second.
+    - Use a responsive grid (similar to the set view) to display card results.
+
+## Verification Plan
+
+### Automated Tests
+- N/A
+
+### Manual Verification
+1. Search for a specific card name (e.g., "Pikachu", "Charizard") in the Pokémon category.
+2. Verify both the set (if applicable) and individual cards appear in the results.
+3. Repeat for Magic, Lorcana, and One Piece categories.
+4. Verify "Clear Search" functionality works for both sets and cards.

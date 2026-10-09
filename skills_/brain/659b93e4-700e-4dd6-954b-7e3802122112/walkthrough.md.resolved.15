@@ -1,0 +1,20 @@
+# Storefront Finalized: Balanced UI & Full Pricing
+
+The storefront has reached its final, polished form with a perfect balance of density and legibility.
+
+## 1. Balanced 3-Column UI
+We've refined the card listings to match your preferred scale and visibility.
+- **3-Column Layout**: Cards now display in a spacious 3-column grid on desktop, making the page feel organized and easy to read.
+- **Enlarged Card Art**: Images have been increased to ~115px in width, allowing the beautiful card artwork to stand out.
+- **Full Pricing Context**: We've restored the full **"Market Price:"** label and bolded the manual shop price for maximum clarity.
+
+## 2. Magic "Add to Cart" Fix
+The system is now fully compatible with all Magic card types.
+- **Slash Sanitization**: Multi-face cards (like *Stonehide Ancient // Warning Tremor*) can now be added to the cart without errors. The system automatically handles the naming characters to ensure they save correctly to your database.
+
+## 3. Real-Time Market Data
+- **Live Sync**: Every card in the set view continues to fetch real-time market data from the TCGDex (Pokémon) and Scryfall (Magic) APIs.
+- **Performance**: Batch fetching ensures that even large sets like C17 load their pricing data quickly and reliably.
+
+---
+**Your storefront is now a professional, beautifully balanced TCG catalog!** 🚀

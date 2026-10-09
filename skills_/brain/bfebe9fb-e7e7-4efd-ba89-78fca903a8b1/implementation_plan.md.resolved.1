@@ -1,0 +1,34 @@
+# Implementation Plan: Modernizing Global Notifications
+
+This plan outlines the transition from static, emoji-based Bootstrap alerts to a premium, "industry-standard" notification system using **SweetAlert2** and **Font Awesome**.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This change will replace the standard top-of-page alerts with modern "Toast" notifications (for successes like "Add to Cart") and "Modal" alerts (for critical errors), ensuring a seamless and non-intrusive user experience.
+
+## Proposed Changes
+
+### [Component Name] Global Templates
+
+#### [MODIFY] [header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php)
+- **Dependency Update**: Inject **SweetAlert2** (JS/CSS) and **Font Awesome 6** into the `<head>` section.
+- **Refactor Notifications**: 
+    - Remove the existing static HTML alert blocks (`.alert-success`, `.alert-danger`).
+    - Add a JavaScript block that detects CodeIgniter `flashdata` and triggers a SweetAlert2 notification accordingly.
+    - **Success Notifications**: Display as a modern, auto-dismissing "Toast" in the top-right corner.
+    - **Error Notifications**: Display as a more prominent modal with a professional icon.
+
+## Open Questions
+
+- **Toast Position**: Should notifications appear in the **Top-Right** (standard for desktop) or **Bottom-Center** (easier for mobile)? I recommend Top-Right for the premium desktop experience.
+- **Auto-Dismiss Timer**: Is **3 seconds** sufficient for reading a "Item Added to Cart" message?
+
+## Verification Plan
+
+### Automated Tests
+- Use the browser tool to trigger an "Add to Cart" action and verify the Toast appears without the old static icon.
+- Trigger a "Login Failed" or "Restricted" event to verify the Error modal displays correctly.
+
+### Manual Verification
+- Testing responsiveness of the Toast on different screen widths.

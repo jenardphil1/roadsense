@@ -1,0 +1,99 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+[0] (269,8)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	METRO-MANILA
+	arrow_drop_down
+[1] (614,8)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	BINONDO
+	arrow_drop_down
+[2] (907,8)<label class='el-checkbox customer-checked' />
+	[3] (804,10)<span  />
+		[4] (804,9)<span  />
+	[5] (881,8)<span >Item additional fee />
+Destination
+[6] (269,106)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[7] (269,95)<div class='q-field__control relative-position row no-wrap' />
+		[8] (253,95)<div  />
+			[9] (253,95)<div  />
+				[10] (166,95)<span >METRO-MANILA />
+				[11] (108,95)<input class='q-select__focus-target' id='f_099d3f34-3e29-49ab-a48d-6ec282d1d032' role='combobox' />
+		[12] (414,95)<div  />
+			[13] (418,95)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[14] (614,106)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[15] (614,95)<div class='q-field__control relative-position row no-wrap' />
+		[16] (597,95)<div  />
+			[17] (597,95)<div  />
+				[18] (488,95)<span >BINONDO />
+				[19] (453,95)<input class='q-select__focus-target' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe' role='combobox' />
+		[20] (759,95)<div  />
+			[21] (762,95)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[22] (907,106)<label class='el-checkbox customer-checked is-disabled'>Item size />
+	[23] (804,108)<span  />
+	Item size
+[24] (161,171)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard q-field--float q-field--with-bottom q-field--disabled' />
+	KG
+Service type
+[25] (269,269)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[26] (269,258)<div class='q-field__control relative-position row no-wrap' />
+		[27] (253,258)<div  />
+			[28] (253,258)<div  />
+				[29] (117,258)<span >EZ />
+				[30] (108,258)<input class='q-select__focus-target' id='f_d5810aa8-fdb0-4877-ae05-4b768a05d056' role='combobox' />
+		[31] (414,258)<div  />
+			[32] (418,258)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Bag Specifications
+[33] (614,258)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense' />
+	[34] (614,258)<div class='q-field__control relative-position row no-wrap' />
+		[35] (583,258)<div  />
+			[36] (583,258)<div  />
+				[37] (502,258)<span >Small (<=3KG) />
+				[38] (453,258)<input class='q-select__focus-target' id='f_29e620d1-1aa9-4977-aba4-fa91ab2c8d84' role='combobox' />
+		[39] (731,258)<div  />
+			[40] (734,258)<i class='cursor-pointer q-icon notranslate material-icons' role='presentation'>close />
+		[41] (761,258)<div  />
+			[42] (762,258)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Service type
+EZ
+Weight
+1
+KG
+Shipping Fee
+PHP
+60.00
+Item additional fee
+0.00
+[43] (753,665)<span >Search />
+20th and 21st Floors, Ecoprime Building, 32nd Street corner 9th Avenue, Bonifacio Global City, Taguig City, Fourth District, National Capital Region (NCR), Philippines | www.jtexpress.ph
+Search
+Track & Trace
+Shipping Rates
+Shipping Days
+About Us
+Our Story
+News & Blogs
+Careers
+Services
+J&T Super
+International Shipping
+Plant Shipping
+Information
+FAQ
+Package Information
+Terms
+[44] (932,500)<div  />
+	[45] (932,486)<img  />
+	[46] (932,536)<p >Mobile />
+[47] (932,606)<div  />
+	[48] (932,592)<img  />
+	[49] (932,642)<p >Place Order />
+[50] (932,724)<div  />
+	[51] (932,724)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[52] (932,699)<img  />
+		[53] (932,762)<p >Customer Service />
+[54] (932,843)<div  />
+	[55] (932,829)<img  />
+	[56] (932,879)<p >TOP />
+
+</current_dom>

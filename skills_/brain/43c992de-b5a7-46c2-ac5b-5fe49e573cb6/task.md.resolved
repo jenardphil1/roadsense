@@ -1,0 +1,4 @@
+- [x] Update `assets/labels.txt` with the new classification: `pothole`
+- [x] Verify `lib/main.dart` model path
+- [x] Verify `pubspec.yaml` asset inclusions
+- [x] Final verification of detection logic

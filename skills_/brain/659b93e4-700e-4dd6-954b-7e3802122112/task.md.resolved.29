@@ -1,0 +1,26 @@
+# Multi-TCG Storefront Integration
+
+- [x] Research MTG raw table schema
+- [x] Create updated Implementation Plan
+- [x] Create normalization script [db/migrations/optimize_mtg_in_pokemon.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/optimize_mtg_in_pokemon.sql)
+- [x] User imports `mtg_cards_raw` into [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#26-37) DB
+- [x] Run normalization script
+- [x] Update Application Models & Config (MTG)
+- [x] Verify MTG Integration
+- [x] Categorize Storefront (TCGPlayer-style)
+- [x] Standardize UI and Navigation
+  - [x] Unify Dashboard and Store Hero/Card styles
+  - [x] Convert all navigation links to lowercase `/store/`
+  - [x] Final UI/UX Sweep
+- [x] Dynamic Navigation Mega Menu
+  - [x] Add `get_latest_sets` functions to both Models
+  - [x] Refactor [megamenu.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/megamenu.php) with dynamic PHP loops
+  - [x] Verify live set display in navigation
+- [x] Professional MTG Set Naming
+  - [x] Create [mtg_sets](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php#15-24) cache table
+  - [x] Implement lazy-loading set name sync in [Mtg_model](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php#3-181)
+  - [x] Update all MTG views to show full cinematic names (e.g. Ravnica Allegiance)
+- [x] Fix Multi-TCG Cart System
+  - [x] Categorize `Cart/add` controller method
+  - [x] Update routing for `/Cart/add/{category}/{id}`
+  - [x] Synchronize all "Add to Cart" links in MTG and Pokémon views

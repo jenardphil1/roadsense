@@ -1,0 +1,112 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function role() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'user';
+    }
+
+    function isAdmin() {
+      return role() in ['admin', 'super_admin'];
+    }
+
+    function isSuperAdmin() {
+      return role() == 'super_admin';
+    }
+
+    function validRole(value) {
+      return value in ['user', 'admin', 'super_admin'];
+    }
+
+    function validPotholeCreate() {
+      return request.resource.data.keys().hasOnly([
+          'latitude', 'longitude', 'imageUrl', 'status', 'overallSeverity',
+          'potholeCount', 'detections', 'reporterUid', 'reporterEmail',
+          'reporterName', 'reporterPhotoUrl', 'timestamp', 'autoApproved',
+          'approvedAt'
+        ])
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.reporterEmail == request.auth.token.email
+        && request.resource.data.latitude is number
+        && request.resource.data.latitude >= -90
+        && request.resource.data.latitude <= 90
+        && request.resource.data.longitude is number
+        && request.resource.data.longitude >= -180
+        && request.resource.data.longitude <= 180
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.matches(
+          'https://potholestorage2026[.]blob[.]core[.]windows[.]net/photos/.*'
+        )
+        && request.resource.data.overallSeverity in ['low', 'medium', 'high']
+        && request.resource.data.potholeCount is int
+        && request.resource.data.potholeCount >= 1
+        && request.resource.data.potholeCount <= 100
+        && request.resource.data.status == 'pending'
+        && request.resource.data.timestamp == request.time;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'user';
+      allow update: if isSuperAdmin()
+        && validRole(request.resource.data.role)
+        || (signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName', 'firstName', 'lastName', 'phoneNumber', 'photoUrl',
+            'lastLogin', 'updatedAt'
+          ]));
+      allow delete: if false;
+    }
+
+    match /potholes/{potholeId} {
+      allow read: if true;
+      allow create: if signedIn() && validPotholeCreate();
+      allow update: if isAdmin()
+        || (signedIn()
+            && resource.data.reporterUid == request.auth.uid
+            && resource.data.status != 'approved'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'previousStatus', 'deletedAt', 'deletedBy', 'restoredAt', 'restoredBy'
+            ])
+            && request.resource.data.status in ['deleted', 'pending']);
+      allow delete: if isAdmin()
+        || (signedIn()
+            && resource.data.reporterUid == request.auth.uid
+            && resource.data.status != 'approved');
+    }
+
+    match /settings/system {
+      allow read: if signedIn();
+      allow write: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'autoAcceptPotholes', 'updatedAt', 'updatedBy'
+        ]);
+    }
+
+    // Verification codes and outbound email must be handled by trusted backend
+    // code (Admin SDK bypasses rules), never by an untrusted mobile/web client.
+    match /mail/{messageId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

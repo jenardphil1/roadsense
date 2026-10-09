@@ -1,0 +1,27 @@
+# Implementation Plan: Amazon-Style Product Image Gallery
+
+The user wants to upload multiple custom images for a single product (like a Pokémon card) in the Admin panel, and have those images seamlessly appear as a clickable thumbnail gallery on the storefront's product page, matching Amazon's clean e-commerce layout.
+
+## 1. Database Implementation
+- **[NEW] `product_images` Table**: I will create a new scalable table alongside the `store_inventory` system dedicated exclusively to managing a multi-item photo array.
+  - Columns: `id` (INT), `card_id` (VARCHAR), `category` (VARCHAR, e.g., 'pokemon', 'custom'), `image_path` (VARCHAR).
+- **[NEW] `Gallery_model.php`**: A localized model to handle uploading, fetching, ordering, and deleting photos per entity.
+
+## 2. Admin System Updates
+The admin inventory pages (like `pokemon_inventory.php`) currently have a non-functional "**📷 Photos**" button. 
+- **[MODIFY] `Admin.php`**: Add the core backend controller logic allowing you to actually view the `edit_images` endpoint.
+- **[NEW] `application/views/admin/edit_images.php`**: A dedicated photo-management UI where the admin can drag-and-drop or select new images to upload, and view/delete currently uploaded alternate angles of the product.
+- Add secure upload endpoints (`upload_gallery_photo()`, `delete_gallery_photo()`) saving files directly into `assets/images/gallery/`.
+
+## 3. Storefront UI Overhaul (Amazon Style)
+Currently, `view_card.php` has a dormant, partially written loop (`$custom_images`) for an Amazon layout. 
+- **[MODIFY] `Store.php`**: Before loading the final product view page, securely query the new `product_images` table using the target card's ID and push any photo results into the view.
+- **[MODIFY] `view_card.php` (Pokémon)**: Activate the dormant horizontal HTML thumbnail layout. Ensure Javascript triggers immediately so when a customer clicks a thumbnail, the main featured product image instantly swaps to the clicked perspective.
+
+## Open Questions & Review
+- Do you want this multiple-image gallery capability immediately enabled for **all** systems (Pokémon, MTG, One Piece, Lorcana, Custom Merch), or should we start exclusively with **Pokémon** first to perfect it before rolling it out store-wide? (The database will be built to handle all of them regardless).
+
+## Verification Plan
+1. I will write the `Gallery_model.php` which auto-initiates the database table.
+2. I will build the Admin UI. We can upload a test photo to a Pokémon card to ensure the database properly records the image path.
+3. We will then check the Pokémon store page to visually confirm that the Amazon layout loads properly, looks premium, and correctly swaps images on click.

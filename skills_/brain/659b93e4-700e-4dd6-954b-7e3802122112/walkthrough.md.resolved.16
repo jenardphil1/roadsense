@@ -1,0 +1,21 @@
+# Storefront Finalized: Clickable Cards & Balanced UI
+
+The storefront has reached its ultimate level of interactivity and professional design.
+
+## 1. Clickable Card Boxes
+We've significantly improved the navigation experience in all set views.
+- **Full-Card Interactivity**: You no longer need to click exactly on the name or the image. The **entire card box** is now a clickable link that takes you straight to the card details.
+- **Visual Feedback**: We've added a **pointer cursor** to the entire card area, so users immediately know the whole box is interactive.
+
+## 2. Balanced 3-Column UI
+The layout is perfectly tuned for both Pokémon and Magic: The Gathering.
+- **Spacious Grid**: A clean 3-column layout that balances density with high legibility.
+- **Large Previews**: Card art is displayed prominently at ~115px-120px height.
+- **Complete Pricing**: Professional **"Market Price:"** labels provide full context alongside your shop's price.
+
+## 3. Technical Stability
+- **MTG Cart Compatibility**: All characters (including slashes in split names) are sanitized for a seamless "Add to Cart" experience.
+- **Efficient API Fetching**: Scryfall and TCGDex pricing data is fetched in optimized batches to ensure fast page loads.
+
+---
+**Your storefront is now a professional, highly interactive, and beautifully balanced TCG marketplace!** 🚀

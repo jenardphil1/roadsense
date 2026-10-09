@@ -1,0 +1,24 @@
+# TCGPlayer Horizontal List UI Redesign
+
+Redesign the card listing UI in both Pokémon and Magic set views to match the professional, horizontal layout shown in the user's screenshot.
+
+## Proposed Changes
+
+### Storefront Views
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+
+- **Grid Refactor**: Replace the 4-column vertical grid with a **2-column horizontal grid** (`row-cols-1 row-cols-lg-2`).
+- **Horizontal Cards**: Use `row g-0` inside each card to place the image on the left (~40% width) and details on the right (~60% width).
+- **Pricing Overhaul**:
+  - Direct "Listings from **$X.XX**" display.
+  - Secondary "Market Price: **$X.XX**" display.
+- **Aesthetics**: White background cards, subtle borders, and smooth hover shadows.
+
+## Verification Plan
+
+### Manual Verification
+- **Visual Check**: Open the Pokémon and Magic set views to ensure the horizontal layout matches the target screenshot.
+- **Responsive Check**: Ensure the layout stacks correctly on smaller screens.
+- **Functionality**: Verify the "Add to Cart" button still works perfectly.

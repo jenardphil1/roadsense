@@ -1,0 +1,33 @@
+# Storefront Premium UI Overhaul: Walkthrough
+
+The storefront has been transformed into a professional, multi-TCG platform with a high-fidelity "Horizontal List" UI and enhanced stock visibility.
+
+## 1. Professional Horizontal Card UI
+The card listing in both **Pokémon** and **Magic** set views has been refactored to a cinematic, horizontal layout. This design is optimized for detail-rich TCG browsing.
+
+- **Layout**: Image on the left, Name/Rarity/Price on the right.
+- **Pricing Indicators**:
+  - High-visibility **"Listings from $X.XX"** label.
+  - **"Market Price: $X.XX"** subtext to give users a reference point.
+- **Aesthetics**: Premium shadows, clean white backgrounds, and a rounded "Add to Cart" button.
+
+## 2. Dynamic Set Card Counting
+The set tiles on the index pages now provide instant feedback on available inventory variety.
+
+- **Available Cards Badge**: Each set tile now displays a **"X Cards Available"** badge.
+- **Accuracy**: This count represents the number of *unique* cards in that set that have a positive stock level in the `store_inventory` table.
+- **Simplified Design**: Per the user's request, the release date has been removed to prioritize the availability count, creating a cleaner look.
+
+## 3. Intelligent Category-Aware Search
+The Global Search bar in the header is now fully functional and context-sensitive.
+
+- **Category Dropdown**: Users can select "Pokémon" or "Magic".
+- **Dynamic Action**: Selecting a category updates the search behavior instantly.
+- **Live Filtering**: Searching now filters the sets (by name or ID) and displays a "Search Results" header with a "Clear Search" option.
+
+## 4. Stability & Crash-Proofing
+- **Safety Checks**: All breadcrumb and detail logic now use `isset()` and null-coalescing fallbacks. Even if a set or card link is broken, the page will display a clean "Not Found" message instead of a PHP notice or crash.
+- **Unified Routing**: Routing follows a consistent `/store/{category}/...` pattern, preventing any ID collisions between different card games.
+
+---
+**Your storefront is now professional, stable, and ready for high-volume trading!** 🚀

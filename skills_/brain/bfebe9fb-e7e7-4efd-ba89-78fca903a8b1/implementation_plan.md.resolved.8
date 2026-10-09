@@ -1,0 +1,62 @@
+# Modernizing TCG Category Storefronts
+
+Apply the premium design overhaul (already implemented for Pokémon and Custom Merchandise) to all remaining TCG categories.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This overhaul covers **Category Index** (set lists) and **Set Details** (card lists) for Magic, Lorcana, and One Piece.
+> As requested, **Individual Card Detail pages will NOT be modified.**
+
+## Proposed Changes
+
+### 0. Global: Stable Breadcrumbs [CRITICAL]
+- **Issue**: Breadcrumbs move/shift because they are currently inside the dynamic hero banners.
+- **Fix**: Move breadcrumbs OUT of the hero/header blocks and into a dedicated `.store-nav-header` container that stays in the same position on every page. This ensures the "Store / TCG / Set" link stays perfectly aligned regardless of content size.
+
+### 1. Magic: The Gathering (MTG)
+- **Theme**: Charcoal & Deep Blue (`#2c3e50` to `#000000`)
+- **Icon**: `fa-magic` or MTG Set SVGs
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php)
+- Add MTG-themed Hero Banner.
+- Implement `set-card` design for MTG expansions.
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- Update set header and card listing grid to the new premium aesthetic.
+
+---
+
+### 2. Lorcana TCG
+- **Theme**: Enchanted Purple & Ink Blue (`#4B0082` to `#1a1a2e`)
+- **Icon**: `fa-feather-alt` or Disney-inspired accents
+#### [MODIFY] [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php)
+- Add Lorcana-themed Hero Banner.
+- Implement `set-card` design for Lorcana Chapters.
+#### [MODIFY] [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php)
+- Update set header and card listing grid.
+
+---
+
+### 3. One Piece TCG
+- **Theme**: Red & Deep Sea Blue (`#dc3545` to `#004085`)
+- **Icon**: `fa-anchor` or Straw Hat inspired accents
+#### [MODIFY] [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php)
+- Add One Piece-themed Hero Banner.
+- Implement `set-card` design for OP expansions.
+#### [MODIFY] [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php)
+- Update set header and card listing grid.
+
+## Open Questions
+
+1. **Category Specific Logos**: For MTG and One Piece, should I continue using the Scryfall/Official SVGs for the set logos, or do you prefer the "Icon Box" fallback used in the Custom Merch page for everything? (I recommend keeping the Logos as primary).
+
+## Verification Plan
+
+### Automated Tests
+- Browser test each index page to ensure the Hero Banner loads correctly.
+- Verify that clicking a set card leads to the correctly styled set detail page.
+- **Breadcrumb Stability**: Navigate between Pokemon sets and Magic sets to confirm the "Store / ..." text does NOT jump vertically or horizontally.
+- Ensure "Quick Add" functionality still works for all categories.
+
+### Manual Verification
+- Visually confirm color consistency (MTG = Blue/Black, Lorcana = Purple, One Piece = Red/Blue).
+- Confirm that the "View Card" (detail) pages for these categories remain in their original state as requested.

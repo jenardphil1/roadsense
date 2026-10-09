@@ -1,0 +1,17 @@
+# Tasks: Add Set Names to Admin Inventory
+
+- [ ] **Model Updates (Database Joins)**
+    - [ ] Update `Admin_model.php` (Pokémon) <!-- id: 1 -->
+    - [ ] Update `Mtg_model.php` (MTG) <!-- id: 2 -->
+    - [ ] Update `Lorcana_model.php` (Lorcana) <!-- id: 3 -->
+    - [ ] Update `OnePiece_model.php` (One Piece) <!-- id: 4 -->
+- [ ] **View Updates (UI & AJAX)**
+    - [ ] Update `pokemon_inventory.php` <!-- id: 5 -->
+    - [ ] Update `mtg_inventory.php` <!-- id: 6 -->
+    - [ ] Update `lorcana_inventory.php` <!-- id: 7 -->
+    - [ ] Update `onepiece_inventory.php` <!-- id: 8 -->
+- [ ] **Verification**
+    - [ ] Verify Pokémon Inventory
+    - [ ] Verify MTG Inventory
+    - [ ] Verify Lorcana Inventory
+    - [ ] Verify One Piece Inventory

@@ -1,0 +1,30 @@
+# Pokemon TCG UI Development
+
+## 1. Data Analysis
+- [x] Inspect the [sets](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php#10-19) folder to understand how set data is stored.
+- [x] Inspect the [cards](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php#24-51) folder to understand how card data is stored.
+
+## 2. Backend Implementation (CodeIgniter 3)
+- [x] Create [Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php) to read and parse the local JSON files.
+- [x] Create [Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php) controller.
+- [x] Configure [config/routes.php](file:///f:/UniServerZ/www/pokemon/application/config/routes.php).
+
+## 3. Frontend Implementation (CodeIgniter Views & UI)
+- [x] Set up an overarching application layout (header, footer).
+- [x] Create `sets_list` view.
+- [x] Create `cards_list` view.
+
+## 4. Feature: TCGPlayer Market Prices
+- [x] Debug API fetch mechanism (cURL disabled -> file_get_contents failing due to HTTP blocks).
+- [x] Successfully inject TCGPlayer data into the UI via client-side JavaScript `fetch()`.
+
+## 5. Feature: Card Details Page
+- [x] Add controller endpoint `pokemon/card/{set_id}/{card_id}`.
+- [x] Create [card_details.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/card_details.php) view.
+- [x] Link [cards.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/cards.php) grid items to the new details page.
+- [x] Implement JS functionality to fetch market prices for the specific card on the details page.
+- [x] **Fallback Implementation**: Implement JS fallback to search prices by exact card name for custom/unreleased set data (e.g., `me2pt5`).
+
+## 6. Polish & Verification
+- [x] Verify UI runs correctly.
+- [x] Test with different sets to ensure card data renders.

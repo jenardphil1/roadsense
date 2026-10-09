@@ -1,0 +1,50 @@
+# Lean Azure Architecture ($100 Credit Optimized)
+
+A cost-optimized approach to cloud-powering your Pothole Detection app, ensuring your $100 credit lasts as long as possible (likely 12+ months for development and small-scale testing).
+
+## User Review Required
+
+> [!TIP]
+> **Cost Strategy**: We will prioritize "Serverless" and "Consumption-based" tiers. If the app has no users, it costs virtually $0.
+> **Azure Maps Free Tier**: Azure Maps offers a generous free tier (5,000 transactions/month for many services). We will use this to replace Nominatim and ORS.
+
+## Proposed Changes
+
+We will focus on the three pillars that provide the most "wow" factor for the lowest cost.
+
+### 1. Unified Mapping with Azure Maps (Highest Value)
+Replace the current mix of OpenRouteService and Nominatim.
+- **Why**: Faster search, better routing, and professional-grade tiles.
+- **Cost**: Free for the first 5,000 transactions/month.
+- **Implementation**: Replace `Nominatim` calls in `map_screen.dart` with Azure Maps Fuzzy Search.
+
+### 2. Community Image Sharing (Azure Blob Storage)
+Move images to the cloud so they can be shared between users.
+- **Why**: Critical for collaborative pothole tracking.
+- **Cost**: Extremely low (< $2/month for thousands of images).
+- **Implementation**: Upload images on detection; update `database_helper.dart` to store the Blobs' public SAS URLs.
+
+### 3. Shared Database (Azure Cosmos DB Serverless)
+A global registry of potholes.
+- **Why**: Allow User A's detections to show up on User B's map.
+- **Cost**: **Serverless Mode** only charges per request. For a prototype, this will be pennies.
+- **Implementation**: Simple Azure Function to `GET/POST` potholes to Cosmos DB.
+
+### 4. Optional: Automated Verification (Azure Functions)
+- **Why**: Use a cloud AI to verify if the uploaded image actually contains a pothole.
+- **Cost**: First 1 million executions/month are free. Only pay for the AI Vision call (~$0.001 per call).
+
+---
+
+## Open Questions
+
+1. **Authentication**: Do we want to use **Azure AD B2C** to track which user reported which pothole?
+2. **Offline Support**: Should the app remain fully functional offline (using the current local model) and only sync when a connection is available?
+3. **Budget**: Are you looking to stay within the Azure Free tier limits?
+
+## Verification Plan
+
+### Manual Verification
+1. Verify that search results from Azure Maps are more accurate/responsive than Nominatim.
+2. Confirm that images appear in the Azure Portal's Blob Container after being "detected" in the app.
+3. Use two different "simulated" devices to ensure a pothole detected by one appears on the map of the other.

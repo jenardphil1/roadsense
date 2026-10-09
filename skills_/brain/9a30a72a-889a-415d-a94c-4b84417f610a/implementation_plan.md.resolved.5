@@ -1,0 +1,56 @@
+# Smart Route Optimization & 'Whole Road' Analysis
+
+This plan outlines the implementation of a comprehensive "Whole Road" analysis and a smart route optimizer that actively avoids high-pothole areas by requesting new paths from the mapping service.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Regional Avoidance (Big Scan)**: As requested, the app will focus on a broad regional scan rather than narrow lane guidance. When you click **Optimize**, the app will identify roads and blocks with high pothole density in the entire region between your start and destination and ask the mapping service to avoid them entirely.
+
+
+
+
+## Proposed Changes
+
+### Map Screen Component
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **Regional Avoidance Score**:
+    - Focus on a "Big Scan" using the Bounding Box of the trip.
+    - Identify "Hotspots" (areas with multiple potholes) within the region.
+    - Calculate a general "Road Quality" score for suggested routes based on their proximity to these hotspots.
+
+- **Smart Optimization (Manual Trigger)**:
+    - **Trigger**: A manual "Optimize" button.
+    - **Avoidance Logic**: Generate `avoid_polygons` for the identified hotspots.
+    - **Re-routing**: Request a new route from ORS that steers clear of these high-density zones.
+
+
+
+
+- **UI Updates**:
+    - **Optimize Button**: A dedicated button to trigger regional re-routing.
+    - **Enhanced Route Cards**: Clearly display "Fastest" vs "Smooth Route" (Optimized) with their respective pothole counts.
+    - **Simplicity**: No lane arrows or narrow corridor indicators; just clear, road-based routing.
+
+
+
+
+---
+
+## Open Questions
+
+- **Optimization Trigger**: Should the app automatically try to find an optimized route *every* time you search, or only when you manually click "Optimize"?
+- **Polygon Type**: Should the avoided areas be small "dots" on the map, or should we group them into larger "high-risk blocks"?
+
+## Verification Plan
+
+### Automated Tests
+- Test clustering logic to ensure it doesn't generate too many polygons.
+- Verify ORS response when `avoid_polygons` is included.
+
+### Manual Verification
+- Search for a route known to have many potholes.
+- Click "Smart Optimize".
+- Verify that the resulting route is different and avoids the previously identified pothole locations.

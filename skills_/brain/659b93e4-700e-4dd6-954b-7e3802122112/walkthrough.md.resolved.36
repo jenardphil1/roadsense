@@ -1,0 +1,25 @@
+# Walkthrough: Enhanced Search Results
+
+I have upgraded the store's search functionality across all TCG categories (**Pokémon, Magic, Lorcana, and One Piece**). The search now looks for both **Set Names** and **Individual Card Names**, with a new layout that prioritizes card matches.
+
+## Changes Made
+
+### 1. Multi-Level Search logic
+I updated all database models to perform a deeper search. When you type a query, the system now scans the entire card library for matching names, rather than just the sets.
+
+### 2. "Cards First" Layout
+I redesigned the category index pages to prioritize your search results:
+- **Top Section**: "Matching Cards" — a responsive grid showing individual cards matching your search (with quick-add buttons).
+- **Bottom Section**: "Matching Sets" — the traditional set list for broader browsing.
+
+### 3. Smart Category Mapping
+The search remains category-aware. For example, if you search for "Pikachu" while in the Pokémon category, it will show you Pikachu cards from across all Pokémon sets you have in stock.
+
+## How to test:
+1. Go to any TCG category (e.g., **Store > Pokémon**).
+2. Enter a card name in the search bar (e.g., "Charizard" or "Mew").
+3. **Observation**: Notice the individual cards appear in a grid at the top, allowing you to quickly see the stock and price of specific cards.
+4. If you want to see all sets, just click the **"Clear"** button next to your results.
+
+> [!TIP]
+> This new "Cards First" approach makes it much easier for collectors to find specific cards without having to guess which set they belong to!

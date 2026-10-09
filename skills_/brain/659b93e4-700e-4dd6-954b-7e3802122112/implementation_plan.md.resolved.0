@@ -1,0 +1,46 @@
+# Data to MySQL Conversion Plan
+
+This plan details the process for converting the Pokémon TCG TypeScript database into a MySQL format. We will create a database schema and build a Node.js (TypeScript) script to read the local [.ts](file:///f:/UniServerZ/www/pokemon/cards-database-master/extract.ts) files and generate standard SQL files that can be directly imported into your MySQL server via phpMyAdmin or the command line.
+
+## Proposed Changes
+
+We will create two main artefacts in the `cards-database-master` folder:
+
+### 1. `schema.sql` (The Database Structure)
+This file will contain all the `CREATE TABLE` statements for the relational database. The schema will be designed to normalize the complex card data.
+
+**Proposed Tables:**
+- `series`: Stores the major series (e.g., Base, Scarlet & Violet)
+- `sets`: Stores the sets (e.g., Fossil, 151), linked to `series`.
+- `cards`: Stores the main properties of each card (name, HP, evolution stage, category, rarity, illustrator, etc.), linked to `sets`.
+- `card_types`: Stores the types of a Pokémon (e.g., Grass, Poison).
+- `attacks`: Stores attacks with their costs, damage, and effects, linked to `cards`.
+- `weaknesses` & `resistances`: Store the type match-ups for a card.
+- `abilities`: Stores Poké-Powers, Poke-Bodies, and modern Abilities.
+
+*Note: For simplicity, we are defaulting to extracting the English nomenclature (`name_en`, `effect_en`) since the data contains multiple languages.*
+
+### 2. `generate_sql.ts` (The Extraction Script)
+This is the TypeScript script that will read all the data and convert it into SQL queries.
+
+**How the script will work:**
+1. Use `glob` to find all `data/*/*.ts` (Series/Sets) and `data/*/*/*.ts` (Cards).
+2. It will dynamically `import()` each file, taking advantage of the pre-existing data structures.
+3. For every entity, it will construct robust `INSERT INTO ...` SQL operations. To prevent memory overload, we will batch these inserts.
+4. It will write an `inserts.sql` file.
+
+### [NEW] `schema.sql`
+Will define the database tables.
+
+### [NEW] `generate_sql.ts`
+The data harvesting and SQL generation engine.
+
+## Verification Plan
+
+### Automated Tests
+- We will run `ts-node generate_sql.ts` to ensure the compilation of the data into an `inserts.sql` log functions correctly without syntax errors.
+- We will verify that no illegal SQL characters (like unescaped quotes) break the generated statements.
+
+### Manual Verification
+- We will instruct you how to take the resulting `schema.sql` and `inserts.sql` and import them directly into your local UniServerZ MySQL instance.
+- We will query a known card (like Base Set Charizard) in your database to ensure data relationships map correctly!

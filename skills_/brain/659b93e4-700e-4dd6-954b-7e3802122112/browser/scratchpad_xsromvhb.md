@@ -1,0 +1,10 @@
+# Admin UI Verification Task
+
+- [ ] Navigate to Admin Dashboard (http://localhost:81/coolex_shop/index.php/Admin/)
+- [ ] Scroll through sidebar layout, verify it's fixed on the left.
+- [ ] Visit 'Manage Orders' and verify 2-column design.
+- [ ] Visit 'Pokémon Inventory' and verify 2-column design and white card formatting.
+- [ ] Confirm sidebar remains fixed and content is in white cards.
+
+## Status:
+Encountered error: "Chrome installation not found" when attempting to open the browser. Verification could not be completed.

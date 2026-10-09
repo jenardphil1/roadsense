@@ -1,0 +1,19 @@
+# Walkthrough: Global Navigation Alignment
+
+I have standardized the horizontal alignment of the breadcrumb navigation across all Pokémon TCG storefront views. This ensures that the navigation (the starting "Store" link) remains perfectly static and aligned with the primary content as users navigate between sets and individual cards.
+
+## Changes Made
+
+### [Global Standardization](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php)
+-   **Unified Padding**: Applied the responsive padding utility `px-4 px-md-5` to all breadcrumb wrappers and main content containers across `index.php`, `view_set.php`, and `view_card.php`.
+-   **Fixed Horizontal Jumps**: By standardizing the side padding, the starting `X` position of the breadcrumb is now identical on every page.
+-   **Structure Alignment**: Moved the breadcrumb **outside** the white boxes on the Card Detail page for consistency with the Sets pages, where it sits independently above the hero banners.
+-   **Syntax Cleanup**: Removed a trailing `le>` error from `index.php` that was previously causing a syntax break.
+
+## Verification Results
+
+| View | Starting Alignment | Mobile Padding | Status |
+|---|---|---|---|
+| Main Sets List (`index.php`) | Identical to Hero | `px-4` | ✅ Aligned |
+| Set Card Grid (`view_set.php`) | Identical to Header | `px-4` | ✅ Aligned |
+| Card Detail Page (`view_card.php`) | Identical to Product Box | `px-4` | ✅ Aligned |

@@ -1,0 +1,40 @@
+# Route Optimization Walkthrough
+
+I have implemented manual route optimization to help you avoid potholes while driving. The app now fetches multiple route alternatives, evaluates them for pothole density, and allows you to pick the smoothest path.
+
+## Key Features
+
+### 🛣️ Multiple Route Alternatives
+When you search for a destination, the app now requests up to **3 alternative routes** from OpenRouteService. 
+
+### 📊 Pothole Analysis
+For every route alternative, the app performs a **dense path interpolation** and counts how many potholes (both hardcoded and detected) are within 25 meters of the driving line.
+
+### 🖱️ Manual Route Selection
+A new **Route Picker** UI appears at the bottom of the screen when multiple routes are found. Each card shows:
+- **Travel Time**: Estimated duration in minutes.
+- **Pothole Count**: Total number of potholes on that path.
+- **Visual Status**: A "Smooth Path" label or a color-coded warning (Orange/Red) based on the number of potholes.
+
+### 🗺️ Visual Map Feedback
+- **Active Route**: Solid blue polyline.
+- **Alt Routes**: Semi-transparent gray dashed lines.
+- Tapping a route card instantly updates the active path on the map.
+
+## Changes Made
+
+### Map Screen
+- **[map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)**
+    - Refactored `_calculateRoute` to use the ORS `alternative_routes` parameter.
+    - Implemented `_processRoutes` to calculate pothole scores for all paths.
+    - Implemented `_selectAlternativeRoute` and `_updatePotholesOnActiveRoute` to sync navigation logic with the selected path.
+    - Updated `PolylineLayer` and added the `ListView` based selector.
+
+## How to Test
+1. **Search** for a destination in an area where you know potholes exist.
+2. Observe the **alternative routes** (gray lines) appearing alongside the main route.
+3. Use the **cards at the bottom** to see which route is the "Smooth Path".
+4. **Tap a card** and notice the blue highlighted line and the "Next pothole in..." banner update to match the new route.
+
+> [!TIP]
+> The app defaults to the fastest route (typically index 0) but clearly highlights if an alternative path is "pothole-free".

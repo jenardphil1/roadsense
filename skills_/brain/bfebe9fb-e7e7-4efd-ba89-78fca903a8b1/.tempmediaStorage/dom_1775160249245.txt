@@ -1,0 +1,113 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+Search
+About Us
+Services
+Information
+Send Package
+VIP
+[0] (635,34)<div >Download Now />
+[1] (760,34)<div  />
+	[2] (741,34)<span >Login />
+	[3] (756,34)<span >/ />
+	[4] (774,34)<span >Sign up />
+Language
+J&T Express Rates
+Track & Trace
+Shipping Rates
+Shipping Days
+Find Branches
+Local Rates
+International Rates
+Origin
+BULACAN
+arrow_drop_down
+[5] (432,854)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[6] (432,843)<div class='q-field__control relative-position row no-wrap' />
+		[7] (424,843)<div  />
+			[8] (424,843)<div  />
+				[9] (398,843)<span >BULACAN-SANTA-MARIA />
+				[10] (354,843)<input class='q-select__focus-target' id='f_7aa985dd-73f9-4a26-9b25-412fff195ee9' role='combobox' />
+		[11] (503,843)<div  />
+			[12] (504,843)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[13] (574,854)<label class='el-checkbox customer-checked' />
+	[14] (524,856)<span  />
+		[15] (524,855)<span  />
+	[16] (562,854)<span >Item additional fee />
+Destination
+[17] (266,949)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--focused q-field--highlighted q-field--float q-field--dense q-field--with-bottom' />
+	[18] (266,939)<div class='q-field__control relative-position row no-wrap' />
+		[19] (258,939)<div  />
+			[20] (258,939)<div  />
+				[21] (188,939)<input class='q-select__focus-target' id='f_f2e8f992-11b9-4d3b-b2f4-2310d0ae05e9' role='combobox' />
+		[22] (336,939)<div  />
+			[23] (338,939)<i class='q-select__dropdown-icon rotate-180 q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[24] (432,949)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--dense q-field--with-bottom' />
+	[25] (432,939)<div class='q-field__control relative-position row no-wrap' />
+		[26] (424,939)<div  />
+			[27] (424,939)<div  />
+				[28] (354,939)<input class='q-select__focus-target' id='f_74c6ce76-d073-42ec-902d-7006daac528a' role='combobox' />
+		[29] (503,939)<div  />
+			[30] (504,939)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[31] (574,949)<label class='el-checkbox customer-checked' />
+	[32] (524,951)<span  />
+		[33] (524,950)<span  />
+	[34] (545,949)<span >Item size />
+KG
+[35] (967,607)<div  />
+	[36] (967,594)<img  />
+	[37] (967,642)<p >Mobile />
+[38] (967,710)<div  />
+	[39] (967,696)<img  />
+	[40] (967,744)<p >Place Order />
+[41] (967,825)<div  />
+	[42] (967,825)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[43] (967,800)<img  />
+		[44] (967,861)<p >Customer Service />
+[45] (967,927)<img  />
+[46] (266,593)<div class='q-menu q-position-engine scroll q-menu--square q-transition--fade-enter-active q-transition--fade-enter-to' id='f_f2e8f992-11b9-4d3b-b2f4-2310d0ae05e9_lb' role='listbox' scrollable='true' />
+	[47] (262,293)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[48] (262,293)<div  />
+			[49] (262,293)<p >ABRA />
+	[50] (262,344)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[51] (262,344)<div  />
+			[52] (262,344)<p >AGUSAN-DEL-NORTE />
+	[53] (262,395)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[54] (262,395)<div  />
+			[55] (262,395)<p >AGUSAN-DEL-SUR />
+	[56] (262,446)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[57] (262,446)<div  />
+			[58] (262,446)<p >AKLAN />
+	[59] (262,496)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[60] (262,496)<div  />
+			[61] (262,496)<p >ALBAY />
+	[62] (262,547)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[63] (262,547)<div  />
+			[64] (262,547)<p >ANTIQUE />
+	[65] (262,598)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[66] (262,598)<div  />
+			[67] (262,598)<p >APAYAO />
+	[68] (262,649)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[69] (262,649)<div  />
+			[70] (262,649)<p >AURORA />
+	[71] (262,699)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[72] (262,699)<div  />
+			[73] (262,699)<p >BASILAN />
+	[74] (262,750)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[75] (262,750)<div  />
+			[76] (262,750)<p >BATAAN />
+	[77] (262,801)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[78] (262,801)<div  />
+			[79] (262,801)<p >BATANES />
+	[80] (262,852)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[81] (262,852)<div  />
+			[82] (262,852)<p >BATANGAS />
+	[83] (262,903)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' role='listitem' />
+		[84] (262,903)<div  />
+			[85] (262,903)<p >BENGUET />
+	BILIRAN
+	BOHOL
+
+</current_dom>

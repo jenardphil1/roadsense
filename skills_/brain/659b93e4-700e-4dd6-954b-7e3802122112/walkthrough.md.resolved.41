@@ -1,0 +1,22 @@
+# Walkthrough: Button Alignment & Text Cleanup
+
+I have refined the product interaction area on the Pokémon card detail page to improve visual balance and satisfy the request to remove non-essential labels.
+
+## Changes Made
+
+### [Pokémon Card Detail](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+-   **Removed "Authenticity Guaranteed"**: Deleted the secondary text label next to the stock status for a cleaner, more focused look.
+-   **Unified Action Bar**:
+    -   Set both the **Quantity Stepper** and the **Add to Shopping Bag** button to a matching fixed height of `60px`.
+    -   Ensured perfect horizontal alignment by using `display: flex` and matching paddings.
+    -   Corrected the centering of plus/minus icons in the stepper.
+-   **Visual Polish**: Reduced the stepper's internal padding and added `display: flex` to the stepper buttons to ensure icons are perfectly centered within their white background.
+
+## Verification Results
+
+| Test | Status |
+|---|---|
+| Same Height Check | ✅ Both elements are exactly `60px` tall |
+| Text Removal | ✅ "Authenticity Guaranteed" is gone |
+| Center Alignment | ✅ Stepper icons and Button text are centered |
+| Responsiveness | ✅ Action bar wraps correctly on small screens |

@@ -1,0 +1,36 @@
+# Order Management System Implementation Plan
+
+The user wants to fix the checkout process and add an admin panel to manage orders, including tracking who checked out and the shipping status.
+
+## Proposed Changes
+
+### 1. Database Layer
+- **[MODIFY] [Order_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php)**: 
+    - Update [add_order_items](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php#23-46) to handle `category` and deduct stock from the correct TCG table.
+    - Add `get_all_orders()` and `get_order_details($id)` for the admin panel.
+    - Add `update_order_status($id, $status)` for manipulation.
+
+### 2. Checkout Flow
+- **[MODIFY] [Checkout.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Checkout.php)**:
+    - Ensure `category` is passed to [add_order_items](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php#23-46).
+- **[MODIFY] [order_items table]**: Add `category` column (to be done via SQL or Model).
+
+### 3. Admin Order Management
+- **[MODIFY] [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php)**:
+    - Add `manage_orders()` method.
+    - Add `view_order($id)` method.
+    - Add `update_order_ajax()` method.
+- **[NEW] [manage_orders.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/manage_orders.php)**: List all orders with customer names, totals, and statuses.
+- **[NEW] [view_order.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/view_order.php)**: Detailed view of an order with item breakdown and "Mark as Sent" controls.
+
+## Verification Plan
+
+### Automated Tests
+- Place a test order for multiple TCGs (Pokémon + One Piece).
+- Verify stock is deducted from both `pokemon_cards` and [onepiece_cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#153-160).
+- Verify the order appears in the Admin dashboard.
+
+### Manual Verification
+- Log in as admin, navigate to "Manage Orders".
+- Click "View" on a pending order.
+- Click "Mark as Sent" and verify status updates to 'Shipped'.

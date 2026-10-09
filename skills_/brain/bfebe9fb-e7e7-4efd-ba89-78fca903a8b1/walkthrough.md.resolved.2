@@ -1,0 +1,30 @@
+# Modernized Manual Payment Walkthrough
+
+We have successfully overhauled the manual payment flow to be more secure, faster for verification, and fully aligned with the **Coolex Aesthetic**.
+
+## 🎨 Premium Payment UI
+
+The new [Payment Page](file:///f:/UniServerZ/www/coolex_shop/application/views/checkout/payment.php) features:
+- **Glass-Card Containers**: Sleek, modern cards with subtle shadows.
+- **Numbered Steps**: A clear **1-2-3 guide** using red circles and bold typography to walk users through the process.
+- **Reference Number Field**: A dedicated, styled input for the **13-digit GCash Reference ID**.
+
+## 🛠️ Technical Improvements
+
+### 1. Data Capture
+- **[Checkout.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Checkout.php)**: The controller now captures both the `payment_receipt` image and the `payment_ref_no` text.
+- **Database**: The `orders` table has been upgraded with a new `payment_ref_no` column.
+
+### 2. Admin Verification
+- **[view_order.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/view_order.php)**: Admins now have a dedicated **"Payment Integrity Review"** block.
+- **Monospaced ID**: The Reference Number is displayed in a clear, high-contrast box for easy cross-referencing with GCash history.
+
+## ✅ Verification Results
+
+### Customer Experience
+> [!NOTE]
+> Customers are now explicitly guided to copy their Reference Number from GCash, reducing the number of "incomplete" submissions.
+
+### Admin Experience
+> [!IMPORTANT]
+> You no longer need to rely solely on the receipt image. You can copy the Reference Number directly from the order page to verify the transfer in your GCash app.

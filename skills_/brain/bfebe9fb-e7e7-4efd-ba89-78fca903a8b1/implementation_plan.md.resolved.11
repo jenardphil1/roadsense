@@ -1,0 +1,33 @@
+# Implementation Plan - Standardize Set Logo Icons
+
+The objective is to resolve broken image errors in TCG sets by standardizing the "Set Logo" display to use high-quality thematic icons instead of relying on external or potentially broken image URLs, following the design of the successful One Piece storefront.
+
+## User Review Required
+
+> [!IMPORTANT]
+> I will be replacing the set image thumbnails with thematic icons for each TCG category:
+> - **Disney Lorcana**: ✨ Sparkles (`fa-sparkles`)
+> - **Pokémon TCG**: ⚡ Bolt (`fa-bolt`)
+> - **Magic: The Gathering**: 🃏 Magic (`fa-magic`)
+> This ensures no more broken images will occur and creates a uniform, premium look across the Entire store.
+
+## Proposed Changes
+
+### [Storefront Views]
+
+#### [MODIFY] [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php)
+- Replace the `img` tag in `.set-logo-box` with a thematic `i` tag (`fa-sparkles`).
+- Standardize the CSS to match One Piece styling.
+
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php)
+- Replace the SVG/Fallback logic with a consistent thematic icon (`fa-quidditch` or `fa-magic`).
+
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) (Pokémon)
+- Replace the set logo image with a thematic Pokéball-style or Bolt icon (`fa-bolt`).
+
+## Verification Plan
+
+### Manual Verification
+- I will check the visual layout for Pokémon, Magic, and Lorcana category index pages.
+- Confirm that the "Fabled" set (The First Chapter) no longer shows an image error and uses the new ✨ Sparkles icon.
+- Verify that hover animations (scaling icons) work consistently.

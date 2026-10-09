@@ -1,0 +1,46 @@
+# TCG Storefront Integration: One Piece & Lorcana
+
+Successfully integrated Disney Lorcana and One Piece TCG as major categories in the Coolex Shop, maintaining full UI consistency and cart functionality.
+
+## ✨ Key Features Implemented
+
+### 1. One Piece TCG Integration
+- **Direct Data Sync**: Implemented a high-speed local JSON sync for One Piece, importing all sets and cards from [onepiece_cards.json](file:///f:/UniServerZ/www/coolex_shop/data/onepiece_cards.json).
+- **Premium Storefront**: Created a dedicated One Piece index, set, and card views. The design includes specialized stats like Power, Cost, and Counter, styled to match the premium Pokémon/Lorcana look.
+- **Admin Inventory**: Added a One Piece section to the Admin Dashboard allowing for manual pricing and stock management via AJAX.
+- **Cart & Checkout**: One Piece cards now correctly map to the cart system, enabling full checkout flow.
+
+### 2. Disney Lorcana Integration
+- **Local JSON Sync**: Processed over 1,000 cards from [lorcana.json](file:///f:/UniServerZ/www/coolex_shop/data/lorcana.json).
+- **UI Mirroring**: Ensured the Lorcana set view perfectly mirrors Pokémon and MTG designs (3-column grid, breadcrumbs, etc.).
+- **Inventory Control**: Implemented AJAX-based pricing and stock management for Lorcana cards.
+
+### 3. Order Management System (New!)
+- **Admin Order Tracking**: Added a central "Manage Orders" dashboard to see every customer checkout, including their name, email, and shipping address.
+- **Multi-TCG Fulfillment**: The checkout system now intelligently deducts stock from the correct category table (Pokémon, MTG, Lorcana, or One Piece).
+- **Status Manipulation**: Admins can now mark orders as "Pending", "Shipped", or "Cancelled" with a single click.
+
+### 4. Premium Admin Sidebar UI
+- **Modern 2-Column Layout**: Transformed the admin panel from a simple list of buttons into a professional dashboard with a fixed vertical sidebar.
+- **Quick Stats**: Added a dashboard summary showing Total Sales, Orders, and Customers with visual growth indicators.
+- **TCG Segmentation**: Unified the management of Pokémon, Magic, Lorcana, and One Piece under a single, cohesive navigation bar.
+
+### 5. Smart Inventory Search
+- **Live Filtering**: Added a real-time search bar to all inventory pages. Admins can now instantly filter cards by name within a set without reloading the page.
+- **Unified Controls**: Standardized the control panel (Set Selector + Search Bar + Status Badge) across all TCG collections.
+
+### 6. Unified Global Search
+- **Category-Aware Search**: The main header search bar now includes all four categories (Pokémon, Magic, Lorcana, One Piece).
+- **Intelligent Routing**: Selecting a category in the dropdown automatically routes your search to the correct storefront index with the appropriate filtering logic.
+- **Improved UX**: Added "Search Results" headers and "Clear Search" buttons to all category indices for a professional, easy-to-navigate experience.
+
+## 🛠️ Components Created/Updated
+
+- **One Piece**: [OnePiece_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/OnePiece_Import.php), [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php), [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php), [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php), [view_onepiece_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_card.php), [onepiece_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/onepiece_inventory.php)
+- **Lorcana**: [Lorcana_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Lorcana_Import.php), [Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php), [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php), [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php), [view_lorcana_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_card.php), [lorcana_inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/lorcana_inventory.php)
+- **Shared**: [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php), [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php), [Cart.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Cart.php), [megamenu.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/megamenu.php)
+
+## 🚀 How to Verify (One Piece)
+1. **Admin Home**: Visit the new [Admin Dashboard](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/index.php) to see the sidebar and stats.
+2. **Orders**: Go to **Manage Orders** to see the clean table layout.
+3. **Sync card**: Check any **Inventory** page (e.g., Pokémon) to see the new card-based control panel.

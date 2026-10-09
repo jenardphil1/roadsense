@@ -1,0 +1,33 @@
+# Implementation Plan - Fix Header Button Stacking
+
+The goal is to fix the issue where the "All Sets" button in the modernized headers is unclickable or unresponsive. This is caused by semi-transparent background graphics (absolute-positioned elements) overlapping the button in the CSS stacking order.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The fix involves adding a small CSS update to the header content areas to lift them above the background decorations. I will also check if the button should be made visible on smaller screens (mobile) to improve navigation, as it's currently hidden there.
+
+## Proposed Changes
+
+### [CSS Stacking Fixes]
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (Pokémon)
+- Add `position: relative; z-index: 5;` to the `d-flex` content container in the header.
+
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php) (Magic)
+- Add `position: relative; z-index: 5;` to the `d-flex` content container in the header.
+
+#### [MODIFY] [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php) (Lorcana)
+- Add `position: relative; z-index: 5;` to the `d-flex` content container in the header.
+
+#### [MODIFY] [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php) (One Piece)
+- Add `position: relative; z-index: 5;` to the `d-flex` content container in the header.
+
+#### [MODIFY] [view_custom_category.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_custom_category.php) (Custom)
+- Add `position: relative; z-index: 5;` to the `d-flex` content container in the header.
+
+## Verification Plan
+
+### Manual Verification
+- I will verify the clickability by testing the button hover state and click functionality.
+- Since I cannot physically click, I will ensure the generated HTML/CSS places the button in a superior stacking context.

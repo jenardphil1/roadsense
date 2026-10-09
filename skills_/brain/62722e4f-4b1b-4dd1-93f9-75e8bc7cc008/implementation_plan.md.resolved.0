@@ -1,0 +1,21 @@
+# Add Simple Readline Loop
+
+## Goal Description
+Implement a simple Read-Eval-Print Loop (REPL) in [Program.cs](file:///c:/Users/jenar/MyFirstProject/Program.cs) that reads user input and echoes it back until the user types "exit".
+
+## Proposed Changes
+
+### MyFirstProject
+
+#### [MODIFY] [Program.cs](file:///c:/Users/jenar/MyFirstProject/Program.cs)
+- Replace the "Hello, World!" print with a `while` loop.
+- Use `Console.ReadLine()` to get input.
+- Print the input back to the console.
+- Break the loop if input is "exit".
+
+## Verification Plan
+
+### Manual Verification
+- Run the application using `dotnet run`.
+- Type various strings to see them echoed.
+- Type "exit" to verify the application terminates.

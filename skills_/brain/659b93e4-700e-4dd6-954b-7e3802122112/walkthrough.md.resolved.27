@@ -1,0 +1,28 @@
+# Customer Profile & Orders Hub
+
+I have successfully replaced the generic "Dashboard" user dropdown menu link with a brand-new **Customer Profile Hub**. This page is designed to be the central location for users to check their account details and view their past orders.
+
+## Key Features Implemented
+
+### 1. New Profile Dropdown
+- The dropdown in the main navigation menu now properly reads "Profile" instead of "Dashboard", creating a more intuitive user experience.
+
+### 2. Industry-Standard Order History UI
+- A brand new page (`/Customer/profile`) has been created utilizing the premium `coolex_shop` aesthetic.
+- The `Order_model` was upgraded to perform complex cross-table indexing. When a customer views their orders, the system automatically checks the MTG, Pokémon, Lorcana, and One Piece databases to perfectly translate RAW card IDs into their actual human-readable card names!
+- Each order is displayed in a sleek, collapsible Accordion card showing:
+  - **Order ID & Date**
+  - **Status Badge** (Dynamic colors for Paid, Pending, Cancelled)
+  - **Total Cost**
+
+### 3. Deep-Dive Order Details
+When a user clicks on an order in their history, it smoothly expands to reveal:
+- The exact **Shipping Address** and **Phone Number** used for that specific transaction.
+- An itemized receipt of everything purchased.
+- Each item displays its category (with a unique icon), the specific card name, quantity purchased, and the line-item subtotal.
+
+## How to Test
+1. Make sure you are logged in using any of your customer test accounts.
+2. Click the user icon on the top right navigation bar.
+3. Click on the new **Profile** button.
+4. Browse your account details and click on any past orders (if that test account has made any block purchases) to see the items drop down!

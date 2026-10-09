@@ -1,0 +1,25 @@
+# Storefront Refinement: Global Catalog Mode & Live Pricing
+
+The storefront has been refined into a professional-grade **Catalog Mode** experience, prioritizing data visibility and price comparisons.
+
+## 1. Global Catalog Mode
+As requested, the "Add to Cart" functionality has been removed globally to transition the shop into a catalog-style browsing experience.
+- **Set Views**: Removed the cart buttons and replaced them with **"Catalog Only 🔍"** indicators.
+- **Card Details**: Replaced the primary purchase button with a professional **"Catalog Mode Only"** alert box explaining that the shop is currently for browsing only.
+
+## 2. Live Side-by-Side Pricing UI
+We've implemented a high-fidelity pricing comparison system on all card detail pages.
+- **Dual-Pricing Box**: A prominent two-column layout showing:
+  - **"Your Shop Price"**: The custom price you set in your admin panel.
+  - **"Live Market Price"**: Real-time data fetched directly from professional APIs.
+- **Multi-TCG Data**: 
+  - **Pokémon**: Live data fetched from **TCGDex (TCGPlayer/Cardmarket Market Prices)**.
+  - **Magic**: Live data fetched from the **Scryfall API (TCGPlayer USD)**.
+- **Visual Feedback**: The system automatically identifies the source (e.g., "TCGPlayer Market", "Scryfall TCGPlayer") and displays it alongside the live value.
+
+## 3. Aesthetic Improvements
+- **Uniform Design**: Catalog indicators use a consistent blue info style across both Pokémon and Magic categories.
+- **Simplified Set Cards**: Set cards on the homepage now focus exclusively on **"X Cards Available"** counts, following the removal of release dates.
+
+---
+**Your storefront is now a powerful, data-driven catalog that provides users with instant market context for every card!** 🚀

@@ -1,0 +1,69 @@
+# Implementation Plan - Navigation, 50m Alerts & Database Persistence
+
+This updated plan incorporates your feedback: English voice alerts, 50-meter proximity distance, and persistent data storage.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Database Choice**: I am proposing **SQLite (sqflite)** for the database. This will store the potholes locally on your phone so they persist even after you close the app. If you need a **shared** database (where all users see the same potholes), please let me know, as that would require Firebase or Supabase.
+
+> [!NOTE]
+> **Alert Distance**: The proximity alert is now set to **50 meters**. This provides more reaction time for drivers.
+
+## Proposed Changes
+
+### Dependencies & Setup
+
+#### [MODIFY] [pubspec.yaml](file:///c:/ssdd/flutter/pubspec.yaml)
+* Add `flutter_tts: ^4.2.2` (Voice)
+* Add `http: ^1.2.2` (Navigation APIs)
+* Add `sqflite: ^2.4.1` (Local Database)
+* Add `path: ^1.9.0` (Database path handling)
+
+---
+
+### Database Persistence System
+
+#### [NEW] [database_helper.dart](file:///c:/ssdd/flutter/lib/database_helper.dart)
+* Create a helper class to manage the SQLite database.
+* Table schema: `potholes`
+    * `id`: Integer Primary Key
+    * `latitude`: Double
+    * `longitude`: Double
+    * `image_path`: String
+    * `timestamp`: String
+
+#### [MODIFY] [main.dart](file:///c:/ssdd/flutter/lib/main.dart)
+* **On App Start**: Load all potholes from the database into the `_detectedPotholes` list.
+* **On Detection**: When `_sendToMap()` is called, save the new pothole to the database *before* adding it to the list.
+
+---
+
+### Proximity Alerts System (English, 50m)
+
+#### [MODIFY] [main.dart](file:///c:/ssdd/flutter/lib/main.dart)
+* **Initialize TTS**: Setup `FlutterTts` to use "en-US".
+* **Distance Logic**: 
+    * Increase `alertDistance` to `50.0`.
+    * Use `Geolocator.getPositionStream` to monitor distance to all database-loaded potholes.
+    * Trigger voice: "Warning: Pothole 50 meters ahead."
+
+---
+
+### Navigation (Point A to Point B)
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+* **Search UI**: Add a search bar at the top with a "Go" button.
+* **OSRM Routing**: Fetch and draw the route via OSRM GeoJSON.
+
+## Open Questions
+
+1. **Shared vs Local**: Is a local database (this phone only) enough, or do you need a central server so multiple people can report potholes?
+2. **Alert Frequency**: Should the app repeat the alert if you stay within 50m (e.g., every 10 seconds), or only say it once?
+
+## Verification Plan
+
+### Manual Verification
+* **Persistence Test**: Detect a pothole, close the app completely, reopen it, and verify the marker is still on the Map.
+* **Proximity Test**: Use a mock GPS to move within 50m of a saved pothole and listen for the English voice alert.
+* **Navigation Test**: Search for a destination and verify the blue route path appears.

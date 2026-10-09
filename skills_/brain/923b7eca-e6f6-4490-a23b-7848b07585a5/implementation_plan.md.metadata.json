@@ -1,0 +1,7 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Updated plan incorporating a separate lib/map_screen.dart file and automatic pothole GPS plotting based on AI detections.",
+  "updatedAt": "2026-04-15T13:34:17.041272400Z",
+  "version": "1",
+  "requestFeedback": true
+}

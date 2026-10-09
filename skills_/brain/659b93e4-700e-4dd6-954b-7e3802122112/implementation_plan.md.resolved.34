@@ -1,0 +1,43 @@
+# Convert Currency from USD to PHP (Updated)
+
+The objective is to standardize the shop on Philippine Peso (₱). API-sourced prices (Pokemon/MTG/Lorcana/One Piece) will be converted from USD/EUR to PHP (Rate: 1 USD = 56 PHP). Manual/Custom inventory inputs in the Admin panel will be treated as native PHP.
+
+## Proposed Changes
+
+### 1. Currency Helper Logic
+- Already implemented `application/helpers/currency_helper.php` with `format_php($amount, $is_usd = true)` and `convert_to_php($amount)`.
+- Already autoloaded in `autoload.php`.
+
+### 2. Frontend View Updates (PHP)
+- Batch replaced `$<?= number_format(...) ?>` with `<?= format_php(...) ?>`. 
+- For Pokemon, MTG, Lorcana, and One Piece (API-sourced), these use `format_php(..., true)`.
+- For Custom items, Checkout, Orders, and Cart, these use `format_php(..., false)`.
+
+### 3. Frontend View Updates (JavaScript)
+- **Pokemon (`view_card.php`)**: Update the `tcgdex` fetch script to multiply the `livePrice` by 56 and display it with `₱`.
+- **MTG (`view_mtg_card.php`)**: Update the `scryfall` fetch script to multiply the `usd` price by 56 and display it with `₱`.
+- **Lorcana (`view_lorcana_card.php`)**: Update any live price scripts if they exist (usually static for Lorcana/OnePiece).
+
+### 4. Controller Updates
+- **Cart (`Cart.php`)**: Already updated `Cart::add` to use `convert_to_php()` for API cards. This ensures that the math is done correctly before storage.
+- **Admin (`Admin.php`)**: Ensure that displayed revenue and order totals in the dashboard (which are now in PHP) are preceded by `₱`.
+
+### 5. Admin Panel UI
+- Replace remaining hardcoded `$` symbols in admin inventory views, order views, and "Add Product" forms with `₱`.
+
+## Open Questions
+
+> [!NOTE]
+> - Confirm the exchange rate of **1 USD = 56 PHP** is exactly what you want.
+> - Ensure you have already been inputting prices in PHP for your "Custom" items. If you were inputting them in USD, we will need to multiply those once-off.
+
+## Verification Plan
+
+### Automated Tests
+- None, manual verification required for visual and numeric correctness.
+
+### Manual Verification
+- Check Pokemon card detail page: Verify "Shop Price" is ~56x the original and shown with `₱`.
+- Check MTG card detail page: Verify "Live Price" (Scryfall) is shown in `₱` (Live conversion).
+- Check Cart: Add a $1 card, see "₱56.00" in total.
+- Check Admin: Revenue stats and inventory prices should consistently use `₱`.

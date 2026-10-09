@@ -1,0 +1,40 @@
+# Pokemon TCG Viewer Implementation Plan
+
+## Goal Description
+Build a beautiful UI in CodeIgniter 3 to display Pokemon TCG sets and cards using the local JSON data provided in `pokemon-tcg-data`. The UI will feature a modern, responsive design with grid layouts, utilizing glassmorphism and vibrant styling for a premium feel.
+
+## Proposed Changes
+
+### Configuration
+#### [MODIFY] [routes.php](file:///f:/UniServerZ/www/pokemon/application/config/routes.php)
+- Set default controller to `pokemon`.
+
+### Controller Layer
+#### [NEW] [Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php)
+- Creates a `Pokemon` controller.
+- `index()`: fetches all sets from the model and loads the `sets` view.
+- `cards($set_id)`: fetches cards for a specific set from the model and loads the `cards` view.
+
+### Model Layer
+#### [NEW] [Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php)
+- Defines methods to interact with the local JSON files.
+- `get_sets()`: reads [pokemon-tcg-data-master/pokemon-tcg-data-master/sets/en.json](file:///f:/UniServerZ/www/pokemon/pokemon-tcg-data-master/pokemon-tcg-data-master/sets/en.json) and decodes it.
+- `get_cards_by_set($set_id)`: reads `pokemon-tcg-data-master/pokemon-tcg-data-master/cards/en/{$set_id}.json` and decodes it.
+
+### View Layer
+#### [NEW] [header.php](file:///f:/UniServerZ/www/pokemon/application/views/templates/header.php)
+- HTML5 boilerplate with beautiful custom CSS to establish a premium app feel (custom fonts, dynamic backgrounds).
+#### [NEW] [footer.php](file:///f:/UniServerZ/www/pokemon/application/views/templates/footer.php)
+- Close out HTML.
+#### [NEW] [sets.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/sets.php)
+- UI to display a grid of all available sets (showing set logo/symbol, name, and release date). Interactive cards with hover micro-animations.
+#### [NEW] [cards.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/cards.php)
+- UI to display a grid of cards from the selected set. Includes a "Back to Sets" button and beautiful card presentations.
+
+## Verification Plan
+
+### Manual Verification
+- Since this project is in `UniServerZ\www\pokemon`, I will use the `browser_subagent` to navigate to `http://localhost/pokemon/` (where the local server is expected to be running).
+- Verify the Sets page loads and displays visually stunning components.
+- Click on a set (e.g., Base Set) and verify that it navigates to the Cards page.
+- Ensure all images load and the general aesthetic matches the premium requirement.

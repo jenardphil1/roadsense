@@ -1,0 +1,10 @@
+# Lorcana Import Task Progress
+
+- [Failed] Sync Lorcana Sets (http://localhost:81/coolex_shop/index.php/lorcana_import/sync_sets)
+- [Failed] Sync Lorcana Cards (http://localhost:81/coolex_shop/index.php/lorcana_import/sync_cards)
+- [ ] Report final results
+
+## Notes
+- `sync_cards` might take over a minute (1000+ cards).
+- Browser failed with error: "Chrome installation not found."
+

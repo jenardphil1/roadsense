@@ -1,0 +1,142 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+[0] (269,8)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	METRO-MANILA
+	arrow_drop_down
+[1] (614,8)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	BINONDO
+	arrow_drop_down
+[2] (907,8)<label class='el-checkbox customer-checked' />
+	[3] (804,10)<span  />
+		[4] (804,9)<span  />
+	[5] (881,8)<span >Item additional fee />
+Destination
+[6] (269,106)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[7] (269,95)<div class='q-field__control relative-position row no-wrap' />
+		[8] (253,95)<div  />
+			[9] (253,95)<div  />
+				[10] (128,95)<span >CEBU />
+				[11] (108,95)<input class='q-select__focus-target' id='f_099d3f34-3e29-49ab-a48d-6ec282d1d032' role='combobox' />
+		[12] (414,95)<div  />
+			[13] (418,95)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[14] (614,106)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--focused q-field--highlighted q-field--float q-field--dense q-field--with-bottom q-field--error' />
+	[15] (614,95)<div class='q-field__control relative-position row no-wrap text-negative' />
+		[16] (597,95)<div  />
+			[17] (597,95)<div  />
+				[18] (453,95)<input class='q-select__focus-target' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe' role='combobox' />
+		[19] (759,95)<div  />
+			[20] (762,95)<i class='q-select__dropdown-icon rotate-180 q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+	Please choose city
+[21] (907,106)<label class='el-checkbox customer-checked is-checked' />
+	[22] (804,108)<span  />
+		[23] (804,107)<span  />
+	[24] (847,106)<span >Item size />
+[25] (161,171)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard q-field--float q-field--with-bottom' />
+	[26] (149,160)<input class='q-field__native q-placeholder' id='f_34d82cd1-8559-452c-8104-924718984186' />
+	KG
+[27] (911,171)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard' />
+	length
+	[28] (922,160)<input class='q-field__native q-placeholder' id='f_a8054193-a405-4de7-a5b2-67b87ad71d81' />
+	CM
+Service type
+[29] (269,269)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[30] (269,258)<div class='q-field__control relative-position row no-wrap' />
+		[31] (253,258)<div  />
+			[32] (253,258)<div  />
+				[33] (117,258)<span >EZ />
+				[34] (108,258)<input class='q-select__focus-target' id='f_d5810aa8-fdb0-4877-ae05-4b768a05d056' role='combobox' />
+		[35] (414,258)<div  />
+			[36] (418,258)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Bag Specifications
+arrow_drop_down
+Service type
+EZ
+Weight
+1
+KG
+Shipping Fee
+PHP
+95.00
+Item additional fee
+0.00
+Search
+20th and 21st Floors, Ecoprime Building, 32nd Street corner 9th Avenue, Bonifacio Global City, Taguig City, Fourth District, National Capital Region (NCR), Philippines | www.jtexpress.ph
+Search
+Track & Trace
+Shipping Rates
+Shipping Days
+About Us
+Our Story
+News & Blogs
+Careers
+Services
+J&T Super
+International Shipping
+Plant Shipping
+Information
+FAQ
+Package Information
+Terms
+[37] (932,500)<div  />
+	[38] (932,486)<img  />
+	[39] (932,536)<p >Mobile />
+[40] (932,606)<div  />
+	[41] (932,592)<img  />
+	[42] (932,642)<p >Place Order />
+[43] (932,724)<div  />
+	[44] (932,724)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[45] (932,699)<img  />
+		[46] (932,762)<p >Customer Service />
+[47] (932,843)<div  />
+	[48] (932,829)<img  />
+	[49] (932,879)<p >TOP />
+[50] (614,442)<div class='q-menu q-position-engine scroll q-menu--square' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_lb' role='listbox' scrollable='true' />
+	BADIAN
+	BALAMBAN
+	[51] (605,130)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_6' role='option' />
+		[52] (605,130)<div  />
+			[53] (605,130)<div >BANTAYAN />
+	[54] (605,182)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_7' role='option' />
+		[55] (605,182)<div  />
+			[56] (605,182)<div >BARILI />
+	[57] (605,234)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_8' role='option' />
+		[58] (605,234)<div  />
+			[59] (605,234)<div >BOGO-CITY />
+	[60] (605,287)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_9' role='option' />
+		[61] (605,287)<div  />
+			[62] (605,287)<div >BOLJOON />
+	[63] (605,339)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_10' role='option' />
+		[64] (605,339)<div  />
+			[65] (605,339)<div >BORBON />
+	[66] (605,391)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_11' role='option' />
+		[67] (605,391)<div  />
+			[68] (605,391)<div >CARCAR-CITY />
+	[69] (605,444)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_12' role='option' />
+		[70] (605,444)<div  />
+			[71] (605,444)<div >CATMON />
+	[72] (605,496)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_13' role='option' />
+		[73] (605,496)<div  />
+			[74] (605,496)<div >CEBU-ALCANTARA />
+	[75] (605,549)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_14' role='option' />
+		[76] (605,549)<div  />
+			[77] (605,549)<div >CEBU-ALEGRIA />
+	[78] (605,601)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_15' role='option' />
+		[79] (605,601)<div  />
+			[80] (605,601)<div >CEBU-CARMEN />
+	[81] (605,653)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_16' role='option' />
+		[82] (605,653)<div  />
+			[83] (605,653)<div >CEBU-CITY />
+	[84] (605,706)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_17' role='option' />
+		[85] (605,706)<div  />
+			[86] (605,706)<div >CEBU-COMPOSTELA />
+	[87] (605,758)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_88cfbbe3-55dc-4a95-883f-af8c0ef1bcfe_18' role='option' />
+		[88] (605,758)<div  />
+			[89] (605,758)<div >CEBU-LILOAN />
+	CEBU-NAGA-CITY
+	CEBU-PILAR
+	CEBU-SAN-FERNANDO
+	CEBU-SAN-FRANCISCO
+
+</current_dom>

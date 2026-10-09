@@ -1,0 +1,10 @@
+# Gallery System Checklist
+
+- [ ] Create `Gallery_model.php` (Auto-creates `product_images` table).
+- [ ] Add `edit_images` route in `Admin.php` to load the gallery management UI.
+- [ ] Build `edit_images.php` Admin view allowing photo uploads and deletions.
+- [ ] Create upload/delete POST endpoints in `Admin.php`.
+- [ ] Fetch `$custom_images` inside `Store.php -> view_card()`.
+- [ ] Implement Amazon-style JS image swap and thumbnail rendering in `view_card.php` (Pokémon).
+- [ ] Refine the UI/UX based on testing.
+- [ ] Expand functionality to MTG, Lorcana, One Piece, and Custom Merch.

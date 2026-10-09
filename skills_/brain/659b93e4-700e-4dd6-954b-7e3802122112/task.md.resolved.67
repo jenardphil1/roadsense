@@ -1,0 +1,11 @@
+# Custom Merch Store Checklist
+
+- [ ] Add `custom_products` table initialization (ID, name, category, desc, price, stock, image_url).
+- [ ] Create `Custom_model.php` to handle database logic.
+- [ ] Update `Admin.php` controller to manage custom products (Add/Edit).
+- [ ] Create `add_custom.php` and `custom_inventory.php` admin views.
+- [ ] Implement image upload handling to `assets/images/custom_products/`.
+- [ ] Update `Store.php` controller for `custom_index`, `custom_category`, and `view_custom_product`.
+- [ ] Build the storefront views: `custom_index.php`, `view_custom_category.php`, `view_custom_product.php`.
+- [ ] Hook into `Order_model.php` to correctly support checkouts and order history queries.
+- [ ] Add "Custom Store" link to `megamenu.php`.

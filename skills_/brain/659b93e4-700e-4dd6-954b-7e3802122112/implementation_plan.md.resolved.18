@@ -1,0 +1,37 @@
+# Global TCG Search Modernization
+
+Improve the storefront search bar to support all four TCG categories (Pokémon, Magic, Lorcana, One Piece) with a unified dropdown and consistent filtering logic.
+
+## Proposed Changes
+
+### [Storefront System]
+
+#### [MODIFY] [header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php)
+- Remove `overflow: hidden` from the search `input-group` to prevent clipping the dropdown menu.
+- Apply `border-radius` directly to the `button` and `search button` to maintain the rounded look.
+- Ensure all TCG categories (Pokémon, Magic, Lorcana, One Piece) are present in the dropdown.
+
+#### [MODIFY] [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php)
+- Add "Search Results" header logic (consistent with Pokémon/Magic).
+- Add "Clear Search" button.
+- Implement empty state for search results.
+
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+- (Already planned) Ensure [onepiece_index](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#136-151) handles query.
+- Ensure [lorcana_index](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#99-113) and [onepiece_index](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#136-151) pass the `query` variable to their respective views.
+
+#### [MODIFY] [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php)
+- Enhance [get_active_onepiece_sets($query = NULL)](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php#10-29) to filter the result set using `LIKE` on the set name.
+
+#### [MODIFY] [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php)
+- Add a "Search Results for..." heading when a query is active.
+- Add a "Clear Search" button.
+
+## Verification Plan
+
+### Manual Verification
+- Navigate to the home page.
+- Use the search dropdown to select "Lorcana" and search for a set name.
+- Use the search dropdown to select "One Piece" and search for a set name.
+- Verify that "Pokémon" and "Magic" still function correctly.
+- Verify that the "Clear Search" button works on the One Piece results page.

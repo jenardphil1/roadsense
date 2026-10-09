@@ -1,0 +1,51 @@
+# MTG Database Schema Optimization and Integration Plan
+
+## Goal
+Optimize the MTG card database schema by replacing inefficient `TEXT` types with appropriate data types and normalizing the structure. This optimized schema will be integrated directly into the existing [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database in SQLyog to unify the store architecture.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The [assets/mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) file (152MB) is configured to create and use a separate [mtg](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#58-69) database. To merge it into your [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database, please follow these steps:
+
+1.  **Preparation**: Open [assets/mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) in a text editor.
+2.  **Manual Edit**: Comment out or delete the following lines at the top:
+    ```sql
+    CREATE DATABASE /*!32312 IF NOT EXISTS*/`mtg` ...;
+    USE `mtg`;
+    ```
+3.  **Import**: In SQLyog, select your [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database and run the modified [mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql). This will create the `mtg_cards_raw` table inside [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50).
+4.  **Optimization**: After the import finishes, run the `db/migrations/optimize_mtg_in_pokemon.sql` script (which I will provide) to transform the raw data into optimized tables.
+
+## Proposed Changes
+
+---
+
+### Database Schema
+
+#### [NEW] [optimize_mtg_in_pokemon.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/optimize_mtg_in_pokemon.sql)
+This script will:
+- Create normalized tables: [mtg_cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#82-89), `mtg_card_colors`, `mtg_card_types`, `mtg_card_subtypes`, and `mtg_card_keywords`.
+- Use `INSERT ... SELECT` with type casting (`CAST`, `CONVERT`) to move data from `mtg_cards_raw` to the new tables.
+- Add primary keys, foreign keys, and indexes for performance.
+- Rename the raw table to `mtg_cards_raw_old` once verification is complete.
+
+---
+
+### Application Logic
+
+#### [MODIFY] [Store_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php)
+Update the model to query the new [mtg_cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#82-89) table in the [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database.
+
+#### [MODIFY] [database.php](file:///f:/UniServerZ/www/coolex_shop/application/config/database.php)
+Remove the secondary [mtg](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#58-69) database configuration since all data will now be in [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50).
+
+## Verification Plan
+
+### Automated Tests
+- Run row count comparisons between `mtg_cards_raw` and [mtg_cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#82-89).
+- Execute sample queries to verify complex fields (colors, types) are correctly normalized.
+
+### Manual Verification
+- Verify the new tables appear in SQLyog under the [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) database.
+- Check that card details load correctly in the application UI.

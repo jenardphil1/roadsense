@@ -1,0 +1,79 @@
+[0] (84,43)<a class='navbar-brand d-flex align-items-center mr-0' href='//localhost:81/coolex_shop/index.php/Dashboard' />
+	[1] (44,43)<div  />
+		[2] (44,43)<span >CX />
+	[3] (96,43)<div  />
+		[4] (96,34)<span >COOLEX />
+		[5] (96,54)<span >COLLECTIBLES />
+[6] (196,43)<button class='btn btn-link text-white text-decoration-none dropdown-toggle px-4 fw-bold small opacity-75' id='categoryBtn'>Pokémon />
+[7] (358,43)<input aria-label='Search' class='form-control border-0 bg-transparent text-white px-3 shadow-none' id='searchInput' placeholder='Search the multiverse...' />
+[8] (503,43)<button class='btn btn-danger rounded-pill px-4 shadow-sm fw-bold'>🔍 />
+[9] (574,43)<a class='btn btn-outline-light text-white border-0 rounded-pill px-4 fw-bold small' href='//localhost:81/coolex_shop/index.php/Customer/login'>Sign In />
+[10] (627,43)<a class='btn btn-danger rounded-pill px-4 fw-bold shadow-sm small' href='//localhost:81/coolex_shop/index.php/Customer/register'>Register />
+[11] (675,43)<a class='btn btn-outline-light border-0 rounded-circle position-relative p-2 ml-3' href='//localhost:81/coolex_shop/index.php/Cart/view' />
+	[12] (675,41)<span >🛒 />
+[13] (51,112)<a class='nav-link' href='//localhost:81/coolex_shop/index.php/store/magic' id='magicMenu'>Magic />
+	[14] (64,113)<span >▼ />
+[15] (109,112)<a class='nav-link' href='//localhost:81/coolex_shop/index.php/store/pokemon' id='pokemonMenu'>Pokémon />
+	[16] (129,113)<span >▼ />
+[17] (187,112)<a class='nav-link' href='//localhost:81/coolex_shop/index.php/store/lorcana' id='lorcanaMenu'>Disney Lorcana />
+	[18] (221,113)<span >▼ />
+[19] (266,112)<a class='nav-link' href='//localhost:81/coolex_shop/index.php/store/onepiece' id='onepieceMenu'>One Piece />
+	[20] (287,113)<span >▼ />
+[21] (343,112)<a class='nav-link text-warning fw-bold' href='//localhost:81/coolex_shop/index.php/store/custom'>Custom Merch />
+	[22] (312,113)<i  />
+[23] (245,183)<a href='//localhost:81/coolex_shop/index.php/store'>Store />
+/
+[24] (309,183)<a href='//localhost:81/coolex_shop/index.php/store/magic'>Magic: The Gathering TCG />
+/
+All Expansions
+MASTER THE MULTIVERSE
+MAGIC: THE
+GATHERING
+The world's premier trading card game. Discover timeless classics
+and the newest expansions across the multiverse.
+Browse All Expansions
+4 set expansion cards currently active
+[25] (277,795)<a class='text-decoration-none' href='//localhost:81/coolex_shop/index.php/store/magic/set/C17' />
+	[26] (277,795)<div  />
+		[27] (277,740)<div  />
+			[28] (277,740)<img  />
+		[29] (277,883)<div  />
+			[30] (277,864)<div >C17 />
+			[31] (277,898)<div  />
+				[32] (248,898)<span >1 CARDS />
+					[33] (236,898)<i  />
+				[34] (320,898)<span >View />
+					[35] (329,898)<i  />
+[36] (426,795)<a class='text-decoration-none' href='//localhost:81/coolex_shop/index.php/store/magic/set/CMD' />
+	[37] (426,795)<div  />
+		[38] (426,740)<div  />
+			[39] (426,740)<img  />
+		[40] (426,883)<div  />
+			[41] (426,864)<div >CMD />
+			[42] (426,898)<div  />
+				[43] (397,898)<span >4 CARDS />
+					[44] (384,898)<i  />
+				[45] (469,898)<span >View />
+					[46] (477,898)<i  />
+[47] (574,795)<a class='text-decoration-none' href='//localhost:81/coolex_shop/index.php/store/magic/set/CP1' />
+	[48] (574,795)<div  />
+		[49] (574,740)<div  />
+			[50] (574,740)<div >CP1 />
+		[51] (574,883)<div  />
+			[52] (574,864)<div >CP1 />
+			[53] (574,898)<div  />
+				[54] (545,898)<span >2 CARDS />
+					[55] (532,898)<i  />
+				[56] (617,898)<span >View />
+					[57] (626,898)<i  />
+[58] (723,795)<a class='text-decoration-none' href='//localhost:81/coolex_shop/index.php/store/magic/set/STH' />
+	[59] (723,795)<div  />
+		[60] (723,740)<div  />
+			[61] (723,740)<img  />
+		[62] (723,883)<div  />
+			[63] (723,864)<div >STH />
+			[64] (723,898)<div  />
+				[65] (694,898)<span >3 CARDS />
+					[66] (681,898)<i  />
+				[67] (765,898)<span >View />
+					[68] (774,898)<i  />

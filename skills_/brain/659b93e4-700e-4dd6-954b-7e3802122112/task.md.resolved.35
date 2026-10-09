@@ -1,0 +1,19 @@
+# Multi-TCG Storefront Integration
+
+- [x] Research MTG raw table schema
+- [x] Create updated Implementation Plan
+- [x] Create normalization script [db/migrations/optimize_mtg_in_pokemon.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/optimize_mtg_in_pokemon.sql)
+- [x] User imports `mtg_cards_raw` into [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#26-39) DB
+- [x] Run normalization script
+- [x] Update Application Models & Config (MTG)
+- [x] Verify MTG Integration
+- [x] Categorize Storefront (TCGPlayer-style)
+- [x] Standardize UI and Navigation
+- [x] Dynamic Navigation Mega Menu
+- [x] Professional MTG Set Naming (REVERTED)
+- [x] Fix Multi-TCG Cart System
+- [x] UI Redesign (TCGPlayer Horizontal List)
+- [/] Refined Storefront Logic
+  - [ ] Restrict 'Add to Cart' for Magic Set C17
+  - [ ] Integrate Live Scryfall Pricing in Magic Card View
+  - [ ] Implement Side-by-Side Price Comparison UI

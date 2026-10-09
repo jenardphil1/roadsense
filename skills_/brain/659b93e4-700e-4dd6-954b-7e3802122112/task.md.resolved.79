@@ -1,0 +1,7 @@
+# Tasks: Restock on Cancellation
+
+- [x] **Modify `Order_model.php`** <!-- id: 1 -->
+    - [x] Update `update_order_status` to include restock/deduct logic. <!-- id: 2 -->
+- [x] **Verify Logic** <!-- id: 3 -->
+    - [x] Test status change to 'Cancelled' (restock). <!-- id: 4 -->
+    - [x] Test status change from 'Cancelled' (deduct). <!-- id: 5 -->

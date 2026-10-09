@@ -1,0 +1,10 @@
+# MTG Database Integration & Optimization
+
+- [x] Research MTG raw table schema
+- [x] Create updated Implementation Plan
+- [x] Create normalization script [db/migrations/optimize_mtg_in_pokemon.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/optimize_mtg_in_pokemon.sql)
+- [x] Notify user of manual import steps
+- [x] User imports `mtg_cards_raw` into [pokemon](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#39-50) DB (109,043 rows confirmed)
+- [/] Run normalization script
+- [ ] Update Application Models & Config
+- [ ] Verify Integration

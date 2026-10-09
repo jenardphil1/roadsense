@@ -1,0 +1,33 @@
+# Walkthrough - Admin Inventory Set Visibility
+
+I have successfully upgraded the Admin Inventory management system to display the **Set Name** for every card. This makes managing stock significantly easier, especially when using the "Show Entire Stocked Inventory" filter.
+
+## Changes Made
+
+### 1. Unified Database Joins
+Updated all TCG models (`Admin_model`, `Mtg_model`, `Lorcana_model`, and `OnePiece_model`) to perform a `LEFT JOIN` with their respective set tables. This ensures that every card retrieved now carries its parent set's name.
+
+### 2. Upgraded Admin Tables
+Added a new **SET** column to the following inventory panels:
+- **Pokémon Inventory**: Now includes card images and set tags.
+- **MTG Inventory**: Added set tags next to card details.
+- **Lorcana Inventory**: Integrated card images and set identity.
+- **One Piece Inventory**: Unified the layout with card images and set tags.
+
+### 3. Dynamic AJAX Rendering
+Updated the JavaScript logic in all views to handle the new `set_name` data. If a card belongs to an older or untracked set, it will display a neutral "Unknown Set" badge instead of leaving the column empty.
+
+---
+
+## Visual Verification
+
+### Pokémon Inventory
+![Pokemon Inventory](/C:/Users/jenar/.gemini/antigravity/brain/659b93e4-700e-4dd6-954b-7e3802122112/media__1774811624776.png)
+*Example of the new Pokémon layout with images and set tags.*
+
+---
+
+## How to Test
+1.  Go to **Admin > Pokémon/Magic/Lorcana/One Piece Inventory**.
+2.  Choose the filter: **"💎 -- Show My Entire Stocked Inventory --"**.
+3.  You will now see a clean list where every card clearly identifies which set it belongs to!

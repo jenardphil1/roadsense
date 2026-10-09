@@ -1,0 +1,1 @@
+{"name":"get_active_gcp_connection","description":"Returns active GCP project ID and region.","parameters":{"type":"object"}}

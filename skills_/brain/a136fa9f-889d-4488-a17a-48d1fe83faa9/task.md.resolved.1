@@ -1,0 +1,18 @@
+# Pothole Tracker App Tasks
+
+- [ ] **Project Setup**
+    - [/] Initialize Next.js project (Mobile-first config) <!-- id: 0 -->
+    - [ ] Clean up default boilerplate <!-- id: 1 -->
+    - [ ] Install dependencies (`leaflet`, `react-leaflet`) <!-- id: 2 -->
+- [ ] **Core Implementation**
+    - [ ] Create `MapComponent` with Leaflet <!-- id: 3 -->
+    - [ ] Implement Geolocation service to find user position <!-- id: 4 -->
+    - [ ] Create data model/state for storing Potholes (Local State for demo) <!-- id: 5 -->
+    - [ ] Implement "Report Pothole" interaction flow <!-- id: 6 -->
+- [ ] **UI/UX Design**
+    - [ ] Design mobile-friendly layout (CSS) <!-- id: 7 -->
+    - [ ] Create "Add Pothole" FAB (Floating Action Button) <!-- id: 8 -->
+    - [ ] Add smooth transitions and markers <!-- id: 9 -->
+- [ ] **Verification**
+    - [ ] Verify map rendering on resize <!-- id: 10 -->
+    - [ ] Verify marker addition flow <!-- id: 11 -->

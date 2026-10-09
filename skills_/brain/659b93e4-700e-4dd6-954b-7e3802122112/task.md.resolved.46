@@ -1,0 +1,14 @@
+# Disney Lorcana Integration
+
+- [x] Research Lorcana API structure
+- [x] Create updated Implementation Plan
+- [x] Draft Database Schema ([lorcana_schema.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/lorcana_schema.sql))
+- [x] Create Import Controller ([Lorcana_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Lorcana_Import.php))
+- [x] Create Model ([Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php))
+- [ ] User executes [lorcana_schema.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/lorcana_schema.sql) (Verification)
+- [ ] Run Import Tool (Sync Sets & Cards)
+- [ ] Update Navigation Mega Menu
+- [ ] Implement Lorcana Storefront controller
+- [ ] Create Lorcana Set Listing View
+- [ ] Create Lorcana Card Detail View
+- [ ] Verify TCG Cart Integration

@@ -1,0 +1,53 @@
+# Hybrid Azure Cloud Architecture for Pothole Detection
+
+Transforming the current standalone Flutter application into a collaborative, cloud-connected platform using Microsoft Azure.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Cost Implications**: Switching to Azure Maps and Azure Storage involves usage-based costs. While there are free tiers (e.g., Azure Maps 5,000 transactions/month), high-traffic apps will require a paid subscription.
+> **Dependency Change**: Moving to Azure Maps replaces the currently used Nominatim (OpenStreetMap) and OpenRouteService. This will require an Azure Subscription and an API Key.
+> **Privacy**: Pothole photos will now be stored in the cloud. We should discuss whether to include any user identification or anonymization.
+
+## Proposed Changes
+
+The transition will be modular, allowing for a phased implementation.
+
+### 1. Azure Maps Integration
+Replace current fragmented services (Nominatim/ORS/OSRM) with a unified Azure Maps solution.
+
+- **Fuzzy Search**: Replace `Nominatim` with [Azure Maps Search](https://learn.microsoft.com/en-us/rest/api/maps/search/get-search-fuzzy).
+- **Professional Routing**: Replace `ORS/OSRM` with [Azure Maps Route](https://learn.microsoft.com/en-us/rest/api/maps/route/get-route-directions).
+- **Custom Tiles**: Configure `flutter_map` to use Azure Maps tile layers for better styling and performance.
+
+### 2. Azure Blob Storage (Images)
+Enable uploading detected pothole images to the cloud.
+
+- Use the Azure Storage REST API to upload images captured via `camera` / `image_picker`.
+- Generate Short-lived SAS (Shared Access Signature) tokens for secure uploads from the device.
+- Update `PotholeMarker` to store a remote URL instead of a local file path.
+
+### 3. Azure Cosmos DB / SQL (Global Registry)
+Transition from local-only `sqflite` to a shared database.
+
+- **Shared Wisdom**: Potholes detected by one user become visible to all users on the map.
+- **Data Sync**: Implement a sync manager that fetches nearby potholes from Azure and stores a cache in `sqflite` for offline usage.
+
+### 4. Azure AI Vision (Secondary Verification)
+- When a pothole is uploaded, trigger an **Azure Function** that uses **Azure AI Vision** to double-check the image's classification.
+- This ensures that only true potholes (and not shadows or cracks) are shared with the community.
+
+---
+
+## Open Questions
+
+1. **Authentication**: Do we want to use **Azure AD B2C** to track which user reported which pothole?
+2. **Offline Support**: Should the app remain fully functional offline (using the current local model) and only sync when a connection is available?
+3. **Budget**: Are you looking to stay within the Azure Free tier limits?
+
+## Verification Plan
+
+### Manual Verification
+1. Verify that search results from Azure Maps are more accurate/responsive than Nominatim.
+2. Confirm that images appear in the Azure Portal's Blob Container after being "detected" in the app.
+3. Use two different "simulated" devices to ensure a pothole detected by one appears on the map of the other.

@@ -1,0 +1,36 @@
+# Integrate OpenStreetMap
+
+This plan outlines the steps to add an interactive OpenStreetMap to the app, allowing users to view a map and their current location alongside the AI Pothole Scanner.
+
+## Proposed Changes
+
+We will introduce a bottom navigation bar to switch between the Pothole Scanner and the new Map interface smoothly.
+
+### 1. Add Dependencies
+We need to add three essential packages to `pubspec.yaml`:
+- **`flutter_map`**: The core package for rendering OpenStreetMap tiles.
+- **`latlong2`**: Required for handling Latitude/Longitude map coordinates.
+- **`geolocator`**: To request GPS permissions and locate the user on the map.
+
+### 2. Architecture Updates (lib/main.dart)
+Modify `main.dart` to support multiple screens natively without interrupting the camera:
+- Wrap the main scaffold body in an `IndexedStack` based on a `_currentIndex` variable. The `IndexedStack` ensures the camera doesn't completely rebuild/destroy when we look at the map.
+- **Tab 0**: The existing Pothole Scanner UI.
+- **Tab 1**: A new `MapScreen` widget.
+- Add a `BottomNavigationBar` with icons for "Scanner" and "Map".
+
+### 3. Implement MapScreen Widget
+Create the `MapScreen` logic:
+- Render a `FlutterMap` widget using the generic OpenStreetMap public tile server (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`).
+- Add logic using `geolocator` to request user location and automatically pan the map to the user's current GPS position.
+
+### 4. Native Permissions (Android)
+Update `android/app/src/main/AndroidManifest.xml` to include location access permissions so that `geolocator` can function correctly.
+
+## User Review Required
+
+> [!IMPORTANT]  
+> The `geolocator` plugin requires native Location Permissions on Android. The app will prompt you for GPS access the first time you open the Map tab. I will inject these permissions into your Android configuration automatically.
+
+> [!NOTE]  
+> Do you want any specific map features right away, such as plotting a marker on the map whenever the AI detects a pothole, or just a basic map viewer for now?

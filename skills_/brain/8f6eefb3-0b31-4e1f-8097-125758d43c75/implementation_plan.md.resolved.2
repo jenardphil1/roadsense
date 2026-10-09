@@ -1,0 +1,38 @@
+# Implementation Plan - Improved Search & Suggestions
+
+This plan adds a "Google Maps style" search experience, where typing a location shows a list of possible matches to choose from.
+
+## Proposed Changes
+
+### UI Enhancement (Search Suggestions)
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+* **Search Results Logic**: 
+    - Change `_searchAndRoute` into a two-step process: `_performSearch` (gets the list) and `_selectResult` (starts the routing).
+    - Add a state variable `List<dynamic> _suggestions` to hold the Nominatim results.
+* **Dynamic Search Bar**:
+    - The bottom search bar will now expand upwards when you have suggestions.
+    - Add a `ListView.separated` to display the "Display Name" and "Type" (e.g., City, Street) of each suggestion.
+* **Selection Flow**:
+    - Tapping a suggestion will automatically:
+        1. Fill the search box with the full name.
+        2. Zoom to the location.
+        3. Fetch the OSRM route.
+        4. Close the suggestions list.
+
+### Routing Improvements
+
+* **Clear Path**: Add a small "X" button to the search bar to clear the current route and results.
+* **Error Handling**: Display better "No Route" messages if a specific suggestion can't be reached by car.
+
+## Open Questions
+
+1. **Search Trigger**: Would you like the list to appear **instantly while typing** (Real-time), or only after you press the **Search icon**? (Real-time feels better but uses more data/API requests).
+2. **Result Count**: How many suggestions should we show? (I recommend 5 for mobile screens).
+
+## Verification Plan
+
+### Manual Verification
+* Type "Manila" and verify a list of different Manila locations appears.
+* Tap one and verify the blue route line updates to that specific point.
+* Press the "X" button and verify the blue line disappears.

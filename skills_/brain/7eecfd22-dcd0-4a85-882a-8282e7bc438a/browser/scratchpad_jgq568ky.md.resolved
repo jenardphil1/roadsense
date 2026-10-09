@@ -1,0 +1,13 @@
+# Task: Verify Ecommerce-style Landing Page
+
+## Plan
+- [X] Open `http://localhost:81/coolex_shop/index.php/Store`. (Failed)
+- [ ] Verify "Best Sellers" section.
+- [ ] Verify category banners.
+- [ ] Capture screenshot of the top half of the page.
+- [ ] Verify layout and visibility.
+
+## Observations
+- Encountered consistent error while trying to open the browser: `failed to create browser context: failed to create browser instance: wrong CDP URL: invalid CDP URL`.
+- Tried 4 times but failed. 
+- Conclusion: Unable to complete task due to browser initialization failure.

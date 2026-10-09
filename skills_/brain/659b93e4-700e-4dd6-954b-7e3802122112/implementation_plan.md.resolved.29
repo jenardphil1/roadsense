@@ -1,0 +1,48 @@
+# Implementation Plan - Enhanced Customer Profiles
+
+This plan outlines the steps to upgrade account profiles, allowing customers to store and edit their shipping information (address, phone, etc.) directly on their profile page.
+
+## User Review Required
+
+> [!IMPORTANT]
+> - **New Fields**: I will be adding `phone`, `address`, `city`, `state`, and `zip_code` to the customer accounts.
+> - **Profile UI**: I will implement a sleek "Edit Profile" modal in the profile page so users don't have to leave the page to update their info.
+
+## Proposed Changes
+
+### 1. Database Schema Upgrade
+- Execute an `ALTER TABLE` query on the `customers` table to add the missing fields:
+    - `phone` (VARCHAR 20)
+    - `address` (TEXT)
+    - `city` (VARCHAR 50)
+    - `state` (VARCHAR 50)
+    - `zip_code` (VARCHAR 10)
+
+### 2. Model Enhancements
+#### [MODIFY] [Customer_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Customer_model.php)
+- Add `update_customer($user_id, $data)` to handle profile updates.
+- Add `get_customer_by_id($user_id)` to ensure we have the freshest data from the DB.
+
+### 3. Controller Logic
+#### [MODIFY] [Customer.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Customer.php)
+- Update `profile()` to fetch the latest data from the database instead of relying solely on the session.
+- Add `update_profile_action()`:
+    - Validate the inputs (phone, address, etc.).
+    - Update the database.
+    - Update the user's session data so the UI reflects changes immediately.
+
+### 4. UI Improvements
+#### [MODIFY] [profile.php](file:///f:/UniServerZ/www/coolex_shop/application/views/customer/profile.php)
+- **Visuals**: Add sections to the profile card for Address and Phone.
+- **Interactivity**: Add an "Edit Profile" button that triggers a Bootstrap Modal.
+- **Form**: Create the edit form inside the modal using a premium, clean design.
+
+## Verification Plan
+
+### Manual Verification
+1. **Login** as a customer.
+2. **Navigate** to "My Profile".
+3. **Verify** the new empty fields for Address/Phone are visible.
+4. **Click "Edit Profile"** and fill in the information.
+5. **Save Changes** and verify the page updates without errors.
+6. **Refresh the page** to ensure the data is persisted in the database.

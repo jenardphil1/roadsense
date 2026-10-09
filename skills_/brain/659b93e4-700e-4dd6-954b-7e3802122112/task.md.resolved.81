@@ -1,0 +1,6 @@
+# Tasks: Enhanced Customer Profiles
+
+- [x] **Database Setup**: Add profile columns (phone, address, etc.) to `customers` table. <!-- id: 1 -->
+- [x] **Model Enhancement**: Update `Customer_model` with `update_customer` and `get_customer_by_id`. <!-- id: 2 -->
+- [x] **Controller Logic**: Update `Customer` controller to handle profile updates. <!-- id: 3 -->
+- [x] **UI Implementation**: Revamp `profile.php` with new info fields and an "Edit Profile" modal. <!-- id: 4 -->

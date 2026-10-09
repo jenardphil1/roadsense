@@ -1,0 +1,14 @@
+# Tasks: Admin Management Links on Store Pages
+
+- [x] **Lorcana Views**
+    - [x] Update `lorcana_index.php` (Replace Import tool link) <!-- id: 1 -->
+    - [x] Update `view_lorcana_set.php` (Add Admin link for non-stocked) <!-- id: 2 -->
+- [x] **Magic Views**
+    - [x] Update `magic_index.php` (Add Admin link for non-stocked) <!-- id: 3 -->
+    - [x] Update `view_mtg_set.php` (Add Admin link for non-stocked) <!-- id: 4 -->
+- [x] **One Piece Views**
+    - [x] Update `onepiece_index.php` (Add Admin link for non-stocked) <!-- id: 5 -->
+    - [x] Update `view_onepiece_set.php` (Add Admin link for non-stocked) <!-- id: 6 -->
+- [x] **Pokémon Views**
+    - [x] Update `index.php` (Add Admin link for non-stocked) <!-- id: 7 -->
+    - [x] Update `view_set.php` (Add Admin link for non-stocked) <!-- id: 8 -->

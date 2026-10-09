@@ -1,0 +1,7 @@
+- [x] **Unify 'Back to Set' Buttons** (Completed)
+- [x] **Fix 'All Sets' Button Stacking** (Completed)
+- [ ] **Standardize Lorcana Set Icons (Fix Fabled Image Error)**
+  - [ ] Update `lorcana_index.php` CSS for set icons
+  - [ ] Update `lorcana_index.php` HTML to use `fa-sparkles`
+- [ ] **Verification**
+  - [ ] Confirm Lorcana set index shows ✨ icons and no broken images.

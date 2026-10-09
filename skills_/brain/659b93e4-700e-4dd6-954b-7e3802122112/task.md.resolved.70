@@ -1,0 +1,26 @@
+# Store-Wide Amazon Gallery Rollout Checklist
+
+- [ ] **Admin Core Updates**
+  - [ ] Refactor `Admin_model.php -> get_universal_card($id, $category)` to support mapping all primary keys (`uuid`, `unique_id`, etc.).
+  - [ ] Update `Admin.php -> edit_images($id, $category)` to pass the category string along.
+  - [ ] Update `Admin.php -> upload_images_action()` to preserve category correctly in redirects.
+  - [ ] Update `Admin.php -> delete_image_action()` to preserve category in redirects.
+  - [ ] Insert a `<input type="hidden" name="category">` tag into `admin/edit_images.php`.
+
+- [ ] **Admin Inventory Panel Links**
+  - [ ] Add `📷 Photos` action to `mtg_inventory.php`.
+  - [ ] Add `📷 Photos` action to `lorcana_inventory.php`.
+  - [ ] Add `📷 Photos` action to `onepiece_inventory.php`.
+  - [ ] Add `📷 Photos` action to `custom_inventory.php`.
+
+- [ ] **Storefront Controller Integration**
+  - [ ] Inject `Admin_model->get_card_images()` into `Store.php -> view_mtg_card()`.
+  - [ ] Inject `Admin_model->get_card_images()` into `Store.php -> view_lorcana_card()`.
+  - [ ] Inject `Admin_model->get_card_images()` into `Store.php -> view_onepiece_card()`.
+  - [ ] Inject `Admin_model->get_card_images()` into `Store.php -> view_custom_product()`.
+
+- [ ] **Store Front UI Renderings**
+  - [ ] Replicate 500px solid Amazon lens hover mechanics in `view_mtg_card.php`.
+  - [ ] Replicate Amazon hover mechanics in `view_lorcana_card.php`.
+  - [ ] Replicate Amazon hover mechanics in `view_onepiece_card.php`.
+  - [ ] Replicate Amazon hover mechanics in `view_custom_product.php`.

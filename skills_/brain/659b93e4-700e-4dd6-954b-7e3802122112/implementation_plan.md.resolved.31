@@ -1,0 +1,59 @@
+# Search Enhancement: prioritize Card Matches
+
+The search functionality currently only filters sets by their name. This plan will expand search to include individual card names across all TCG categories (Pokémon, Magic, Lorcana, One Piece) and ensure card matches are displayed prominently at the top of the results.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This change will affect all category index pages (Pokémon, Magic, etc.). When a search is performed, the layout will temporarily shift to show a "Matching Cards" grid followed by a "Matching Sets" grid.
+
+## Proposed Changes
+
+### [Component] Database Models
+We need to add new methods to each TCG-specific model to search for individual cards that are currently in stock.
+
+#### [MODIFY] [Store_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Store_model.php) [Pokémon]
+- Add `get_active_cards_by_query($query)`: Joins `cards` with `store_inventory` and `sets` to find in-stock cards matching the name.
+
+#### [MODIFY] [Mtg_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Mtg_model.php) [Magic]
+- Add `get_active_mtg_cards_by_query($query)`: Joins `mtg_cards` with `store_inventory` and `mtg_sets` to find in-stock cards matching the name.
+
+#### [MODIFY] [Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php) [Lorcana]
+- Add `get_active_lorcana_cards_by_query($query)`: Similar logic for Lorcana cards.
+
+#### [MODIFY] [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php) [One Piece]
+- Add `get_active_onepiece_cards_by_query($query)`: Similar logic for One Piece cards.
+
+---
+
+### [Component] Store Controller
+
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+- Update `pokemon_index()`, `magic_index()`, `lorcana_index()`, and `onepiece_index()` to:
+    1. Capture the `query` input.
+    2. If a query exists, call the new `get_active_cards_by_query()` model method.
+    3. Pass `$matching_cards` to the view.
+
+---
+
+### [Component] Frontend Views
+We need to update the category index views to render the new "Matching Cards" section before the sets.
+
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) [Pokémon]
+#### [MODIFY] [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php) [Magic]
+#### [MODIFY] [view_lorcana_category.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_category.php) [Lorcana]
+#### [MODIFY] [view_onepiece_category.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_category.php) [One Piece]
+
+- If `$matching_cards` is not empty, display a header "Matching Cards" followed by a responsive grid of card items (using the same "glass-card" style as the set view but optimized for cards).
+- Followed by the existing "Matching Sets" section.
+
+## Verification Plan
+
+### Manual Verification
+1. Open the store homepage.
+2. Select "Pokémon" in the search dropdown.
+3. Search for a specific card name (e.g., "Pikachu").
+4. **Verify**: Individual Pikachu cards appear in a grid at the top of the page.
+5. **Verify**: Sets containing "Pikachu" in their name (if any, like "Pikachu Special Set") appear below.
+6. Repeat for "Magic", "Lorcana", and "One Piece" categories.
+7. Perform an empty search and verify it shows all sets as normal.

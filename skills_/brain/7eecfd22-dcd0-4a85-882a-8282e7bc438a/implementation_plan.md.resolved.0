@@ -1,0 +1,46 @@
+# Implementation Plan: Deploy Website via Cloudflare Tunnel
+
+This plan outlines the steps to make your local **UniServerZ** website accessible over the internet using a **Cloudflare Tunnel**. This is the most secure and easiest method as it avoids port forwarding.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Temporary vs. Permanent URL:**
+> - By default, this plan starts with a **Quick Tunnel** (`*.trycloudflare.com`). This provides a temporary link that works as long as the tunnel is running.
+> - For a **Permanent URL** (e.g., `www.yourshop.com`), you will eventually need a registered domain name and a free Cloudflare account.
+
+> [!WARNING]
+> **Server Uptime:**
+> Your website will only be accessible while your PC is on and both UniServerZ and the tunnel program are running.
+
+## Proposed Changes
+
+### 1. Download Cloudflare Tunnel Tools
+I will download the official `cloudflared.exe` binary to your `f:\UniServerZ` folder. This tool is the "bridge" between your PC and the Cloudflare network.
+
+### 2. Verify Local Server Port
+Based on your logs, the server appears to be running on **Port 81** (`localhost:81`). I will confirm this is active before starting the tunnel.
+
+### 3. Launch the Tunnel
+I will run a command to generate a public link for you.
+- **Command:** `cloudflared tunnel --url http://localhost:81`
+- **Result:** You will receive a unique link (like `random-name.trycloudflare.com`) that anyone can use to visit your site.
+
+### 4. Setup for "Always On" (Optional)
+If you want the site to stay up permanently, I can show you how to:
+- Move the tunnel configuration to a "Service" so it starts with your PC.
+- (If you have a domain) Point your domain to this tunnel.
+
+## Open Questions
+
+1. **Do you already have a domain name** (e.g., `.com`, `.net`) or a Cloudflare account?
+2. **Is Port 81 the correct port** for your shop? (I can verify this once we start).
+
+## Verification Plan
+
+### Automated Tests
+- I'll use the browser tool to ping the local server `http://localhost:81/coolex_shop` to ensure it's up.
+- After starting the tunnel, I'll use the browser tool to visit the generated `*.trycloudflare.com` link.
+
+### Manual Verification
+- You will be able to visit the link on your mobile phone or another device to confirm it works globally.

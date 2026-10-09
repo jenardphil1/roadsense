@@ -1,0 +1,38 @@
+# Modernized Global Notifications Walkthrough
+
+We have successfully overhauled the global notification system to match the premium **Coolex Aesthetic**. This transition replaces static Bootstrap alerts with an "industry-standard" dynamic experience.
+
+## 🚀 Key Improvements
+
+- **SweetAlert2 Integration**: Implemented the powerful SweetAlert2 library for all system notifications.
+- **Icon Update**: Replaced basic emojis (✅, ⚠️) with professional **Font Awesome 6** icons.
+- **Non-Intrusive UX**: Success messages now appear as elegant **Toasts** in the top-right corner, ensuring they don't block the user's primary workflow.
+
+## 🎨 Coolex Aesthetic Alignment
+
+The notification system now perfectly matches your design tokens:
+
+| Feature | Implementation |
+| :--- | :--- |
+| **Typography** | **Outfit** font at **800 weight** with tight letter-spacing. |
+| **Container** | **Glass-card** styling with `1.25rem` border-radius and subtle shadow. |
+| **Buttons** | **.modern-btn** overrides for confirmation dialogs (uppercase, 12px radius, red glow). |
+| **Color** | Icons and buttons utilize the primary **Red Accent** (`#dc3545`). |
+| **Motion** | Transitions powered by a smooth `cubic-bezier(0.4, 0, 0.2, 1)`. |
+
+## 📁 Technical Changes
+
+- **[header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php)**:
+    - Added **SweetAlert2** and **Font Awesome 6** dependencies.
+    - Simplified the "Global Flash Messages" block by replacing hardcoded HTML with a JavaScript logic engine.
+    - Integrated custom CSS in the `<head>` to override default library styles.
+
+## 🛠️ Verification Results
+
+### Success Toast (e.g., Adding to Cart)
+> [!NOTE]
+> Appears in the top-right, auto-dismisses after 3.5 seconds, and features a red "Success" checkmark.
+
+### Error Modal (e.g., Login Failure)
+> [!IMPORTANT]
+> Appears as a centered modal with a professional red error icon and a "Coolex-style" confirmation button.

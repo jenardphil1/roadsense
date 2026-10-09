@@ -1,0 +1,44 @@
+# Implementation Plan - Unify 'Back to Set' Buttons
+
+The objective is to standardize the "Back" buttons across all TCG set views and the Custom Merchandise category view to ensure a consistent, premium user experience and fix any broken links.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The button text will be unified to **"All Sets"** for all categories, including Custom Merchandise, as per your request. If you prefer "All Collections" or "All Categories" for the merchandise section specifically, please let me know.
+
+## Proposed Changes
+
+### [Storefront Views]
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (Pokémon)
+- Standardize button text to "All Sets".
+- Ensure URL `site_url('store/pokemon')` is consistent.
+
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php) (Magic)
+- Standardize button text to "All Sets".
+- Style matching the other premium headers.
+
+#### [MODIFY] [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php) (Lorcana)
+- Standardize button text to "All Sets".
+- Style matching the indigo theme.
+
+#### [MODIFY] [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php) (One Piece)
+- Standardize button text to "All Sets".
+- Style matching the crimson theme.
+
+#### [MODIFY] [view_custom_category.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_custom_category.php) (Custom Merch)
+- Standardize button text to "All Sets".
+- Verify `site_url('store/custom')` functionality.
+
+## Verification Plan
+
+### Manual Verification
+- Click the "All Sets" button on each of the following pages:
+  - Pokémon Set Detail
+  - MTG Set Detail
+  - Lorcana Set Detail
+  - One Piece Set Detail
+  - Custom Category Detail
+- Confirm each redirects to the correct landing page for that category.
+- Confirm visual consistency (size, rounded-pill shape, glassmorphism background).

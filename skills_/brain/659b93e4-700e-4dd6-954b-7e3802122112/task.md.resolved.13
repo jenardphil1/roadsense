@@ -1,0 +1,28 @@
+# Bootstrap E-Commerce Redesign
+
+- [x] Download Bootstrap 5 CSS & JS into the `assets/` folder via terminal
+- [x] Redesign [store/index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) (Main Store & Sets list) using Bootstrap Navbar, Hero, Grid, and Cards
+- [x] Redesign [store/view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (Cards in Set) using Bootstrap Grid and Cards
+- [x] Redesign [store/search_results.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/search_results.php) using Bootstrap Grid and Cards
+- [x] Redesign [store/view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php) (Single Card Info) using Bootstrap rows, columns, badges, and styled tables
+
+# Admin Inventory Management Example
+- [x] Create search endpoint functionality in [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php)
+- [x] Create UI for search and stock management in [admin/add.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/add.php)
+- [x] Add save functionality to update `manual_price` and `stock` in [cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#51-61) table
+
+# Store Inventory Architecture (Normalization)
+- [ ] Create `store_inventory` table in SQLyog to hold `price` and `stock`
+- [ ] Update [admin/inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/inventory.php) to write to `store_inventory` instead of modifying the global [cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#51-61) table
+- [ ] Update Store Controller to perform SQL JOINs to display active inventory to customers
+
+# Global Templating Architecture
+- [x] Create [views/templates/header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php) with Bootstrap Navigation
+- [x] Create [views/templates/footer.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/footer.php)
+- [x] Refactor Controllers to load header/footer automatically
+
+# Shopping Cart Checkout Architecture
+- [ ] Create `orders` and `order_items` tables in MySQL
+- [ ] Load the CodeIgniter Cart Library in config
+- [ ] Add "Add to Cart" functionality to Store Controller
+- [ ] Build `checkout` processing endpoint to write PHP Session Carts permanently to the Database

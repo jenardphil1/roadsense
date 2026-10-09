@@ -1,0 +1,131 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+Track & Trace
+Shipping Rates
+Shipping Days
+Find Branches
+Local Rates
+International Rates
+Origin
+[0] (266,219)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[1] (266,208)<div class='q-field__control relative-position row no-wrap' />
+		[2] (258,208)<div  />
+			[3] (258,208)<div  />
+				[4] (205,208)<span >BULACAN />
+				[5] (188,208)<input class='q-select__focus-target' id='f_1dc129c2-0135-4209-949c-040da2ab05d4' role='combobox' />
+		[6] (336,208)<div  />
+			[7] (338,208)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[8] (432,219)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[9] (432,208)<div class='q-field__control relative-position row no-wrap' />
+		[10] (424,208)<div  />
+			[11] (424,208)<div  />
+				[12] (398,208)<span >BULACAN-SANTA-MARIA />
+				[13] (354,208)<input class='q-select__focus-target' id='f_7aa985dd-73f9-4a26-9b25-412fff195ee9' role='combobox' />
+		[14] (503,208)<div  />
+			[15] (504,208)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[16] (574,219)<label class='el-checkbox customer-checked' />
+	[17] (524,221)<span  />
+		[18] (524,220)<span  />
+	[19] (562,219)<span >Item additional fee />
+Destination
+[20] (266,314)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[21] (266,304)<div class='q-field__control relative-position row no-wrap' />
+		[22] (258,304)<div  />
+			[23] (258,304)<div  />
+				[24] (225,304)<span >AGUSAN-DEL-NORTE />
+				[25] (188,304)<input class='q-select__focus-target' id='f_f2e8f992-11b9-4d3b-b2f4-2310d0ae05e9' role='combobox' />
+		[26] (336,304)<div  />
+			[27] (338,304)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[28] (432,314)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--focused q-field--highlighted q-field--float q-field--dense q-field--with-bottom q-field--error' />
+	[29] (432,304)<div class='q-field__control relative-position row no-wrap text-negative' />
+		[30] (424,304)<div  />
+			[31] (424,304)<div  />
+				[32] (354,304)<input class='q-select__focus-target' id='f_74c6ce76-d073-42ec-902d-7006daac528a' role='combobox' />
+		[33] (503,304)<div  />
+			[34] (504,304)<i class='q-select__dropdown-icon rotate-180 q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+	Please choose city
+[35] (574,314)<label class='el-checkbox customer-checked is-disabled'>Item size />
+	[36] (524,316)<span  />
+	Item size
+[37] (214,378)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard q-field--float q-field--with-bottom q-field--disabled' />
+	KG
+Service type
+[38] (266,473)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[39] (266,462)<div class='q-field__control relative-position row no-wrap' />
+		[40] (258,462)<div  />
+			[41] (258,462)<div  />
+				[42] (192,462)<span >EZ />
+				[43] (188,462)<input class='q-select__focus-target' id='f_a33d1eb2-ed70-48a3-a0ef-f1119de958c6' role='combobox' />
+		[44] (336,462)<div  />
+			[45] (338,462)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Bag Specifications
+Small (<=3KG)
+close
+arrow_drop_down
+Service type
+EZ
+Weight
+1
+KG
+Shipping Fee
+PHP
+70.00
+Item additional fee
+0.00
+Total Amount
+PHP
+70.00
+Search
+[46] (967,515)<div  />
+	[47] (967,502)<img  />
+	[48] (967,550)<p >Mobile />
+[49] (967,617)<div  />
+	[50] (967,604)<img  />
+	[51] (967,652)<p >Place Order />
+[52] (967,733)<div  />
+	[53] (967,733)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[54] (967,708)<img  />
+		[55] (967,769)<p >Customer Service />
+[56] (967,848)<div  />
+	[57] (967,834)<img  />
+	[58] (967,883)<p >TOP />
+[59] (432,350)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_0' role='option' />
+	[60] (432,350)<div  />
+		[61] (432,350)<div >AGUSAN-DEL-NORTE-BUENAVISTA />
+[62] (432,401)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_1' role='option' />
+	[63] (432,401)<div  />
+		[64] (432,401)<div >AGUSAN-DEL-NORTE-CARMEN />
+[65] (432,452)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_2' role='option' />
+	[66] (432,452)<div  />
+		[67] (432,452)<div >AGUSAN-DEL-NORTE-MAGALLANES />
+[68] (432,503)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_3' role='option' />
+	[69] (432,503)<div  />
+		[70] (432,503)<div >AGUSAN-DEL-NORTE-SANTIAGO />
+[71] (432,553)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_4' role='option' />
+	[72] (432,553)<div  />
+		[73] (432,553)<div >BUTUAN-CITY />
+[74] (432,604)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_5' role='option' />
+	[75] (432,604)<div  />
+		[76] (432,604)<div >CABADBARAN-CITY />
+[77] (432,655)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_6' role='option' />
+	[78] (432,655)<div  />
+		[79] (432,655)<div >JABONGA />
+[80] (432,706)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_7' role='option' />
+	[81] (432,706)<div  />
+		[82] (432,706)<div >KITCHARAO />
+[83] (432,757)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_8' role='option' />
+	[84] (432,757)<div  />
+		[85] (432,757)<div >LAS-NIEVES />
+[86] (432,807)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_9' role='option' />
+	[87] (432,807)<div  />
+		[88] (432,807)<div >NASIPIT />
+[89] (432,858)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_10' role='option' />
+	[90] (432,858)<div  />
+		[91] (432,858)<div >REMEDIOS-T.-ROMUALDEZ />
+[92] (432,909)<div class='q-item q-item-type row no-wrap q-item--clickable q-link cursor-pointer q-manual-focusable' id='f_74c6ce76-d073-42ec-902d-7006daac528a_11' role='option' />
+	[93] (432,909)<div  />
+		[94] (432,909)<div >TUBAY />
+
+</current_dom>

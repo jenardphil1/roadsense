@@ -1,0 +1,6 @@
+- [ ] `[ ]` Add `product_condition` to `custom_products` table via `Custom_model.php`
+- [ ] `[ ]` Update `Admin` controller with `save_custom` field and new `edit_custom` / `update_custom` methods
+- [ ] `[ ]` Update `add_custom.php` view with Condition dropdown
+- [ ] `[ ]` Create `edit_custom.php` view for modifying existing merchandise
+- [ ] `[ ]` Update `view_custom_product.php` (Storefront) to display the correct condition
+- [ ] `[ ]` Verify all changes

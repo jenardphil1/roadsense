@@ -1,0 +1,1 @@
+{"name":"list_resource_templates","description":"Lists all supported resource URI templates by Context MCP.","parameters":{"type":"object"}}

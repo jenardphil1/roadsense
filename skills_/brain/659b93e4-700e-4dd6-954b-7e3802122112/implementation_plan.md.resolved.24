@@ -1,0 +1,28 @@
+# Implementation Plan: Store-Wide Gallery Rollout
+
+The user wants to deploy the fully tested, zoomed photo-gallery functionality from the Pokémon integration out to **all** product lines currently missing it.
+
+## Proposed Changes
+
+### 1. Model Updates (Admin Backend)
+The current gallery upload system natively assumes any passed `card_id` belongs to the Pokémon database `cards`.
+- **[MODIFY] `Admin_model.php`**: Upgrade `get_raw_card()` into a universal parser (`get_universal_card($id, $category)`). This will dynamically scan `mtg_cards`, `lorcana_cards`, `onepiece_cards`, or `custom_products` using its respective primary keys depending on the category passed, ensuring the Admin "Edit Photos" screen works and displays the correct item title.
+
+### 2. Admin Controller Updates
+- **[MODIFY] `Admin.php`**: Reconfigure the `edit_images()` and `upload_images_action()` functions to explicitly accept and forward the `$category` identifier alongside the `$card_id`.
+
+### 3. Inventory UI Unlocks
+We need to add the "📷 Photos" launch button to the admin tables!
+- **[MODIFY] `admin/mtg_inventory.php`**, **`lorcana_inventory.php`**, **`onepiece_inventory.php`**, and **`custom_inventory.php`**: Inject the `href="<?= site_url('Admin/edit_images/' . card.id . '/mtg') ?>"` action buttons into the JavaScript table rendering logic.
+
+### 4. Storefront Logic Injection
+Fetch the uploaded photos and inject the Amazon-layout to the storefront pages!
+- **[MODIFY] `Store.php`**: Hook `$this->Admin_model->get_card_images($id)` into the individual viewing controllers (`view_mtg_card`, `view_lorcana_card`, `view_onepiece_card`, `view_custom_product`).
+- **[MODIFY] `view_mtg_card.php`, `view_lorcana_card.php`, `view_onepiece_card.php`, `view_custom_product.php`**: Implement the locked `500px` height wrapper, the `overflow: hidden` bounding box, the thumbnail mapping logic, and the perfectly smooth `.getBoundingClientRect` coordinate javascript magnifier tool we just refined for Pokémon.
+
+---
+
+> [!CAUTION]
+> The only minor limitation: the gallery feature currently assumes independent card IDs. So long as a Custom Keychain does not accidentally use the exact same ID as a Lorcana ID (e.g. `TFC-001`), the photos will remain separate. This is extremely unlikely to ever happen since TCG sets use wildly different unique alphanumeric ID structures.
+
+Let me know if this implementation plan is approved and I will rapidly execute it block by block!

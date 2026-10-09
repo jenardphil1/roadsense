@@ -1,0 +1,7 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Consolidating route selection and smart optimization into a single master button on the right, removing the bottom route cards for a cleaner UI.",
+  "updatedAt": "2026-04-19T06:00:05.982881200Z",
+  "version": "8",
+  "requestFeedback": true
+}

@@ -1,0 +1,7 @@
+- [ ] Update state variables in `_MapScreenState` for multiple routes
+- [ ] Refactor `_calculateRoute` to request alternative routes from ORS
+- [ ] Create `_processRoutes` to evaluate and score multiple alternatives
+- [ ] Update `PolylineLayer` to render multiple routes with different styles
+- [ ] Implement Route Selection UI (Horizontal Cards)
+- [ ] Ensure navigation logic (`_checkPotholeProximity`, banner) follows the selected route
+- [ ] Verify functionality with manual testing

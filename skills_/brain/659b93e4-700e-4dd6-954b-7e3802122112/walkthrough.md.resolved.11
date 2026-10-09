@@ -1,0 +1,19 @@
+# Storefront Refinement: Listing-Only Catalog & Extended Pricing
+
+The storefront has been refined to balance clean browsing with convenient checkout.
+
+## 1. Listing-Only Catalog Mode
+As clarified, we have isolated the **"Catalog Mode"** to the set listing pages.
+- **Set Listing Pages**: These pages now hide the "Add to Cart" buttons, encouraging users to click into the card details for a more immersive experience. These are now labeled with **"Catalog Only 🔍"**.
+- **Card Detail Pages**: The "Add to Cart" buttons have been **restored** to all individual card detail pages. This allows your customers to complete their purchases after viewing the full card details and live pricing.
+
+## 2. Professional Live Pricing
+We've maintained the dual-pricing comparison on all card details:
+- **Shop Price vs. Live Market Price**: Displayed side-by-side for both Pokémon and Magic cards.
+- **Real-Time Data**: Fetched from Scryfall (Magic) and TCGDex (Pokémon).
+
+## 3. Stability & Bug Fixes
+- **Solved**: Fixed a PHP Notice related to the missing `number` property in some Pokémon sets, ensuring the storefront remains crash-proof even with partial database data.
+
+---
+**Your storefront is now perfectly balanced—clean set listings that lead to detailed, purchase-ready card pages!** 🚀

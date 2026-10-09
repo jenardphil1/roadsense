@@ -1,0 +1,20 @@
+- `[ ]` **Phase 1: Global CSS (modern.css)**
+    - `[ ]` Add "Tiny Uppercase Eyebrow" utility class
+    - `[ ]` Standardize `.glass-card` radius and shadow
+    - `[ ]` Add `.modern-badge` variants
+
+- `[ ]` **Phase 2: Storefront Redesign**
+    - `[ ]` Redesign Card Pages (`view_card.php`, `view_mtg_card.php`, etc.)
+    - `[ ]` Redesign Set Pages (`view_set.php`, `view_mtg_set.php`, etc.)
+    - `[ ]` Standardize Breadcrumbs and Headers
+
+- `[ ]` **Phase 3: Admin Dashboard Redesign**
+    - `[ ]` Modernize Stat Cards in `admin/index.php`
+    - `[ ]` Modernize Category/Navigation cards
+    - `[ ]` Update Dashboard Header layout
+
+- `[ ]` **Phase 4: Admin Inventory & Management**
+    - `[ ]` Modernize `pokemon_inventory.php` (Card-wrapped tables)
+    - `[ ]` Modernize `mtg_inventory.php`
+    - `[ ]` Modernize `manage_orders.php`
+    - `[ ]` Update Admin Sidebar (`admin/sidebar.php`)

@@ -1,0 +1,7 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "This implementation plan outlines the migration of the map-related services (Search, Routing, and Tile Layers) from open-source/third-party providers to Microsoft Azure Maps. This will provide a more responsive and professional mapping experience within the $100 credit budget.",
+  "updatedAt": "2026-04-19T02:16:06.008344Z",
+  "version": "2",
+  "requestFeedback": true
+}

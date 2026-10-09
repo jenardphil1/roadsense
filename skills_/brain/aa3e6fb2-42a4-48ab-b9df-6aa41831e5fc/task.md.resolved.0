@@ -1,0 +1,6 @@
+- [x] Integrate `flutter_compass` for device orientation
+- [/] Implement Low-Pass Filter for smooth rotation
+- [ ] Update `map_screen.dart` to support mode cycling (Standby -> Follow -> Navigation)
+- [ ] Refine `_startFollowing` and `_toggleFollowMode` logic
+- [ ] Update Navigation UI icons and feedback
+- [ ] Verify rotation and following on map

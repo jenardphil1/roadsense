@@ -1,0 +1,25 @@
+# Pokemon TCG UI Development
+
+## 1. Data Analysis (Completed)
+- [x] Inspect sets folder to understand data structure.
+- [x] Inspect cards folder to understand data structure.
+
+## 2. Backend Implementation (Completed)
+- [x] Create [Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php) and [Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php) controller.
+- [x] Configure routes and layout rendering.
+
+## 3. Frontend Implementation (Completed)
+- [x] Set up app layout, header, footer with glassmorphic styling.
+- [x] Create `sets_list` and `cards_list` grids.
+- [x] Create `card_details` specific page.
+
+## 4. API Migration: TCGDex & Caching (Current)
+- [ ] **Remove** all Market Price badges and fetch logic from the [cards.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/cards.php) grid page (prevent API flooding/browser crashing).
+- [ ] **Migrate** [card_details.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/card_details.php) to fetch from `api.tcgdex.net` instead of `api.pokemontcg.io`.
+- [ ] **Implement LocalStorage Cache** in [card_details.php](file:///f:/UniServerZ/www/pokemon/application/views/pokemon/card_details.php) to save prices across page loads and avoid redundant API calls.
+- [ ] Map the TCGDex `pricing` data structure to the UI badge system.
+
+## 5. Verification
+- [ ] Load the Base Set grid to verify no prices are fetched (loads instantly).
+- [ ] Click a card to view details, verify the TCGDex price fetches correctly.
+- [ ] Refresh the page to verify the price loads instantly from LocalStorage instead of a new fetch.

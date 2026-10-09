@@ -1,0 +1,51 @@
+# Disney Lorcana Integration Plan
+
+Integrate Disney Lorcana as a third major TCG alongside Pokémon and Magic: The Gathering. This will include a full catalog, real-time-capable data structure, and cart integration.
+
+## Proposed Changes
+
+### Database Layer
+Create dedicated tables for Lorcana cards and sets to maintain high performance and data integrity.
+
+#### [NEW] [lorcana_schema.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/lorcana_schema.sql)
+- `lorcana_cards`: Stores all card data (name, cost, strength, willpower, rarity, etc.).
+- `lorcana_sets`: Stores set definitions (ID, Name, Set Number).
+
+### Infrastructure
+Create an automated import tool to populate the local database from the official Lorcana API.
+
+#### [NEW] [Lorcana_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Lorcana_Import.php)
+- Controller to fetch `https://api.lorcana-api.com/cards/all`.
+- Logic to upsert data into `lorcana_cards` and `lorcana_sets`.
+
+#### [NEW] [Lorcana_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Lorcana_model.php)
+- Methods to retrieve sets, cards by set, and individual card details.
+- Stock and pricing management logic.
+
+### Storefront UI
+Implement professional set and card views matching the TCGPlayer-style design.
+
+#### [NEW] [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php)
+- Balanced 3-column grid for Lorcana card listings.
+- Proper mapping of Lorcana-specific attributes (Inks, Strength, Willpower).
+
+#### [NEW] [view_lorcana_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_card.php)
+- Detailed card view with Lorcana attributes.
+- "Add to Cart" integration.
+
+### Navigation
+Update the site-wide navigation to include the new game.
+
+#### [MODIFY] [megamenu.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/megamenu.php)
+- Add "Disney Lorcana" category with dynamic set listing.
+
+## Verification Plan
+
+### Automated Tests
+1. **Import Test**: Run the import controller and verify the `lorcana_cards` table population.
+2. **UI Test**: Navigate to the Lorcana section and verify set/card rendering.
+3. **Cart Test**: Verify Lorcana cards can be added to and removed from the cart.
+
+### Manual Verification
+- Confirm image rendering from Lorcana-api.com.
+- Verify that Lorcana-specific fields (Cost, Inkable) display correctly.

@@ -1,0 +1,9 @@
+- [x] **Unify 'Back to Set' Buttons** (Completed in previous turn)
+- [ ] **Fix 'All Sets' Button Stacking (Clickability)**
+  - [ ] Add `position: relative; z-index: 5;` to `view_set.php` (Pokémon)
+  - [ ] Add `position: relative; z-index: 5;` to `view_mtg_set.php` (Magic)
+  - [ ] Add `position: relative; z-index: 5;` to `view_lorcana_set.php` (Lorcana)
+  - [ ] Add `position: relative; z-index: 5;` to `view_onepiece_set.php` (One Piece)
+  - [ ] Add `position: relative; z-index: 5;` to `view_custom_category.php` (Custom Merch)
+- [ ] **Verification**
+  - [ ] Confirm hover effects work (indicating the cursor is no longer blocked).

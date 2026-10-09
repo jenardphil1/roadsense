@@ -1,0 +1,38 @@
+# Customer Profile Page Implementation
+
+This plan outlines the steps to add a new user profile page where customers can view their personal details and order history, replacing the generic "Dashboard" dropdown link.
+
+## Proposed Changes
+
+### Controller & Model Updates
+
+#### [MODIFY] `application/models/Order_model.php`
+- Add a new method `get_orders_by_customer($customer_id)` to query the `orders` table specifically for the logged-in customer's ID, sorted by ID descending (newest first).
+
+#### [MODIFY] `application/controllers/Customer.php`
+- Add a `profile()` method.
+- Add route protection (redirect to login if `$this->session->userdata('user_id')` is not set).
+- Load `Order_model` and fetch the user's orders.
+- Load the header, a new `customer/profile` view, and the footer.
+
+---
+
+### UI & View Updates
+
+#### [MODIFY] `application/views/templates/header.php`
+- In the user dropdown menu, change the link that currently points to `site_url('Dashboard')` (labeled "Dashboard") to point to `site_url('Customer/profile')` and label it "Profile".
+
+#### [NEW] `application/views/customer/profile.php`
+- Create a modern, premium layout matching the `coolex_shop` aesthetic.
+- Include a sidebar or top section displaying user details (Name, Email).
+- Include a main section displaying an "Order History" table/cards, listing order ID, date/time, status, total cost, and shipping address.
+
+## Open Questions
+
+- Should the profile page also list the specific items within each order immediately, or is a concise high-level list (Order ID, Status, Total) sufficient for now?
+
+## Verification Plan
+### Manual Verification
+- Log in as a customer.
+- Open the user dropdown click "Profile".
+- Verify the Profile page loads securely and displays the user's name and any previous orders they've made.

@@ -1,0 +1,11 @@
+# Disney Lorcana Integration
+
+- [x] Research Lorcana API structure
+- [x] Integrate Disney Lorcana into the store
+    - [x] Database Schema and Migration (lorcana_sets, lorcana_cards)
+    - [x] Local JSON Data Sync (Import tool)
+    - [x] Update Mega Menu Navigation
+    - [x] Frontend: Lorcana Storefront (Index, Set, Card views)
+    - [x] Checkout: Lorcana Cart Integration
+    - [x] Admin: Lorcana Inventory Management (Price/Stock)
+- [x] Verify TCG Cart Integration

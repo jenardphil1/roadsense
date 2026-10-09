@@ -1,0 +1,53 @@
+# Smart Route Optimization & 'Whole Road' Analysis
+
+This plan outlines the implementation of a comprehensive "Whole Road" analysis and a smart route optimizer that actively avoids high-pothole areas by requesting new paths from the mapping service.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Lane Optimization**: I will implement logic to determine if a pothole is on the **left or right side** of your path. The app will then provide "Lane Guidance" (e.g., "Stay in the Right Lane") to help you navigate around obstacles within the same road.
+> **Scan Radius (70m)**: As confirmed, the scan will cover the entire width of the road to ensure we catch all lane-specific hazards.
+
+
+
+## Proposed Changes
+
+### Map Screen Component
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **'Whole Road' & Lane Scan**:
+    - Increase search radius to **70m**.
+    - For each pothole, determine its "Lane" (Left or Right) relative to the route polyline using cross-product math.
+    - Add `lanePreference` to the route evaluation (scoring routes based on how many "unavoidable" full-width potholes they have).
+
+- **Smart Optimization & Lane Guidance**:
+    - **Method `_getLaneGuidance()`**: A new method to look 100m ahead and suggest the safest lane based on upcoming pothole positions.
+    - **Optimization**: Use `avoid_polygons` to dodge large clusters, and the "Lane Guidance" for individual potholes within a road.
+
+
+
+- **UI Updates**:
+    - **Enhanced Nav Pill**: Add a "Stay Left/Right" indicator to the top navigation chip when a pothole is ahead in a specific lane.
+    - **✨ Smart Optimize Button**: A prominent button in the route picker to trigger full path avoidance.
+    - **Route Cards**: Show "Smoothness Health" and "Best Lane" information.
+
+
+
+---
+
+## Open Questions
+
+- **Optimization Trigger**: Should the app automatically try to find an optimized route *every* time you search, or only when you manually click "Optimize"?
+- **Polygon Type**: Should the avoided areas be small "dots" on the map, or should we group them into larger "high-risk blocks"?
+
+## Verification Plan
+
+### Automated Tests
+- Test clustering logic to ensure it doesn't generate too many polygons.
+- Verify ORS response when `avoid_polygons` is included.
+
+### Manual Verification
+- Search for a route known to have many potholes.
+- Click "Smart Optimize".
+- Verify that the resulting route is different and avoids the previously identified pothole locations.

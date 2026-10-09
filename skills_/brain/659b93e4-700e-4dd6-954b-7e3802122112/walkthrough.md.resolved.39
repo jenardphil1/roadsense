@@ -1,0 +1,29 @@
+# Walkthrough: Pokémon Card UI Alignment
+
+I have updated the Pokémon Set View to match the modern, premium design of the Sets Landing Page. This ensures a consistent visual experience as users navigate from browsing expansions to viewing specific cards.
+
+## Changes Made
+
+### 1. Card Layout & Media
+-   **Height & Padding:** Standardized the card media box height to `260px` with generous padding for a cleaner, "museum-style" presentation.
+-   **Image Logic:** Switched to a standard aspect ratio treatment that prevents image stretching.
+-   **Premium Hover:** Implemented a `scale(1.12)` zoom with a `cubic-bezier` timing function for a smooth, high-end feel when hovering over cards.
+
+### 2. Typography & Badges
+-   **Unified Branding:** Card titles now use the `fw-black` uppercase style consistent with the sets page.
+-   **Rarity Pills:** Replaced the generic badges with custom `rarity-pill` components (pale red background with bold red text) to match the category's color scheme.
+
+### 3. Action Bar & Pricing
+-   **Subtle Pricing:** Introduced a `price-strip` at the bottom of each card with clear labels and bold primary values.
+-   **Quick Add Button:** Redesigned the "Add" button into a circular, shadowed icon that changes to the dark branding color on hover.
+
+## Visual Comparison (Conceptual)
+
+- **Previous:** Standard bootstrap cards with generic red buttons.
+- **New:** Modern, borderless-feel cards with elevated shadows, integrated pricing, and refined typography.
+
+## Verification Results
+
+- Verified HTML validity within the CodeIgniter loop.
+- Confirmed CSS stacking contexts are correct (cards now pop to the front on hover without clipping).
+- Verified that the "ADD" button functional flow remains intact.

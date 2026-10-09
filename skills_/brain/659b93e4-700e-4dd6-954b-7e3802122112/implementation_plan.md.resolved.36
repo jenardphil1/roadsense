@@ -1,0 +1,38 @@
+# Implementation Plan: Unified Premium Card View
+
+The goal is to apply the "After" design improvements from the Pokémon card page to the remaining TCG categories. This will standardize the UI across Magic: The Gathering, One Piece, and Lorcana while preserving category-specific data (like MTG Mana costs or One Piece Power/Counter stats).
+
+## User Review Required
+
+> [!IMPORTANT]
+> I will be updating the visual style and HTML structure of three files. All existing functionality (Add to Cart, Live Price Fetching, and Card Specific Stats) will be preserved but styled to match the new "Premium Red" design system.
+
+## Proposed Changes
+
+### [Component] TCG Card Views
+
+#### [MODIFY] [view_mtg_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_card.php)
+-   **CSS:** Import 'Outfit' font and apply the new design tokens (`--coolex-red`, `--coolex-dark`, etc.).
+-   **Header:** Replace breadcrumbs with the Hero Banner (Red Gradient).
+-   **Layout:** Wrap content in the new `.product-container` and `.main-image-card` panels.
+-   **Preservation:** Mantain the Scryfall live price JS logic and MTG specs (Mana Cost, P/T).
+
+#### [MODIFY] [view_onepiece_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_card.php)
+-   **CSS:** Align with the new design system.
+-   **Layout:** Implement the `.card-page-hero` and updated `.spec-grid`.
+-   **Preservation:** Maintain the color-coded badges (Red/Blue/Green etc.) and One Piece specific stats (Cost, Power, Counter).
+
+#### [MODIFY] [view_lorcana_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_card.php)
+-   **CSS:** Align with the new design system.
+-   **Layout:** Standardize Hero and Product Panel.
+-   **Preservation:** Maintain Lorcana stats (Ink cost, Strength, Willpower).
+
+## Verification Plan
+
+### Automated Tests
+- I will verify the HTML structure of each file after editing to ensure no broken tags.
+
+### Manual Verification
+- **Visual Check**: Open each TCG category's card view (MTG, One Piece, Lorcana).
+- **Functionality Check**: Verify that "ADD TO CART" works on all pages.
+- **Data Check**: Ensure game-specific stats (like Power or Mana Cost) are still displaying correctly in the new grid layout.

@@ -1,0 +1,6 @@
+{
+  "artifactType": "ARTIFACT_TYPE_WALKTHROUGH",
+  "summary": "Walkthrough of the `mtg.sql` import into the `pokemon` database. Includes verification of the table existence and record count.",
+  "updatedAt": "2026-03-25T10:28:14.129532Z",
+  "version": "1"
+}

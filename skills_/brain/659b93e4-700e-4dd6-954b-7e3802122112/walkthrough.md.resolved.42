@@ -1,0 +1,19 @@
+# Walkthrough: Breadcrumb Alignment
+
+I have updated the layout of the Pokémon card detail page to ensure the breadcrumb navigation ("Store / Pokémon TCG / ...") is perfectly aligned with the rest of the product content.
+
+## Changes Made
+
+### [Pokémon Card Detail](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+-   **Integrated Breadcrumb**: Moved the breadcrumb navigation (`nav.breadcrumb-custom`) from outside the white panel to **inside** the `product-container`.
+-   **Perfect Alignment**: By placing it inside the container, it now automatically inherits the same `4rem` padding as the card image and title, ensuring a perfectly straight vertical line of content.
+-   **Maintained Logic**: Wrapped the new structure correctly in the `card_info` existence check to ensure the page remains robust.
+-   **Visual Polish**: Kept the `mb-4` spacing to provide a clean transition between the navigation and the main product grid.
+
+## Verification Results
+
+| Test | Status |
+|---|---|
+| Alignment Check | ✅ Breadcrumb starts exactly where the card name and image start |
+| Logic Integrity | ✅ PHP tags are balanced and the page loads correctly |
+| Mobile View | ✅ Breadcrumb remains responsive and clean inside the panel |

@@ -1,0 +1,21 @@
+# Pokemon TCG UI - Walkthrough
+
+## Overview
+I have successfully built a beautiful, responsive user interface using CodeIgniter 3 to display Pokemon TCG sets and cards using your local JSON data.
+
+### Features Implemented
+1. **Model Layer ([Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php))**: Added methods to parse [sets/en.json](file:///f:/UniServerZ/www/pokemon/pokemon-tcg-data-master/pokemon-tcg-data-master/sets/en.json) and `cards/en/{set_id}.json`.
+2. **Controller Layer ([Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php))**: Added endpoints `/pokemon` (for Sets) and `/pokemon/cards/{id}` (for Cards).
+3. **Routing**: Updated [config/routes.php](file:///f:/UniServerZ/www/pokemon/application/config/routes.php) to set the default controller to `pokemon`.
+4. **View Layer & UI**: 
+   - Created a modern, glassmorphic UI using custom CSS and the "Outfit" Google Font.
+   - Added grid layouts for both Sets and Cards views.
+   - Incorporated hover animations and visual polish to provide a premium feel.
+
+### How to Verify
+Since my automated browser environment doesn't have Google Chrome installed, I could not capture a screenshot of the UI running. However, the local PHP server is running.
+
+1. Open your browser.
+2. Navigate to: `http://localhost:8080` (or your UniServerZ local domain path like `http://localhost/pokemon`).
+3. You should see a stunning "Pokemon TCG Explorer" page listing all the sets.
+4. Click on any set (e.g., Base Set) to see its cards load with similar visual flair.

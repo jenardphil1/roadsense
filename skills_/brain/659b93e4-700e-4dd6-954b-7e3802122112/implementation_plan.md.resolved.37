@@ -1,0 +1,30 @@
+# Implementation Plan: Cleaner Card Detail UI
+
+The user found the red hero banner on the card detail page to be too overwhelming ("big red box"). This plan removes that banner and reintegrates the product information into a more balanced, professional white panel layout.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This change will remove the red gradient header. The card name and set information will move into the main white content area, similar to standard high-end e-commerce product pages.
+
+## Proposed Changes
+
+### [Component] Pokémon Card Detail View
+
+#### [MODIFY] [view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+-   **CSS Cleanup:** Remove the `.card-page-hero` styles and its pseudo-elements (`::before`, `::after`).
+-   **HTML Structure:** 
+    - Delete the `card-page-hero` div (Lines 79-91).
+    - Ensure the breadcrumb remains at the top for navigation.
+    - Enhance the layout within the `product-container` so the card title and rarity feel integrated and premium without the external banner.
+-   **Visual Polish:** Adjust padding and margins to ensure the transition from breadcrumb to product panel feels seamless.
+
+## Verification Plan
+
+### Automated Tests
+- Non-breaking UI change; no automated tests required. I will verify HTML tag balance.
+
+### Manual Verification
+- **Visual Check**: Open a Pokémon card page and verify the "big red box" is gone.
+- **Layout Check**: Verify the card title, price, and "Add to Cart" button are still perfectly aligned and legible.
+- **Functionality**: Ensure the quantity stepper and zoom still work perfectly.

@@ -1,0 +1,8 @@
+# Customer Profile Page Checklist
+
+- [ ] Modify `Order_model.php` to fetch orders for a specific customer ID.
+- [ ] Modify `Customer.php` controller to add a `profile()` method with authentication and data fetching.
+- [ ] Modify `header.php` to update the dropdown link from "Dashboard" to "Profile".
+- [ ] Create `application/views/customer/profile.php` view.
+- [ ] Implement an industry-standard UI for checking order histories, including nested items per order.
+- [ ] Verify the UI visually and test the profile access logic logs out an unauthenticated user.

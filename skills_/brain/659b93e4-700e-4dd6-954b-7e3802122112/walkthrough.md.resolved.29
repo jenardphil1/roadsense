@@ -1,0 +1,19 @@
+# Global Product Image Galleries 🖼️
+
+Your multi-image gallery uploading mechanism is now globally active across **every single product category in your shop**! 
+
+## 1. Universal Admin Control
+We upgraded the backend `Admin_model.php` router. It now universally dynamically detects if the product you are editing is a Pokemon card, an MTG UUID, Lorecana, or a Custom Keychain. 
+You can access the `📷 Photos` button directly from:
+- Admin -> Magic: The Gathering
+- Admin -> Disney Lorcana
+- Admin -> One Piece
+- Admin -> Custom Inventory
+
+## 2. Jitter-Free Amazon Zoom Lens 🔍
+All 5 of your individual storefront product viewers now sport the Amazon-style hover lens system. 
+- The image wrapper is explicitly locked to `500px` height using `display: flex; overflow: hidden`.
+- The Javascript binds its coordinate calculations against the *invisible bounding box* rather than the image itself, guaranteeing **zero screen shaking or layout jumps** when zooming.
+- Clicking any of the thumbnails seamlessly animates the chosen photo into the primary display box.
+
+Your storefront image displays are now truly premium grade.

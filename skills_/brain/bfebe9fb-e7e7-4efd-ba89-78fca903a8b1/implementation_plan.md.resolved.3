@@ -1,0 +1,45 @@
+# Implementation Plan: Improved Manual Payment & Smart Shipping
+
+This plan outlines the enhancements to the **Coolex Shop** checkout process, focusing on more reliable manual payment verification and a fairer shipping fee structure.
+
+## User Review Required
+
+> [!IMPORTANT]
+> This change introduces a **Reference Number** requirement for manual GCash payments and a **Shipping Region** selector. This will slightly change the checkout flow but will significantly reduce manual verification errors.
+
+## Proposed Changes
+
+### [Database & Models]
+
+#### [MODIFY] [Order_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php)
+- Update `create_order` to accept and store `shipping_region` and `shipping_fee`.
+- Ensure the `orders` table has the necessary columns: `payment_ref_no`, `shipping_region`, and `shipping_fee`.
+
+### [Checkout Engine]
+
+#### [MODIFY] [Checkout.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Checkout.php)
+- **Place Order**: Replace the hardcoded `280.00` shipping fee with a dynamic lookup based on the selected region.
+- **Confirm Payment**: Capture the `payment_ref_no` from the user's input and store it in the database alongside the receipt screenshot.
+
+### [Frontend Modernization]
+
+#### [MODIFY] [checkout/index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/checkout/index.php)
+- Add a **Shipping Region** dropdown in the shipping information section.
+- **Dynamic Updates**: Use a small JavaScript snippet to update the "Order Summary" total whenever the region changes.
+  - *Example Rates*: Metro Manila (₱80), Luzon (₱150), Visayas/Mindanao (₱200).
+
+#### [MODIFY] [checkout/payment.php](file:///f:/UniServerZ/www/coolex_shop/application/views/checkout/payment.php)
+- Add a dedicated input field for the **GCash Reference Number**.
+- Improve the "Steps Guide" to explicitly mention the importance of providing this number for faster verification.
+
+## Open Questions
+
+- **Specific Rates**: Are the suggested rates (₱80, ₱150, ₱200) acceptable for your TCG shop, or would you like different values?
+- **Column Names**: Are you comfortable with me adding `payment_ref_no`, `shipping_region`, and `shipping_fee` to your `orders` table automatically?
+
+## Verification Plan
+
+### Manual Verification
+- **Checkout Process**: Verify that selecting "Metro Manila" changes the final total at the bottom of the page in real-time.
+- **Payment Verification**: Submit an order and enter a dummy Reference Number, then verify in the database (or admin panel) that both the Ref No. and Receipt are captured correctly.
+- **Admin Review**: Ensure the admin view shows these new fields for easier order processing.

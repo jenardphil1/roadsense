@@ -1,0 +1,5 @@
+- `[x]` Install `flutter_map`, `latlong2`, and `geolocator` dependencies
+- `[x]` Inject GPS Location Permissions into Android manifest
+- `[x]` Create `lib/map_screen.dart` with dedicated map logic
+- `[x]` Refactor `lib/main.dart` to introduce a Bottom Navigation Bar
+- `[x]` Hook the AI Detection engine into `geolocator` to automatically push coordinates to the map.

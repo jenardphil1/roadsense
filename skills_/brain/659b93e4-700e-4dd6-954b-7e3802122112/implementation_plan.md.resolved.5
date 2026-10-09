@@ -1,0 +1,38 @@
+# Multi-TCG Categorized Storefront Implementation Plan
+
+The goal is to transform the unified database into a categorized storefront with an intuitive TCGPlayer-style URL structure (e.g., `/Store/pokemon` and `/Store/magic`).
+
+## Proposed Changes
+
+### 1. Database Schema Enhancement
+- **[MODIFY] store_inventory**: Add a `category` column to explicitly differentiate between types of cards.
+  ```sql
+  ALTER TABLE `store_inventory` ADD COLUMN `category` VARCHAR(50) DEFAULT 'pokemon' AFTER `card_id`;
+  UPDATE `store_inventory` SET `category` = 'magic' WHERE card_id REGEXP '^[a-f0-9]{8}-';
+  ```
+
+### 2. Application Routing
+- **[MODIFY] routes.php**: Define SEO-friendly categorized routes.
+  ```php
+  $route['store/pokemon'] = 'Store/index';
+  $route['store/pokemon/set/(:any)'] = 'Store/view_set/$1';
+  $route['store/pokemon/card/(:any)'] = 'Store/view_card/$1';
+  $route['store/magic'] = 'Store/magic';
+  $route['store/magic/set/(:any)'] = 'Store/view_mtg_set/$1';
+  $route['store/magic/card/(:any)'] = 'Store/view_mtg_card/$1';
+  ```
+
+### 3. Model Refactoring
+- **[MODIFY] Store_model.php**: Update all queries to include `WHERE category = 'pokemon'`.
+- **[MODIFY] Mtg_model.php**: Update all queries to include `WHERE category = 'magic'`.
+
+### 4. Controller Refactoring
+- **[MODIFY] Admin.php**: Ensure [save_inventory_item](file:///f:/UniServerZ/www/coolex_shop/application/models/Admin_model.php#41-53) passes the correct category when adding new items.
+- **[MODIFY] Store.php**: Update links in views to point to the new categorized URLs.
+
+## Verification Plan
+
+### Manual Verification
+- Browse to `/Store/pokemon` and verify only Pokémon sets appear.
+- Browse to `/Store/magic` and verify only Magic sets appear.
+- Add a new card to inventory in the Admin panel and verify it appears in the correct category.

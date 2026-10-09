@@ -1,0 +1,111 @@
+<current_dom_explanation>
+This is a temporary snapshot of the current page's DOM structure. The DOM will change if you navigate to or interact with another page. Use a tool like browser_get_dom to capture and preserve the DOM in your trajectory if needed for later reference.
+</current_dom_explanation>
+<current_dom>
+Track & Trace
+Shipping Rates
+Shipping Days
+Find Branches
+Local Rates
+International Rates
+Origin
+[0] (266,219)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[1] (266,208)<div class='q-field__control relative-position row no-wrap' />
+		[2] (258,208)<div  />
+			[3] (258,208)<div  />
+				[4] (205,208)<span >BULACAN />
+				[5] (188,208)<input class='q-select__focus-target' id='f_1dc129c2-0135-4209-949c-040da2ab05d4' role='combobox' />
+		[6] (336,208)<div  />
+			[7] (338,208)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[8] (432,219)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[9] (432,208)<div class='q-field__control relative-position row no-wrap' />
+		[10] (424,208)<div  />
+			[11] (424,208)<div  />
+				[12] (398,208)<span >BULACAN-SANTA-MARIA />
+				[13] (354,208)<input class='q-select__focus-target' id='f_7aa985dd-73f9-4a26-9b25-412fff195ee9' role='combobox' />
+		[14] (503,208)<div  />
+			[15] (504,208)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[16] (574,219)<label class='el-checkbox customer-checked' />
+	[17] (524,221)<span  />
+		[18] (524,220)<span  />
+	[19] (562,219)<span >Item additional fee />
+Destination
+[20] (266,314)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[21] (266,304)<div class='q-field__control relative-position row no-wrap' />
+		[22] (258,304)<div  />
+			[23] (258,304)<div  />
+				[24] (197,304)<span >ABRA />
+				[25] (188,304)<input class='q-select__focus-target' id='f_f2e8f992-11b9-4d3b-b2f4-2310d0ae05e9' role='combobox' />
+		[26] (336,304)<div  />
+			[27] (338,304)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[28] (432,314)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[29] (432,304)<div class='q-field__control relative-position row no-wrap' />
+		[30] (424,304)<div  />
+			[31] (424,304)<div  />
+				[32] (382,304)<span >ABRA-DOLORES />
+				[33] (354,304)<input class='q-select__focus-target' id='f_74c6ce76-d073-42ec-902d-7006daac528a' role='combobox' />
+		[34] (503,304)<div  />
+			[35] (504,304)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[36] (574,314)<label class='el-checkbox customer-checked is-disabled'>Item size />
+	[37] (524,316)<span  />
+	Item size
+[38] (214,378)<label class='q-field q-validation-component row no-wrap items-start price-input q-input q-field--standard q-field--float q-field--with-bottom q-field--disabled' />
+	KG
+Service type
+[39] (266,473)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense q-field--with-bottom' />
+	[40] (266,462)<div class='q-field__control relative-position row no-wrap' />
+		[41] (258,462)<div  />
+			[42] (258,462)<div  />
+				[43] (192,462)<span >EZ />
+				[44] (188,462)<input class='q-select__focus-target' id='f_a33d1eb2-ed70-48a3-a0ef-f1119de958c6' role='combobox' />
+		[45] (336,462)<div  />
+			[46] (338,462)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+Bag Specifications
+[47] (432,462)<label class='q-field q-validation-component row no-wrap items-start q-select q-field--auto-height q-select--without-input q-select--without-chips q-select--single q-field--standard q-field--float q-field--dense' />
+	[48] (432,462)<div class='q-field__control relative-position row no-wrap' />
+		[49] (418,462)<div  />
+			[50] (418,462)<div  />
+				[51] (378,462)<span >Small (<=3KG) />
+				[52] (354,462)<input class='q-select__focus-target' id='f_d105a33a-386c-4b3d-9e39-e20a6bd13666' role='combobox' />
+		[53] (489,462)<div  />
+			[54] (491,462)<i class='cursor-pointer q-icon notranslate material-icons' role='presentation'>close />
+		[55] (504,462)<div  />
+			[56] (504,462)<i class='q-select__dropdown-icon q-icon notranslate material-icons' role='presentation'>arrow_drop_down />
+[57] (500,651)<span >Search />
+20th and 21st Floors, Ecoprime Building, 32nd Street corner 9th Avenue, Bonifacio Global City, Taguig City, Fourth District, National Capital Region (NCR), Philippines | www.jtexpress.ph
+Search
+Track & Trace
+Shipping Rates
+Shipping Days
+About Us
+Our Story
+News & Blogs
+Careers
+Services
+J&T Super
+International Shipping
+Plant Shipping
+Information
+FAQ
+Package Information
+Terms
+Send Package
+Send a Package
+My Shipments
+VIP
+VIP Customer Registration
+[58] (967,515)<div  />
+	[59] (967,502)<img  />
+	[60] (967,550)<p >Mobile />
+[61] (967,617)<div  />
+	[62] (967,604)<img  />
+	[63] (967,652)<p >Place Order />
+[64] (967,733)<div  />
+	[65] (967,733)<a href='https://imc.jtexpress.ph/chat/?code=website' />
+		[66] (967,708)<img  />
+		[67] (967,769)<p >Customer Service />
+[68] (967,848)<div  />
+	[69] (967,834)<img  />
+	[70] (967,883)<p >TOP />
+
+</current_dom>

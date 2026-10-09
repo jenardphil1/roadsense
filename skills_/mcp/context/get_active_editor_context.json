@@ -1,0 +1,1 @@
+{"name":"get_active_editor_context","description":"Returns active editor file path, cloud database resource URI (bq://..., spanner://..., alloydb://..., cloudsql://...), or highlighted line selection range.","parameters":{"type":"object"}}

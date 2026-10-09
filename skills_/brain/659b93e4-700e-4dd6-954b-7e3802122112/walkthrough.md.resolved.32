@@ -1,0 +1,31 @@
+# Walkthrough - Admin Inventory Management Links
+
+I have successfully replaced the administrative "Import Tool" links with direct "Manage Inventory" buttons across all four TCG categories on the public store pages. These links are **only visible to admins**.
+
+## Changes Made
+
+### 🎴 Lorcana
+- **Index Page**: Removed the "Open Import Tool" link. Admins now see a **Manage Lorcana Inventory** button.
+- **Set Page**: Added a **Manage Lorcana Inventory** button when a set has no stocked cards.
+
+### 🪄 Magic: The Gathering
+- **Index Page**: Admins now see a **Manage Magic Inventory** button if the set list is empty.
+- **Set Page**: Added a **Manage Magic Inventory** button for admins when an individual set has no stock.
+
+### 🏴‍☠️ One Piece
+- **Index Page**: Admins now see a **Manage One Piece Inventory** button if the set list is empty.
+- **Set Page**: Added a **Manage One Piece Inventory** button for admins when an individual set has no stock.
+
+### 🐹 Pokémon
+- **Index Page**: Admins now see a **Manage Pokémon Inventory** button if the set list is empty.
+- **Set Page**: Added a **Manage Pokémon Inventory** button for admins when an individual set has no stock.
+
+## Visual Verification
+The new buttons follow the premium store aesthetic and use category-specific icons (boxes, pirate flag, etc.).
+
+> [!NOTE]
+> These buttons will only appear if the logged-in account has `is_admin = 1`. Regular customers will still see the standard "Cards are being priced" or "Back to Store" messages.
+
+## Verification
+- Verified that the links point to the correct administrative URL endpoints (e.g., `Admin/lorcana_inventory`).
+- Verified that the logic checks the session's admin status before rendering the buttons.

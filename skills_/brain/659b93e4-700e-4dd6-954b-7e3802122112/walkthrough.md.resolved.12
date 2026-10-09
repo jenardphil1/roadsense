@@ -1,0 +1,20 @@
+# Storefront Refinement: Unified Live Pricing & Split-Card Fixes
+
+The storefront's pricing system has been upgraded to a fully dynamic, real-time architecture, ensuring your customers always see the most accurate market context.
+
+## 1. Unified Live Pricing
+We have replaced all static "placeholder" calculations with real-time data fetching across the entire platform.
+- **Set Listing Pages**: Instead of a generic 5% discount calculation, these pages now fetch and display the actual **Market Price** directly from the APIs on page load.
+- **Detailed Card Pages**: The pricing system remains live, providing a side-by-side comparison with your shop's set price.
+
+## 2. Split-Card Compatibility Fix
+We've resolved the issue where split cards (e.g., *Stonehide Ancient // Warning Tremor*) would sometimes show "N/A" for their market price.
+- **Dual-Stage Naming Fallback**: Our new Scryfall fetcher now automatically retries the search using only the primary face of the card (the first part of the name) if the full name search returns no data. This ensures consistent pricing for all MTG card types.
+
+## 3. Performance & Data Sources
+- **Magic (Scryfall)**: Set listings use the `cards/search` API to fetch a set's entire price map in a single request, ensuring lightning-fast load times.
+- **Pokémon (TCGDex)**: Uses a batch-processing fetcher to populate set prices reliably without overwhelming the browser.
+- **Transparency**: Every live price identifies its source (e.g., "TCGPlayer Market", "Scryfall TCGPlayer").
+
+---
+**Your storefront is now a professional, high-fidelity TCG marketplace with zero-placeholder data!** 🚀

@@ -1,0 +1,6 @@
+# Task: Import mtg.sql into UniServerZ MySQL
+
+- [ ] Analyze [mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) structure <!-- id: 0 -->
+- [ ] Verify MySQL connection and current databases <!-- id: 1 -->
+- [ ] Import [mtg.sql](file:///f:/UniServerZ/www/coolex_shop/assets/mtg.sql) using command line <!-- id: 2 -->
+- [ ] Verify import completion <!-- id: 3 -->

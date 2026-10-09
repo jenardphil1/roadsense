@@ -1,0 +1,5 @@
+# Store Search Feature
+
+- [ ] Add `search` method to [Store](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#3-83) controller to handle card filtering by name
+- [ ] Create `search_results.php` view to display matched cards
+- [ ] Add a visual search bar to [store/index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) and [store/view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)

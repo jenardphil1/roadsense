@@ -1,0 +1,26 @@
+# Targeted Restrictions & Live API Pricing
+
+Refine the storefront by disabling sales for specific sets and integrating live API data for price comparisons.
+
+## Proposed Changes
+
+### Controllers
+
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+- Update [view_mtg_card](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#85-94) to fetch live pricing from the Scryfall API using the card's name and set code.
+- Pass this live data to the view for comparison.
+
+### Storefront Views
+
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- **C17 Restriction**: Hide the "Add to Cart" button if the set code is 'C17'.
+
+#### [MODIFY] [view_mtg_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_card.php)
+- **Live Comparison**: Display "Your Shop Price" alongside "Live Market Price (API)".
+- **Visual Feedback**: Highlight the difference if the prices are significantly divergent.
+
+## Verification Plan
+
+### Manual Verification
+- **Visual Check**: Open the Magic set and card views to verify the restriction and the new pricing UI.
+- **Accuracy**: Ensure the live price is correctly pulled from Scryfall.

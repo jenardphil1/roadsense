@@ -1,0 +1,7 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Implement a professional 'Follow & Rotate' Navigation Mode using GPS heading (industry standard for driving apps).",
+  "updatedAt": "2026-04-18T08:39:15.048908200Z",
+  "version": "5",
+  "requestFeedback": true
+}

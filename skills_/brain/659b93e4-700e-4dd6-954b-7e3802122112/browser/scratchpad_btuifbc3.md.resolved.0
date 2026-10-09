@@ -1,0 +1,4 @@
+# Task: One Piece TCG Data Sync
+- [ ] Navigate to `http://localhost:81/pokemon/index.php/onepiece_import/sync_local`
+- [ ] Verify success message: "Successfully synced ... One Piece cards"
+- [ ] Record findings

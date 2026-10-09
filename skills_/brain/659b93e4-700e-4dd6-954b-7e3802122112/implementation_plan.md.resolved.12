@@ -1,0 +1,31 @@
+# Targeted Restrictions & Live API Pricing
+
+Refine the storefront by disabling sales for specific sets and integrating live API data for price comparisons.
+
+## Proposed Changes
+
+### Controllers
+
+#### [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php)
+- Update [view_mtg_card](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php#85-94) to fetch live pricing from the Scryfall API using the card's name and set code.
+- Pass this live data to the view for comparison.
+
+### Storefront Views
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+#### [MODIFY] [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- **Ultra-Compact Grid**: Change row columns to `row-cols-md-3 row-cols-lg-4` (or 6) to maximize density.
+- **Tighter Design**: Reduce whitespace and image sizes as requested.
+
+#### [MODIFY] [Cart.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Cart.php)
+- **Sanitization**: Use `str_replace` to remove slashes and other invalid characters from the item `name` before `cart->insert()` to ensure MTG split cards can be added.
+
+#### [MODIFY] [view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+#### [MODIFY] [view_mtg_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_card.php)
+- **Refinement**: Ensure navigation and pricing remain consistent with the new compact listings.
+
+## Verification Plan
+
+### Manual Verification
+- **Visual Check**: Open the Magic set and card views to verify the restriction and the new pricing UI.
+- **Accuracy**: Ensure the live price is correctly pulled from Scryfall.

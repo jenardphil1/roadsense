@@ -1,0 +1,15 @@
+# Store Inventory Architecture (Normalization)
+- [ ] Create `store_inventory` table in SQLyog to hold `price` and `stock`
+- [ ] Update [admin/inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/inventory.php) to write to `store_inventory` instead of modifying the global [cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#51-61) table
+- [ ] Update Store Controller to perform SQL JOINs to display active inventory to customers
+
+# Global Templating Architecture
+- [x] Create [views/templates/header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php) with Bootstrap Navigation
+- [x] Create [views/templates/footer.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/footer.php)
+- [x] Refactor Controllers to load header/footer automatically
+
+# Shopping Cart Checkout Architecture
+- [x] Create `orders` and `order_items` tables in MySQL
+- [x] Load the CodeIgniter Cart Library in config
+- [x] Add "Add to Cart" functionality to Store Controller
+- [ ] Build `checkout` processing endpoint to write PHP Session Carts permanently to the Database

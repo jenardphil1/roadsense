@@ -1,0 +1,36 @@
+# Disney Lorcana Integration
+
+- [x] Research Lorcana API structure
+- [x] Integrate Disney Lorcana into the store
+    - [x] Database Schema and Migration (lorcana_sets, lorcana_cards)
+    - [x] Local JSON Data Sync (Import tool)
+    - [x] Update Mega Menu Navigation
+    - [x] Frontend: Lorcana Storefront (Index, Set, Card views)
+    - [x] Checkout: Lorcana Cart Integration
+    - [x] Admin: Lorcana Inventory Management (Price/Stock)
+- [x] Verify TCG Cart Integration
+
+- [x] Integrate One Piece TCG into the store
+    - [x] Create Database Schema ([onepiece_schema.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/onepiece_schema.sql))
+    - [x] Create Import Controller ([OnePiece_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/OnePiece_Import.php))
+    - [x] Create Model ([OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php))
+    - [x] Implement One Piece Storefront (Index, Set, Card views)
+    - [x] Integrate One Piece with Cart
+    - [x] Add Admin One Piece Inventory Panel
+
+- [x] Implement Order Management System
+    - [x] Update Database Schema ([orders](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#196-205), [order_items](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php#22-59) tables)
+    - [x] Update [Order_model](file:///f:/UniServerZ/www/coolex_shop/application/models/Order_model.php#4-92) for Multi-TCG stock deduction
+    - [x] Create Admin Orders Panel ([manage_orders.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/manage_orders.php))
+    - [x] Implement Order Status manipulation (Mark as Sent)
+    - [x] Update [Checkout](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Checkout.php#4-65) controller to pass category data
+
+- [x] Admin Panel Visual Polish (Sidebar)
+    - [x] Create [admin/sidebar.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/sidebar.php) component
+    - [x] Update Admin Dashboard ([index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/cart/index.php))
+    - [x] Integrate sidebar into all inventory and order pages
+
+- [x] Admin UI Premium Upgrade
+    - [x] Rebuild [sidebar.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/sidebar.php) with dark gradient + logo + hover effects
+    - [x] Upgrade [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/cart/index.php) dashboard with compact stat cards and activity section
+    - [x] Add FontAwesome 6 locally/CDN and consistent icon styling

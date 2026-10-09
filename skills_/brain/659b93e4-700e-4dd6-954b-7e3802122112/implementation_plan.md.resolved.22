@@ -1,0 +1,48 @@
+# Custom Products Store Implementation Plan
+
+The goal is to allow administrators to add, price, and track non-card items (like keychains, apparel, or other custom merchandise) and allow customers to purchase them alongside TCG cards in a seamless manner.
+
+## Proposed Changes
+
+### 1. Database Schema
+- **[NEW] Table `custom_products`**: 
+  - `id` (Auto Increment)
+  - `name` (varchar 255)
+  - `category` (varchar 100) (e.g., "Keychain", "Apparel")
+  - `description` (text)
+  - `price` (decimal 10,2)
+  - `stock` (int)
+  - `image_url` (text)
+
+### 2. Admin Panel Features
+- **[NEW] `application/controllers/Admin.php` Additions**:
+  - `manage_custom()`: View a list of all custom items in the system.
+  - `add_custom_product()`: A form where the admin can type a New Category or select an Existing Category from a dropdown dynamically populated via `SELECT DISTINCT category FROM custom_products`. It will include an intuitive image upload field.
+  - `save_custom_product()`: Process the image upload (saving to `assets/images/custom/`) and insert the record into the database.
+- **[NEW] Admin Views**:
+  - `application/views/admin/custom_inventory.php`
+  - `application/views/admin/add_custom.php`
+
+### 3. Storefront UI
+- **[MODIFY] `application/views/templates/megamenu.php`**: Add "Custom Merch" to the global navigation menu so customers can find it easily.
+- **[NEW] `Store.php` Controller Additions**:
+  - `custom_index()`: Displays an index of all custom categories (like the Pokémon sets view).
+  - `custom_category($category)`: Displays all the custom products within a specific category.
+- **[NEW] Store Views**:
+  - `application/views/store/custom_index.php` (Using our premium styling glass-card grid)
+  - `application/views/store/view_custom_category.php`
+
+### 4. Integration with Cart & Orders
+- **[MODIFY] `application/models/Order_model.php`**: 
+  - Update `add_order_items()` to securely deduct stock directly from the `custom_products` table when an order is finalized with the `'custom'` category designation.
+  - Update `get_order_items_detailed()` so that the Customer Profile accurately fetches the custom item name (`name`) and correct custom identifier.
+
+## Open Questions
+- Do you want a dedicated individual detail page for each custom product (where it takes up the full screen and shows a description), or should customers just click an "Add to Cart" button directly from the grid of keychain/merch images?
+
+## Verification Plan
+### Manual Verification
+1. I will execute a query creating the `custom_products` table.
+2. We will log into the Admin portal and create a test Custom Product with a test category (like "Keychains") and an uploaded image.
+3. We will navigate to the Storefront and verify the product displays correctly.
+4. We will add it to the cart and verify stock decreases accurately upon checkout.

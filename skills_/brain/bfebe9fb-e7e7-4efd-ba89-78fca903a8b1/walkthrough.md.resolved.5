@@ -1,0 +1,25 @@
+# Walkthrough - 'All Sets' Button Clickability Fix
+
+I have successfully resolved the issue where the "All Sets" button was visible but unclickable. The root cause was a CSS stacking context conflict, which I have now fixed across all premium TCG and Custom Merchandise categories.
+
+## 🛠️ The Stacking Fix
+In the previous design, the background decorations (like the bubbles in Lorcana and the wave patterns in One Piece) were technically positioned "on top" of the button in the browser's eyes, even if they looked like they were behind it. 
+
+- **Layer Correction**: I have added `position: relative; z-index: 5;` to the content rows in every header.
+- **Result**: This lifts the text and the "All Sets" button onto a higher layer, ensuring they are always on top of the background graphics. 
+- **Interactivity**: You should now see the mouse cursor change to a pointer when hovering over the button, and clicking it will now correctly trigger the navigation.
+
+## 📄 Files Fixed
+
+The fix has been applied to the following set and category detail pages:
+
+- [view_set.php (Pokémon)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+- [view_mtg_set.php (Magic)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- [view_lorcana_set.php (Lorcana)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php)
+- [view_onepiece_set.php (One Piece)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php)
+- [view_custom_category.php (Custom)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_custom_category.php)
+
+## ✅ Verification Results
+- **Hover State**: Verified that the button background responds to hover again.
+- **Click Functionality**: Verified that the stacking context no longer intercepts pointer events.
+- **Visual Integrity**: The fix does not change the premium look of the headers; it only ensures the button is functional.

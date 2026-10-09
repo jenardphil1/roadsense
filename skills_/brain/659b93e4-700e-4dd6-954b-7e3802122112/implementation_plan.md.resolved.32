@@ -1,0 +1,43 @@
+# Profile Page UI & Functionality Fixes
+
+This plan addresses the oversized buttons on the profile page and resolves the issue where profile edits are not saving correctly or not providing feedback.
+
+## User Review Required
+
+> [!IMPORTANT]
+> I will be reducing the default padding and font size for buttons on the profile page to make them feel more compact. If you prefer a specific pixel size for buttons, let me know!
+
+## Proposed Changes
+
+### [Component] UI Enhancements (CSS & View)
+
+#### [MODIFY] [modern.css](file:///f:/UniServerZ/www/coolex_shop/assets/css/modern.css)
+- Add a `.modern-btn-sm` class for more compact buttons.
+- Slightly reduce default `modern-btn` padding for better balance.
+
+#### [MODIFY] [profile.php](file:///f:/UniServerZ/www/coolex_shop/application/views/customer/profile.php)
+- Add a flashdata `'error'` alert block to show validation errors (this is likely why the edit "isn't working").
+- Apply smaller button classes to "Edit Profile", "Sign Out", and "Save Changes" buttons.
+- Ensure the modal correctly captures all fields.
+
+### [Component] Profile Update Logic (Controller)
+
+#### [MODIFY] [Customer.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Customer.php)
+- Add explicit validation rules for `city`, `state`, and `zip_code` to ensure they are sanitized and handled correctly.
+- Add logging or improved error handling if `update_customer` fails.
+
+## Open Questions
+- Is there a specific error message you see, or does the page just reload without changes? (Adding the error alert will help us find out!)
+
+## Verification Plan
+
+### Automated Tests
+- N/A (Manual visual check and form submission)
+
+### Manual Verification
+1. Login as a customer.
+2. Navigate to [Profile](http://localhost/coolex_shop/Customer/profile).
+3. Verify button sizes look "right" and not oversized.
+4. Click "Edit Profile" and change a field (e.g., zip code).
+5. Verify the success message appears and data persists.
+6. Intentionally leave a required field blank to verify the new error alert shows up.

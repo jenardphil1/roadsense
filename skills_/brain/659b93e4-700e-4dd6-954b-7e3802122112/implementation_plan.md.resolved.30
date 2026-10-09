@@ -1,0 +1,43 @@
+# Add Condition Field to Custom Merchandise
+
+Add a "Condition" field (e.g., Brand New, Used, Like New) to the custom merchandise catalog to provide clearer product information to customers.
+
+## Proposed Changes
+
+### Database & Model
+
+#### [MODIFY] [Custom_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/Custom_model.php)
+- Add a "self-healing" `ALTER TABLE` statement in the constructor to ensure the `product_condition` column exists in the `custom_products` table if it doesn't already.
+
+### Admin Controller & Logic
+
+#### [MODIFY] [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php)
+- Update the `save_custom()` method to capture and save the `product_condition` from the form POST data.
+- **[NEW]** Implement the `edit_custom($id)` method to load a product for editing (this appears to be missing in the current controller).
+- **[NEW]** Implement the `update_custom()` method to process edits, including the new condition field.
+
+### Admin Views
+
+#### [MODIFY] [add_custom.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/add_custom.php)
+- Add a "Product Condition" dropdown selection (options: Brand New, Like New, Lightly Used, Well Used).
+
+#### [NEW] [edit_custom.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/edit_custom.php)
+- Create a dedicated edit page for custom products (based on the `add_custom.php` layout) that includes the new condition field.
+
+### Storefront View
+
+#### [MODIFY] [view_custom_product.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_custom_product.php)
+- Update the "Product Specifications" section to display the actual `product_condition` from the database instead of the hardcoded "Brand New" placeholder.
+
+## Verification Plan
+
+### Manual Verification
+1. Log in as Admin.
+2. Go to "Add Custom Merchandise".
+3. Verify the "Condition" dropdown is present.
+4. Add a product with "Used" condition.
+5. Go to the public store and view the product.
+6. Verify the specs show "Used" instead of "Brand New".
+7. Click "Edit Details" in the admin inventory.
+8. Change the condition to "Brand New" and save.
+9. Verify the change reflected in the store.

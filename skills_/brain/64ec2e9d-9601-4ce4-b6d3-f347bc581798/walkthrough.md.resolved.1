@@ -1,0 +1,20 @@
+# Pokemon TCG UI - Walkthrough
+
+## Overview
+I have successfully built a beautiful, responsive user interface using CodeIgniter 3 to display Pokemon TCG sets and cards using your local JSON data, now featuring live market prices!
+
+### Features Implemented
+1. **Model Layer ([Pokemon_model.php](file:///f:/UniServerZ/www/pokemon/application/models/Pokemon_model.php))**: Added methods to parse [sets/en.json](file:///f:/UniServerZ/www/pokemon/pokemon-tcg-data-master/pokemon-tcg-data-master/sets/en.json) and `cards/en/{set_id}.json`.
+    - **Live Market Prices**: Integrated the `api.pokemontcg.io` API. When viewing a set, the model now reaches out to the live API to fetch real-time TCGPlayer market data and merges it with your local cards!
+2. **Controller Layer ([Pokemon.php](file:///f:/UniServerZ/www/pokemon/application/controllers/Pokemon.php))**: Added endpoints `/pokemon` (for Sets) and `/pokemon/cards/{id}` (for Cards).
+3. **Routing**: Updated [config/routes.php](file:///f:/UniServerZ/www/pokemon/application/config/routes.php) to set the default controller to `pokemon` and specifically configured the URL for `localhost:81`.
+4. **View Layer & UI**: 
+   - Created a modern, glassmorphic UI using custom CSS and the "Outfit" Google Font.
+   - Added grid layouts for both Sets and Cards views.
+   - **Price Badges**: Added beautiful, gradient-styled price badges on the corner of the cards to display the TCGPlayer market price.
+
+### How to Verify
+1. Open your browser.
+2. Navigate to: `http://localhost:81/pokemon/index.php/pokemon/`
+3. You should see a stunning "Pokemon TCG Explorer" page listing all the sets.
+4. Click on any set (e.g., Base Set) to see its cards load. Notice the beautiful new green/purple gradient price tags on the top right corners of the cards!

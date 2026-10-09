@@ -1,0 +1,31 @@
+# Store Inventory Architecture (Normalization)
+- [ ] Create `store_inventory` table in SQLyog to hold `price` and `stock`
+- [ ] Update [admin/inventory.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/inventory.php) to write to `store_inventory` instead of modifying the global [cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#51-61) table
+- [ ] Update Store Controller to perform SQL JOINs to display active inventory to customers
+
+# Global Templating Architecture
+- [x] Create [views/templates/header.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/header.php) with Bootstrap Navigation
+- [x] Create [views/templates/footer.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/footer.php)
+- [x] Refactor Controllers to load header/footer automatically
+
+# Admin Inventory Management Example
+- [x] Create search endpoint functionality in [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php)
+- [x] Create UI for search and stock management in [admin/add.php](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/add.php)
+- [x] Add save functionality to update `manual_price` and `stock` in [cards](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php#51-61) table
+- [x] Add Soft Delete AJAX functionality to completely remove cards from active storefront
+
+# Multi-Image Gallery Architecture
+- [x] Create `assets/uploads` directory to physically hold JPG/PNG files
+- [x] Create `card_images` table in Database to track image paths
+- [x] Add a `[📷 Edit Photo]` button to every card row in `admin/inventory.php`
+- [x] Build a dedicated `admin/edit_images.php` upload center using `multipart/form-data`
+- [x] Write CodeIgniter File Upload looping logic in `Admin.php` Controllers
+
+# Shopping Cart Checkout Architecture
+- [ ] Migrate `Store.php` Cart functions into a new `Cart.php` Controller (`add`, `view`, `update`, `remove`)
+- [ ] Move `store/cart.php` into a new dedicated folder as `cart/index.php`
+- [ ] Implement `Cart->update()` to allow quantity adjustments
+- [ ] Create `Checkout.php` Controller (`index`, `place_order`, `success`)
+- [ ] Create `Order_model.php` (`create_order`, `add_order_items`)
+- [ ] Create Checkout UI views (`checkout/index.php`, `checkout/success.php`)
+- [ ] Create a literal File `CHANGELOG.md` detailing all backend migrations made during this process

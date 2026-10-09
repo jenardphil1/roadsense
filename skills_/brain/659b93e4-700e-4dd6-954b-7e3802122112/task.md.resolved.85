@@ -1,0 +1,7 @@
+- [x] `[x]` Add search methods to all TCG Models (`Store_model`, `Mtg_model`, `Lorcana_model`, `OnePiece_model`)
+- [x] `[x]` Update `Store` controller to fetch matching cards for each category index page
+- [x] `[x]` Update `store/index.php` (Pokémon) view to display matching cards first
+- [x] `[x]` Update `store/magic_index.php` (Magic) view to display matching cards first
+- [x] `[x]` Update Lorcana category view to display matching cards first
+- [x] `[x]` Update One Piece category view to display matching cards first
+- [x] `[x]` Final verification and cleanup

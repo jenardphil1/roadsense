@@ -1,0 +1,51 @@
+# Implementation Plan - Navigation Mode (Auto-Follow & Rotate)
+
+This plan adds a "Navigation Mode" to the Map screen, causing the camera to follow your movement and rotate in the direction you are driving.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Map Rotation**: The map will rotate based on your heading. This can sometimes make the map feel "spinny" if the GPS signal is weak. I will add a toggle button so you can turn it on/off.
+
+> [!NOTE]
+> **Auto-Disable**: Like Google Maps, if you manually drag the map while in Navigation Mode, the auto-following will temporarily pause so you can look around.
+
+## Proposed Changes
+
+### Dependencies & Setup
+
+#### [MODIFY] [pubspec.yaml](file:///c:/ssdd/flutter/pubspec.yaml)
+* Add `flutter_compass: ^1.0.1` to get accurate device heading for map rotation.
+
+---
+
+### Navigation Mode Logic
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+* **New State**:
+    * `bool _isNavigationMode = false;`
+    * `StreamSubscription<Position>? _navigationSubscription;`
+* **Auto-Follow Logic**:
+    * When `_isNavigationMode` is ON:
+        * Listen to the location stream.
+        * Call `_mapController.move()` to keep you centered.
+        * Call `_mapController.rotate()` based on your heading/direction.
+* **Auto-Disable Logic**:
+    * Use a `GestureDetector` or `MapEvent` listener. If the user manually gestures on the map, set `_isNavigationMode = false`.
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart) (UI)
+* **Toggle Button**: Add a second FloatingActionButton (or a stack) that shows a compass icon.
+    * Gray = Manual Mode.
+    * Blue/Purple = Navigation Mode active.
+
+## Open Questions
+
+1. **Rotation Type**: Should the map rotate based on **where the phone is pointing** (Compass) or the **direction you are driving** (GPS Heading)? GPS is usually better for driving.
+2. **Tilt**: Google Maps often "tilts" the view in navigation mode. `flutter_map` doesn't support 3D tilt easily, so we will stay in 2D top-down view for now. Is that okay?
+
+## Verification Plan
+
+### Manual Verification
+* **Follow Test**: Enable Nav Mode and use a mock GPS app to "drive." Confirm the map stays centered on the blue dot.
+* **Rotate Test**: Confirm the map turns as the mock heading changes.
+* **Stop Test**: While in Nav Mode, drag the map with your finger and verify Nav Mode automatically turns off.

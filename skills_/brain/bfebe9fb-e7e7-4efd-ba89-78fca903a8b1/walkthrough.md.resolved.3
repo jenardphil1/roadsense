@@ -1,0 +1,58 @@
+# Walkthrough - TCG Storefront Modernization (Phase 2)
+
+I have successfully completed the premium UI overhaul for all remaining TCG categories—**Magic: The Gathering**, **Disney Lorcana**, and **One Piece TCG**—while implementing a global "Stable Navigation" system to prevent layout shifts.
+
+## 🏗️ Core Structural Changes
+
+### Stable Breadcrumb Navigation
+To solve the "ugly jumping" issue when browsing between different categories and sets, I have decoupled the navigation breadcrumbs from the dynamic hero banners.
+
+- **Fixed Location**: Breadcrumbs now live in a dedicated `.store-breadcrumb` container at the top of the content area.
+- **Perfect Alignment**: Whether you are on a category index or a specific set, the `Store / TCG / Set` links stay in the exact same position, providing a smooth, high-end browsing experience.
+
+## 🎨 Category Overhauls
+
+````carousel
+### Magic: The Gathering
+- **Theme**: "Planeswalker" Dark Slate & Silver.
+- **Hero**: Premium gradient banner with Planeswalker-inspired typography.
+- **Updates**: Modernized set expansion cards and a unified card grid.
+
+<!-- slide -->
+
+### Disney Lorcana
+- **Theme**: "Enchanted" Purple & Indigo.
+- **Hero**: Magical indigo-hued banner with feather accents.
+- **Updates**: Redesigned set cards and "Glimmer" listings with store-price badges.
+
+<!-- slide -->
+
+### One Piece TCG
+- **Theme**: "New World" Crimson & Nautical Navy.
+- **Hero**: High-contrast red/navy banner with pirate silhouettes and wave patterns.
+- **Updates**: Color-coded card type badges and nautical set icons.
+````
+
+## 🛠️ Files Modified
+
+### Navigation & Core Pages
+- [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php) (Pokemon)
+- [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php) (Pokemon)
+- [custom_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/custom_index.php)
+- [view_custom_category.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_custom_category.php)
+
+### TCG Category Overhauls
+- [magic_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/magic_index.php)
+- [view_mtg_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_mtg_set.php)
+- [lorcana_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/lorcana_index.php)
+- [view_lorcana_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_lorcana_set.php)
+- [onepiece_index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/onepiece_index.php)
+- [view_onepiece_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_onepiece_set.php)
+
+> [!IMPORTANT]
+> **Preservation Check**: Individual card detail pages (e.g., `view_card.php`, `view_mtg_card.php`) were **not** modified, as per your strict instruction to leave the complex logic of those pages untouched.
+
+## ✅ Verification Results
+- **Navigation Alignment**: Confirmed using browser testing that breadcrumbs no longer jump when clicking between sets.
+- **PHP Compatibility**: All code adheres to PHP 7.3 syntax (no arrow functions).
+- **Responsive Design**: All new premium banners and grids are fully responsive for mobile and desktop.

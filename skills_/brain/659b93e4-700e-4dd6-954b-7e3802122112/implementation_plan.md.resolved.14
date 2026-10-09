@@ -1,0 +1,35 @@
+# One Piece TCG Storefront Integration
+
+Integration of One Piece Trading Card Game into the multi-TCG storefront.
+
+## Proposed Changes
+
+### Database Layer
+- [NEW] [onepiece_schema.sql](file:///f:/UniServerZ/www/coolex_shop/db/migrations/onepiece_schema.sql): Schema for `onepiece_sets` and `onepiece_cards`.
+- [NEW] [OnePiece_model.php](file:///f:/UniServerZ/www/coolex_shop/application/models/OnePiece_model.php): Data retrieval and inventory logic.
+
+### API & Data Sync
+- [NEW] [OnePiece_Import.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/OnePiece_Import.php): Controller to sync data from `optcgapi.com`.
+
+### Storefront UI (Premium Pokémon/Lorcana Design)
+- [MODIFY] [megamenu.php](file:///f:/UniServerZ/www/coolex_shop/application/views/templates/megamenu.php): Add "One Piece" dropdown.
+- [MODIFY] [Store.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Store.php): Routing for One Piece sets/cards.
+- [NEW] `view_onepiece_set.php`: 3-column balanced grid card listing.
+- [NEW] `view_onepiece_card.php`: Detailed card view with stats (Power, Cost, Counter, etc.).
+
+### Checkout & Cart
+- [MODIFY] [Cart.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Cart.php): Add One Piece category support.
+
+### Admin Tools
+- [MODIFY] [Admin.php](file:///f:/UniServerZ/www/coolex_shop/application/controllers/Admin.php): Add One Piece inventory support.
+- [NEW] `onepiece_inventory.php`: Dedicated AJAX-based pricing tool.
+
+## Verification Plan
+
+### Automated Tests
+- Import set data and verify database population.
+- Add One Piece card to cart and verify price/stock logic.
+
+### Manual Verification
+- Verify One Piece navigation in the mega menu.
+- Verify 3-column grid alignment in `view_onepiece_set.php`.

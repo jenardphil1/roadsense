@@ -1,0 +1,45 @@
+# Modernized Coolex Aesthetic Walkthrough
+
+We have successfully transitioned the **Coolex Shop** to a premium, industry-standard design system. The new "Coolex Aesthetic" focuses on high-end typography, glassmorphism, and a refined color palette that feels both modern and professional.
+
+## 🎨 Design System Overview
+
+- **Typography**: Switched to `Outfit` from Google Fonts. Used `fw-black` (800) for headers and `eyebrow-labels` for metadata to create a clear information hierarchy.
+- **Components**: 
+  - `.glass-card`: Replaced standard boxes with white translucent cards featuring `1.25rem` radius and subtle shadows.
+  - `.modern-btn`: Standardized buttons with uppercase text, specific rounding, and red glow hover effects.
+- **Color Palette**: Off-white background (`#f8f9fa`) with deep red accents (`#dc3545`) for actions and pricing.
+
+## 🛍️ Storefront Improvements
+
+### [Pokémon Card Detail](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+The card detail page now serves as the visual anchor for the shop.
+- **Premium Header**: Large, bold typography with metadata labels.
+- **Refined Gallery**: The main image is housed in a floating glass card with smooth hover transitions.
+- **Modern Specs**: Card details (Type, HP, Stage) are presented in a clean, grid-based specification block.
+
+### [Set Listings (Pokémon & MTG)](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+- **Standardized Grid**: Cards are neatly arranged in glass containers.
+- **Price Highlighting**: Prices are now more legible using the `.price-modern` utility.
+- **Consistent CTAs**: "Add to Cart" buttons use the new premium button style.
+
+## 🛠️ Admin Dashboard & Inventory
+
+### [Admin Dashboard](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/index.php)
+The main dashboard has been overhauled for better readability and a "SaaS-like" feel.
+- **Stat Cards**: Key metrics (Revenue, Orders) now use vibrant icons and glass backgrounds.
+- **Clean Navigation**: Inventory management links are organized into a clear, card-based layout.
+
+### [Admin Sidebar](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/sidebar.php)
+The sidebar now features a sleek dark theme that complements the light main content area.
+- **Active States**: Uses the primary red accent for the active page.
+- **Refined Icons**: Reduced visual clutter with standardized icon spacing and weight.
+
+## 📁 Technical Changes
+
+- **[modern.css](file:///f:/UniServerZ/www/coolex_shop/assets/css/modern.css)**: Centralized the design system tokens (variables, eyebrow labels, badge variants).
+- **[POKEMON Inventory](file:///f:/UniServerZ/www/coolex_shop/application/views/admin/pokemon_inventory.php)**: Updated the layout container to match the new dashboard style.
+
+## 🚀 Future Phases
+- **Phase 4**: Full modernization of the remaining inventory tables (MTG, Lorcana, One Piece).
+- **Phase 5**: Refinement of the "Add to Cart" animations for better user feedback.

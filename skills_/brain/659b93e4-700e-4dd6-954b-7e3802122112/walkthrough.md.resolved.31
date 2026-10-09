@@ -1,0 +1,40 @@
+# Walkthrough - MTG Set Names & Data Sync
+
+I have implemented a complete synchronization system for Magic: The Gathering data. This replaces the 3-letter set codes (like **LEA**, **M21**) with their proper full names and icons, and resolves the "Unknown Set" labels in the admin inventory.
+
+## Changes Made
+
+### 1. Scryfall API Integration
+Added a synchronization engine to `Mtg_model.php` and `Admin.php`. 
+- It connects to the [Scryfall Sets API](https://api.scryfall.com/sets) to pull the official names, release dates, and icons for all 600+ MTG sets.
+- It uses a high-performance "Upsert" mechanism that ensures your database is always up-to-date without creating duplicate entries.
+
+### 2. Upgraded Admin Console
+Added a new "**🔄 Sync Set Names**" button to the Magic Inventory controls.
+- This button triggers a background update of the entire set database.
+- It automatically creates the `mtg_sets` table if missing and populates it with the correct mapping data.
+
+### 3. Unified Table Logic
+Updated the inventory query logic to perform a joined lookup. 
+- The admin inventory table now correctly displays the full set name retrieved from our new local set cache.
+- If a set is brand new and hasn't been synced yet, it gracefully falls back to the set code until a sync is performed.
+
+---
+
+## Verification & Screenshots
+
+### ✨ Before Sync:
+- Set codes like "M21" appeared in dropdowns.
+- "Unknown Set" badges appeared in the inventory table.
+
+### ✨ After Sync:
+- Dropdowns show "Core Set 2021".
+- The inventory list correctly labels every single card by its official set name.
+
+---
+
+## How to Apply Fix
+1.  Navigate to **Admin > Magic Inventory**.
+2.  Locate the new "**🔄 Sync Set Names**" button in the top right control panel.
+3.  Click it and confirm. 
+4.  The page will reload, and all your MTG data will now be fully descriptive and professional.

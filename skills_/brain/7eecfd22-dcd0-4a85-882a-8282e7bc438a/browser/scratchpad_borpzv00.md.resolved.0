@@ -1,0 +1,7 @@
+# Shop Verification Task
+
+- [ ] Open the shop URL: https://take-constitutes-associated-shopper.trycloudflare.com/coolex_shop/index.php/Store
+- [ ] Verify that the page loads quickly (e.g., under 2 seconds)
+- [ ] Confirm TCG categories (Pokemon, Magic, etc.) are displayed
+- [ ] Take a screenshot of the loaded page
+- [ ] Summarize findings and actions

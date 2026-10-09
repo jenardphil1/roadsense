@@ -1,0 +1,7 @@
+# Gallery System Checklist
+
+- [x] Analyze current Admin structure (Found existing dormant backend upload system for Pokémon!)
+- [x] Fetch `$custom_images` inside `Store.php -> view_card()` to unlock UI visibility.
+- [x] Implement Amazon-style JS image swap and thumbnail rendering in `view_card.php`.
+- [ ] User testing & UI/UX refinement for Pokémon system.
+- [ ] Expand functionality to Custom Merch, One Piece, Magic, and Lorcana.

@@ -1,0 +1,64 @@
+# Route Optimization Implementation Plan
+
+This plan outlines the steps to implement route optimization that accounts for pothole density. The application will fetch multiple route alternatives from OpenRouteService (ORS), evaluate each for pothole frequency, and suggest the "smoothest" path to the user.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **API Rate Limits**: Fetching alternative routes and performing dense pothole matching for multiple paths may increase processing time slightly.
+> **Optimization Criteria**: Currently, I will calculate a "Pothole Score" for each route. Should the app automatically switch to the smoothest route, or just present the options for the user to select?
+
+## Proposed Changes
+
+### Map Screen Component
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+
+- **State Management**:
+    - Add `List<List<LatLng>> _alternativeRoutes` to store polyline points for multiple routes.
+    - Add `List<int> _routePotholeCounts` to store the number of potholes on each alternative.
+    - Add `int _selectedRouteIndex` to track which route is currently active.
+    - Add `List<double> _routeDistances` and `List<double> _routeDurations`.
+
+- **Routing Logic (`_calculateRoute`)**:
+    - Update the ORS API request body to include `"alternative_routes": {"target_count": 3}`.
+    - Parse the response to extract multiple features (routes).
+    - For each feature, extract `geometry`, `summary.distance`, and `summary.duration`.
+
+- **Route Evaluation (`_processAlternatives`)**:
+    - Create a new method to evaluate all fetched routes.
+    - For each route:
+        1. Interpolate points densely (reusing existing logic).
+        2. Count potholes within a 25m radius of the polyline.
+        3. Store the result.
+    - Automatically select the "optimal" route (least potholes, or a balance of speed and smoothness).
+
+- **UI Updates**:
+    - **Map Rendering**:
+        - Render unselected alternative routes as semi-transparent gray dashed lines.
+        - Render the selected route as a solid blue line.
+        - Add `GestureDetector` on polylines or a selection UI to allow switching routes.
+    - **Route Selection UI**:
+        - Add a horizontal list of cards or a small overlay when multiple routes are available.
+        - Each card shows: "Duration", "Distance", and "Pothole Count" (e.g., "Smooth Route", "Fastest").
+    - **Instructions/Banner**:
+        - Ensure `_checkPotholeProximity` and the "Next pothole in..." banner use `_alternativeRoutes[_selectedRouteIndex]`.
+
+---
+
+## Open Questions
+
+- **UI Preference**: Would you prefer a "Route Preview" screen before navigation starts, or should they be switchable during navigation?
+- **Pothole Penalty**: What is the "cost" of a pothole in your mind? For example, is a 5-minute longer route worth avoiding 10 potholes? This helps in "auto-suggesting" the best route.
+
+## Verification Plan
+
+### Automated Tests
+- Mock ORS responses with multiple routes and verify that the pothole counting logic correctly assigns counts to each.
+- Simulate GPS movements along different routes to ensure the proximity banner updates correctly for the selected path.
+
+### Manual Verification
+- Perform a search in an area with known potholes.
+- Verify that multiple routes appear on the map.
+- Check that the "Smoothest" route tag appears on the path with fewer potholes.
+- Tap an alternative route and ensure it becomes the active navigation path.

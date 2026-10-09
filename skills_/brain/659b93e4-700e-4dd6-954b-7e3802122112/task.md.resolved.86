@@ -1,0 +1,6 @@
+# Profile Page Fixes Tasks
+
+- [ ] Update `modern.css` with a smaller button variant.
+- [ ] Add explicit validation rules to `Customer.php`.
+- [ ] Implement error feedback and smaller buttons in `profile.php`.
+- [ ] Verify profile updates and UI responsiveness.

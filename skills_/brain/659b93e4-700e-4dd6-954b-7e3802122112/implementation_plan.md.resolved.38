@@ -1,0 +1,31 @@
+# Implementation Plan: Unified Breadcrumb Alignment
+
+The user noted that breadcrumbs "jump" or feel misaligned when switching between the Sets list and an individual Card. This plan standardizes the horizontal padding and placement of breadcrumbs across all Pokémon TCG views.
+
+## User Review Required
+
+> [!IMPORTANT]
+> I will be moving the breadcrumb **outside** the white boxes on all pages. To keep them perfectly aligned with the content below, I will apply a standardized responsive padding (`px-4 px-md-5`) to both the breadcrumb wrappers and the main content panels across the entire site.
+
+## Proposed Changes
+
+### [Component] Global TCG Navigation
+
+#### [MODIFY] [view_card.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_card.php)
+-   **Move Breadcrumb**: Move the `nav` element out of the `.product-container` white box.
+-   **Wrappers**: Wrap the breadcrumb in a `div.px-4.px-md-5`.
+-   **Panel Padding**: Update `.product-container` to use `px-4 px-md-5 py-5` instead of a fixed `4rem` padding, ensuring it matches the alignment of the Sets page.
+
+#### [MODIFY] [view_set.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/view_set.php)
+-   **Alignment**: Update the breadcrumb wrapper (Lines 1-10) to use `div.px-4.px-md-5` so its starting point matches the Hero Banner below it.
+
+#### [MODIFY] [index.php](file:///f:/UniServerZ/www/coolex_shop/application/views/store/index.php)
+-   **Alignment**: Update the breadcrumb wrapper (Lines 1-8) to use `div.px-4.px-md-5`, matching the `pokemon-hero` alignment.
+
+## Verification Plan
+
+### Automated Tests
+- I will verify the CSS classes (`px-4 px-md-5`) are present in the breadcrumb wrapper of all three files.
+
+### Manual Verification
+- **Side-by-Side Test**: Navigate between `store/pokemon`, `store/pokemon/set/xxx`, and `store/pokemon/card/xxx` and verify that the first word of the breadcrumb ("Store") always starts at the exact same horizontal position.

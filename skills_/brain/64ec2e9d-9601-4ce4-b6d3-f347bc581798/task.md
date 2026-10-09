@@ -1,0 +1,38 @@
+# Pokemon TCG UI Development
+
+## 1. Data Analysis (Completed)
+- [x] Inspect sets folder to understand data structure.
+- [x] Inspect cards folder to understand data structure.
+
+## 2. Backend Implementation (Completed)
+- [x] Create `Pokemon_model.php` and `Pokemon.php` controller.
+- [x] Configure routes and layout rendering.
+
+## 3. Frontend Implementation (Completed)
+- [x] Set up app layout, header, footer with glassmorphic styling.
+- [x] Create `sets_list` and `cards_list` grids.
+- [x] Create `card_details` specific page.
+
+## 4. API Migration: TCGDex & Caching (Completed)
+- [x] **Remove** all Market Price badges and fetch logic from the `cards.php` grid page to prevent browser crashes/API bans.
+- [x] **Migrate** `card_details.php` to fetch from `api.tcgdex.net` instead of `api.pokemontcg.io`.
+- [x] **Implement LocalStorage Cache** in `card_details.php` to save prices across page loads for 24 hours.
+- [x] Map the precise TCGDex `pricing` data structure (e.g. `reverse-holofoil`) to the UI badge system.
+
+## 5. Verification (Completed)
+- [x] User testing: Load the Sets grid to verify no prices are fetched and it loads instantly.
+- [x] User testing: Click `Gyarados ex` to view details, verify the TCGDex price fetches correctly from a non-digital variant list.
+- [x] User testing: Refresh the page to verify the price loads instantly from LocalStorage instead of a new fetch.
+
+## 6. Auto-Sync Data (Completed)
+- [x] Translate the `download_tcgdex.py` script into a native `sync_data` model and controller method.
+- [x] Implement skip logic to bypass already downloaded JSON files for instant syncing.
+- [x] Add a `Sync Database` button to the main navigation header.
+- [x] Connect the button via an AJAX call with a UI loading spinner.
+- [x] Verify the sync completes successfully and alerts the user.
+
+## 7. TCGPlayer Theme Overhaul (Completed)
+- [x] Update global CSS variables to a bright, clean e-commerce palette (White backgrounds, light gray panels, dark text).
+- [x] Remove Dark Mode glassmorphism and replace it with solid white cards with subtle `#e5e7eb` borders and flat drop shadows.
+- [x] Update Typography to use standard dark shades instead of white.
+- [x] Update pricing badges to use TCGPlayer's signature vibrant green instead of gradients.

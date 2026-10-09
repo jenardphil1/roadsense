@@ -1,0 +1,4 @@
+- [ ] Modernize `view_mtg_card.php`: New white panel, 80px gap, 60px buttons, px-4 breadcrumb.
+- [ ] Align `view_mtg_set.php`: Breadcrumb alignment `px-4 px-md-5`.
+- [ ] Align `magic_index.php`: Breadcrumb alignment `px-4 px-md-5`.
+- [ ] Verify that the MTG "Store" link starts at the same horizontal offset as Pokémon.

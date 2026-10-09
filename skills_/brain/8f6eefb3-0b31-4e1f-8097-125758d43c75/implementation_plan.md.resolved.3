@@ -1,0 +1,32 @@
+# Implementation Plan - Switch to OpenRouteService (ORS)
+
+This plan moves the routing logic from the public OSRM server to the more professional **OpenRouteService (ORS)** platform.
+
+## Proposed Changes
+
+### Routing Engine Migration
+
+#### [MODIFY] [map_screen.dart](file:///c:/ssdd/flutter/lib/map_screen.dart)
+* **API Key Storage**: Add a constant for the ORS API key.
+* **Update `_calculateRoute`**:
+    - Change HTTP method from `GET` to `POST`.
+    - Update headers to include `'Authorization': 'YOUR_API_KEY'` and `'Content-Type': 'application/json'`.
+    - Update the body to pass coordinates as a JSON list: `{"coordinates": [[startLon, startLat], [endLon, endLat]]}`.
+* **Update Parsing**:
+    - Adjust JSON parsing to handle the ORS GeoJSON response structure (which follows standard GeoJSON `FeatureCollection`).
+
+## User Review Required
+
+> [!IMPORTANT]
+> **API Key Usage**: I will hardcode the key you provided into a constant in `map_screen.dart`. In a production app, you should eventually move this to a more secure "environment variable" file (like `.env`), but for now, making it work is the priority.
+
+## Open Questions
+
+1. **Travel Profile**: I am setting the default to `driving-car`. Would you like to support other modes (e.g., `cycling-regular` or `foot-walking`) in the future?
+
+## Verification Plan
+
+### Manual Verification
+* Enter a destination in Sta. Maria, Bulacan.
+* Verify the blue route line appears correctly using ORS data.
+* Check the debug console for any "401 Unauthorized" or "403 Forbidden" errors which would indicate an issue with the API key.
