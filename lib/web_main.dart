@@ -295,6 +295,17 @@ class _WebUserHomeState extends State<_WebUserHome> {
               timestamp = DateTime.fromMillisecondsSinceEpoch(rawTimestamp);
             }
 
+            final primaryDpwhCode =
+                data['primaryDpwhCode'] as String? ?? 'CODE 01';
+            final primaryDefect =
+                data['primaryDefect'] as String? ?? 'Pothole';
+            final responseTime = data['responseTime'] as String? ?? '3 Days';
+            final correctiveMeasure = data['correctiveMeasure'] as String? ??
+                'Bituminous premix (hot) or penetration patching; add base material if needed.';
+            final detections = (data['detections'] as List<dynamic>?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+
             // Exclude deleted and rejected reports
             if (status == 'deleted' || status == 'rejected') continue;
 
@@ -310,6 +321,11 @@ class _WebUserHomeState extends State<_WebUserHome> {
                 potholeCount: potholeCount,
                 reporterEmail: reporterEmail,
                 reporterUid: reporterUid,
+                primaryDpwhCode: primaryDpwhCode,
+                primaryDefect: primaryDefect,
+                responseTime: responseTime,
+                correctiveMeasure: correctiveMeasure,
+                detections: detections,
               ));
               continue;
             }
@@ -333,6 +349,11 @@ class _WebUserHomeState extends State<_WebUserHome> {
                   potholeCount: potholeCount,
                   reporterEmail: reporterEmail,
                   reporterUid: reporterUid,
+                  primaryDpwhCode: primaryDpwhCode,
+                  primaryDefect: primaryDefect,
+                  responseTime: responseTime,
+                  correctiveMeasure: correctiveMeasure,
+                  detections: detections,
                 ));
               }
             }

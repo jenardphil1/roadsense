@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:azblob/azblob.dart';
@@ -5,6 +6,33 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+
+/// Geographical Local Government Unit (LGU) location details
+class LguLocationInfo {
+  final String barangay;
+  final String city;
+  final String province;
+  final String formattedAddress;
+
+  const LguLocationInfo({
+    required this.barangay,
+    required this.city,
+    required this.province,
+    this.formattedAddress = '',
+  });
+
+  bool get isValid =>
+      (barangay.isNotEmpty && !barangay.startsWith('Unassigned')) ||
+      (city.isNotEmpty && !city.startsWith('Bulacan District'));
+
+  Map<String, dynamic> toMap() => {
+        'barangay': barangay,
+        'city': city,
+        'province': province,
+        'formattedAddress': formattedAddress,
+      };
+}
 
 class CloudService {
   static final CloudService instance = CloudService._init();
@@ -488,6 +516,14 @@ class CloudService {
     String overallSeverity = 'medium', // 'low', 'medium', 'high'
     int potholeCount = 1,
     List<Map<String, dynamic>>? detections,
+    String? primaryDpwhCode,
+    String? primaryDefect,
+    String? responseTime,
+    String? correctiveMeasure,
+    String? barangay,
+    String? city,
+    String? province,
+    String? formattedAddress,
   }) async {
     final user = _auth.currentUser;
     final reporterUid = user?.uid ?? 'anonymous_dev';
@@ -531,13 +567,125 @@ class CloudService {
       'status': initialStatus, // 'approved' if auto-accept is enabled, else 'pending'
       'overallSeverity': overallSeverity,
       'potholeCount': potholeCount,
+      'primaryDpwhCode': primaryDpwhCode ?? 'CODE 01',
+      'primaryDefect': primaryDefect ?? 'Pothole',
+      'responseTime': responseTime ?? '3 Days',
+      'correctiveMeasure': correctiveMeasure ??
+          'Bituminous premix (hot) or penetration patching; add base material if needed.',
       'detections': detections ?? [],
+      if (barangay != null && barangay.isNotEmpty) 'barangay': barangay,
+      if (city != null && city.isNotEmpty) 'city': city,
+      if (province != null && province.isNotEmpty) 'province': province,
+      if (formattedAddress != null && formattedAddress.isNotEmpty)
+        'formattedAddress': formattedAddress,
       'reporterUid': reporterUid,
       'reporterEmail': reporterEmail,
       'reporterName': reporterName,
       'reporterPhotoUrl': reporterPhotoUrl,
       'timestamp': FieldValue.serverTimestamp(),
     });
+  }
+
+  static final Map<String, LguLocationInfo> _lguCache = {};
+
+  /// Reverse geocodes a GPS coordinate into Barangay, City/Municipality, and Province.
+  /// Uses Nominatim OpenStreetMap with structured field extraction for the Philippines.
+  Future<LguLocationInfo> reverseGeocodeLgu(LatLng point) async {
+    final key =
+        '${point.latitude.toStringAsFixed(4)},${point.longitude.toStringAsFixed(4)}';
+    if (_lguCache.containsKey(key)) {
+      return _lguCache[key]!;
+    }
+
+    try {
+      final url = Uri.https('nominatim.openstreetmap.org', '/reverse', {
+        'lat': point.latitude.toString(),
+        'lon': point.longitude.toString(),
+        'format': 'json',
+        'zoom': '18',
+        'addressdetails': '1',
+      });
+      final res = await http.get(
+        url,
+        headers: {'User-Agent': 'RoadSense-LGU-Audit/1.0 (roadsense.local)'},
+      ).timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final addr = (data['address'] as Map<String, dynamic>?) ?? {};
+
+        // In the Philippines:
+        // Suburb, village, quarter, neighbourhood, or city_district maps to Barangay
+        String brgy = (addr['suburb'] ??
+                addr['village'] ??
+                addr['quarter'] ??
+                addr['neighbourhood'] ??
+                addr['city_district'] ??
+                '')
+            .toString()
+            .trim();
+
+        if (brgy.toLowerCase().startsWith('brgy.') ||
+            brgy.toLowerCase().startsWith('brgy ')) {
+          brgy = 'Barangay ${brgy.substring(5).trim()}';
+        } else if (brgy.isNotEmpty && !brgy.toLowerCase().startsWith('barangay')) {
+          brgy = 'Barangay $brgy';
+        }
+
+        // City / Municipality:
+        String city = (addr['city'] ??
+                addr['town'] ??
+                addr['municipality'] ??
+                addr['county'] ??
+                '')
+            .toString()
+            .trim();
+
+        // Province:
+        String province =
+            (addr['state'] ?? addr['province'] ?? 'Bulacan').toString().trim();
+
+        final formatted = (data['display_name'] ?? '').toString();
+
+        final info = LguLocationInfo(
+          barangay: brgy.isNotEmpty ? brgy : 'Unspecified Barangay',
+          city: city.isNotEmpty ? city : 'Bulacan District',
+          province: province.isNotEmpty ? province : 'Bulacan',
+          formattedAddress: formatted,
+        );
+
+        if (_lguCache.length > 500) _lguCache.clear();
+        _lguCache[key] = info;
+        return info;
+      }
+    } catch (_) {}
+
+    final fallback = LguLocationInfo(
+      barangay: 'Unassigned Barangay',
+      city: 'Bulacan District',
+      province: 'Bulacan',
+      formattedAddress:
+          '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}',
+    );
+    _lguCache[key] = fallback;
+    return fallback;
+  }
+
+  /// Updates or backfills the geographic LGU details of a specific pothole
+  Future<void> updatePotholeLguLocation(
+    String docId, {
+    required String barangay,
+    required String city,
+    String? province,
+    String? formattedAddress,
+  }) async {
+    await _potholesCollection.doc(docId).set({
+      'barangay': barangay,
+      'city': city,
+      if (province != null && province.isNotEmpty) 'province': province,
+      if (formattedAddress != null && formattedAddress.isNotEmpty)
+        'formattedAddress': formattedAddress,
+    }, SetOptions(merge: true));
   }
 
   /// Listens to live updates of ONLY 'approved' potholes for navigation map
@@ -578,6 +726,10 @@ class CloudService {
     double? latitude,
     double? longitude,
     String? note,
+    String? primaryDpwhCode,
+    String? primaryDefect,
+    String? responseTime,
+    String? correctiveMeasure,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -602,6 +754,10 @@ class CloudService {
     if (latitude != null) updates['latitude'] = latitude;
     if (longitude != null) updates['longitude'] = longitude;
     if (note != null) updates['note'] = note;
+    if (primaryDpwhCode != null) updates['primaryDpwhCode'] = primaryDpwhCode;
+    if (primaryDefect != null) updates['primaryDefect'] = primaryDefect;
+    if (responseTime != null) updates['responseTime'] = responseTime;
+    if (correctiveMeasure != null) updates['correctiveMeasure'] = correctiveMeasure;
 
     await _potholesCollection.doc(docId).update(updates);
   }

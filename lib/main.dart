@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_vision/flutter_vision.dart';
 import 'package:camera/camera.dart';
@@ -22,6 +23,7 @@ import 'admin_dashboard_screen.dart';
 import 'profile_screen.dart';
 import 'app_settings.dart';
 import 'app_design.dart';
+import 'dpwh_standards.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 late List<CameraDescription> cameras;
@@ -186,6 +188,16 @@ class _MyHomePageState extends State<MyHomePage> {
             // Exclude deleted and rejected reports
             if (status == 'deleted' || status == 'rejected') continue;
 
+            final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+            final defectName = data['primaryDefect'] as String? ?? 'Pothole';
+            final responseTime = data['responseTime'] as String? ?? '3 Days';
+            final correctiveMeasure = data['correctiveMeasure'] as String? ??
+                'Bituminous premix (hot) or penetration patching; add base material if needed.';
+            final brgy = data['barangay'] as String? ?? '';
+            final city = data['city'] as String? ?? '';
+            final province = data['province'] as String? ?? '';
+            final formatted = data['formattedAddress'] as String? ?? '';
+
             // Include if approved live
             if (status == 'approved') {
               cloudPotholes.add(PotholeMarker(
@@ -198,6 +210,14 @@ class _MyHomePageState extends State<MyHomePage> {
                 potholeCount: potholeCount,
                 reporterEmail: reporterEmail,
                 reporterUid: reporterUid,
+                primaryDpwhCode: dpwhCode,
+                primaryDefect: defectName,
+                responseTime: responseTime,
+                correctiveMeasure: correctiveMeasure,
+                barangay: brgy,
+                city: city,
+                province: province,
+                formattedAddress: formatted,
               ));
               continue;
             }
@@ -221,6 +241,14 @@ class _MyHomePageState extends State<MyHomePage> {
                   potholeCount: potholeCount,
                   reporterEmail: reporterEmail,
                   reporterUid: reporterUid,
+                  primaryDpwhCode: dpwhCode,
+                  primaryDefect: defectName,
+                  responseTime: responseTime,
+                  correctiveMeasure: correctiveMeasure,
+                  barangay: brgy,
+                  city: city,
+                  province: province,
+                  formattedAddress: formatted,
                 ));
               }
             }
@@ -503,9 +531,9 @@ class _MyHomePageState extends State<MyHomePage> {
             bytesList: bytes,
             imageHeight: decodedImage.height,
             imageWidth: decodedImage.width,
-            iouThreshold: 0.40,
-            confThreshold: 0.12,
-            classThreshold: 0.12,
+            iouThreshold: 0.45,
+            confThreshold: 0.25,
+            classThreshold: 0.25,
           );
 
           if (mounted && _isRealtimeMode) {
@@ -534,6 +562,7 @@ class _MyHomePageState extends State<MyHomePage> {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
+    HapticFeedback.mediumImpact();
 
     // 1. Cancel the periodic detection timer immediately
     _detectionTimer?.cancel();
@@ -598,8 +627,8 @@ class _MyHomePageState extends State<MyHomePage> {
         imageHeight: decodedImage.height,
         imageWidth: decodedImage.width,
         iouThreshold: 0.45,
-        confThreshold: 0.12,
-        classThreshold: 0.12,
+        confThreshold: 0.25,
+        classThreshold: 0.25,
       );
 
       print("[YOLO STATIC] ${result.length} potholes detected: $result");
@@ -616,80 +645,27 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  /// Extracts the model-predicted severity tag ('low', 'medium', 'high') directly from TFLite output
+  /// Extracts the model-predicted severity tag ('low', 'medium', 'high') using DPWH thesis standards
   static String getDetectionSeverity(Map<String, dynamic> det) {
-    final String tag = (det['tag'] as String? ?? '').trim().toLowerCase();
-    if (tag.contains('high') || tag.contains('major')) return 'high';
-    if (tag.contains('med')) return 'medium';
-    if (tag.contains('low') || tag.contains('minor')) return 'low';
-
-    // Dynamic heuristic for single-class 'pothole' model using bounding box area & confidence
-    if (det.containsKey('box')) {
-      final box = det['box'] as List<dynamic>;
-      if (box.length >= 4) {
-        final left = (box[0] as num).toDouble();
-        final top = (box[1] as num).toDouble();
-        final right = (box[2] as num).toDouble();
-        final bottom = (box[3] as num).toDouble();
-        final double width = (right - left).abs();
-        final double height = (bottom - top).abs();
-        final double area = width * height;
-        final double conf = box.length > 4 ? (box[4] as num).toDouble() : 0.5;
-
-        if (area > 45000 || conf >= 0.78) return 'high';
-        if (area > 12000 || conf >= 0.42) return 'medium';
-        return 'low';
-      }
-    }
-    return 'medium';
+    return DpwhStandards.evaluateSeverity(det);
   }
 
   static Color getSeverityColor(String severity) {
-    switch (severity.toLowerCase()) {
-      case 'high':
-        return const Color(0xFFEF4444); // 🔴 High Severity (Red)
-      case 'medium':
-        return const Color(0xFFF97316); // 🟠 Medium Severity (Orange)
-      case 'low':
-      default:
-        return const Color(0xFFEAB308); // 🟡 Low Severity (Amber)
-    }
+    return DpwhStandards.getSeverityColor(severity);
   }
 
-  /// Maps detection attributes to DPWH standard highway defect codes
+  /// Maps detection attributes to official DPWH highway distress codes (CODE 01, CODE 02, etc.)
   static String getDpwhCode(String severity, [String tag = '']) {
-    final lowerTag = tag.toLowerCase();
-    if (lowerTag.contains('alligator') || lowerTag.contains('crocodile')) return 'CODE 02';
-    if (lowerTag.contains('depression') || lowerTag.contains('rut')) return 'CODE 05';
-    if (lowerTag.contains('crack') || lowerTag.contains('transverse') || lowerTag.contains('longitudinal')) return 'CODE 12';
-    switch (severity.toLowerCase()) {
-      case 'high':
-        return 'CODE 01';
-      case 'medium':
-        return 'CODE 02';
-      case 'low':
-      default:
-        return 'CODE 05';
-    }
+    final cls = DpwhStandards.classify(tag);
+    return cls.code;
   }
 
   /// Human-readable title for DPWH maintenance categorization
   static String getDpwhDefectTitle(String code) {
-    switch (code) {
-      case 'CODE 01':
-        return 'Pothole (Urgent 3-Day)';
-      case 'CODE 02':
-        return 'Alligator Crack (High 3-Day)';
-      case 'CODE 05':
-        return 'Pavement Depression (30-Day)';
-      case 'CODE 12':
-        return 'Crack (Routine Sealant)';
-      default:
-        return 'Pothole';
-    }
+    return DpwhStandards.getCodeTitle(code);
   }
 
-  /// Evaluates the highest severity among all detected potholes in the image
+  /// Evaluates the highest severity among all detected defects in the image
   static String getOverallSeverity(List<Map<String, dynamic>> detections) {
     if (detections.isEmpty) return 'medium';
     bool hasHigh = false;
@@ -814,6 +790,22 @@ class _MyHomePageState extends State<MyHomePage> {
       final overallSeverity = getOverallSeverity(detections);
       final potholeCount = detections.isNotEmpty ? detections.length : 1;
 
+      DpwhDefectClass primaryClass = DpwhStandards.pothole;
+      if (detections.isNotEmpty) {
+        for (final det in detections) {
+          final c = DpwhStandards.classify(det['tag'] as String?);
+          if (c.code == 'CODE 01') {
+            primaryClass = c;
+            break;
+          } else if (c.code == 'CODE 02' && primaryClass.code != 'CODE 01') {
+            primaryClass = c;
+          } else if (primaryClass.code == 'CODE 12' &&
+              (c.code == 'CODE 05' || c.code == 'CODE 02')) {
+            primaryClass = c;
+          }
+        }
+      }
+
       final List<Map<String, dynamic>> parsedDetections = detections.map((det) {
         if (!det.containsKey('box')) return <String, dynamic>{};
         final box = det['box'] as List<dynamic>;
@@ -822,24 +814,43 @@ class _MyHomePageState extends State<MyHomePage> {
         final right = (box[2] as num).toDouble();
         final bottom = (box[3] as num).toDouble();
         final conf = box.length > 4 ? (box[4] as num).toDouble() : 0.0;
-        final sev = getDetectionSeverity(det);
-        final dpwhCode = getDpwhCode(sev, det['tag'] as String? ?? '');
-        final defectType = getDpwhDefectTitle(dpwhCode);
+        final rawTag = det['tag'] as String? ?? '';
+        final defectClass = DpwhStandards.classify(rawTag);
+        final sev = DpwhStandards.evaluateSeverity(det);
         return {
+          'classId': defectClass.classId,
+          'className': defectClass.name,
+          'rawTag': rawTag,
+          'dpwhCode': defectClass.code,
+          'defectType': defectClass.name,
           'severity': sev,
           'confidence': conf,
-          'dpwhCode': dpwhCode,
-          'defectType': defectType,
+          'responseTime': defectClass.responseTime,
+          'correctiveMeasure': defectClass.correctiveMeasure,
+          'unit': defectClass.unit,
           'box': [left, top, right, bottom],
         };
       }).toList();
+
+      LguLocationInfo? lguInfo;
+      try {
+        lguInfo = await CloudService.instance.reverseGeocodeLgu(loc);
+      } catch (_) {}
 
       await CloudService.instance.addPotholeToCloud(
         location: loc,
         imageUrl: azureUrl ?? '',
         overallSeverity: overallSeverity,
         potholeCount: potholeCount,
+        primaryDpwhCode: primaryClass.code,
+        primaryDefect: primaryClass.name,
+        responseTime: primaryClass.responseTime,
+        correctiveMeasure: primaryClass.correctiveMeasure,
         detections: parsedDetections,
+        barangay: lguInfo?.barangay,
+        city: lguInfo?.city,
+        province: lguInfo?.province,
+        formattedAddress: lguInfo?.formattedAddress,
       );
 
       _loadPotholesFromDB();
@@ -855,9 +866,9 @@ class _MyHomePageState extends State<MyHomePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              "✅ $potholeCount Pothole(s) (${overallSeverity.toUpperCase()} Severity) submitted for approval!",
+              "✅ $potholeCount Hazard(s) [${primaryClass.code}: ${primaryClass.name}] submitted for approval!",
             ),
-            backgroundColor: getSeverityColor(overallSeverity),
+            backgroundColor: DpwhStandards.getCodeColor(primaryClass.code),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -1037,10 +1048,12 @@ class _MyHomePageState extends State<MyHomePage> {
       final double confidence =
           box.length > 4 ? (box[4] as num).toDouble() * 100 : 0.0;
 
-      final String severity = getDetectionSeverity(result);
-      final String dpwhCode = getDpwhCode(severity, result['tag'] as String? ?? '');
-      final Color boxColor = getSeverityColor(severity);
-      final String severityLabel = severity.toUpperCase();
+      final String rawTag = result['tag'] as String? ?? '';
+      final DpwhDefectClass defectClass = DpwhStandards.classify(rawTag);
+      final String severity = DpwhStandards.evaluateSeverity(result);
+      final String dpwhCode = defectClass.code;
+      final Color boxColor = DpwhStandards.getCodeColor(dpwhCode);
+      final String label = '[$dpwhCode] ${defectClass.name} ${confidence > 0 ? "(${confidence.toStringAsFixed(0)}%)" : ""}';
 
       return Positioned(
         left: left,
@@ -1064,7 +1077,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
               child: Text(
-                '[$dpwhCode] $severityLabel ${confidence > 0 ? "(${confidence.toStringAsFixed(0)}%)" : ""}',
+                label,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -1094,12 +1107,16 @@ class _MyHomePageState extends State<MyHomePage> {
     double height = bottom - top;
     double confidence = box.length > 4 ? box[4] * 100 : 0.0;
 
-    final String severity = getDetectionSeverity(result);
-    final String dpwhCode = getDpwhCode(severity, result['tag'] as String? ?? '');
-    final Color boxColor = getSeverityColor(severity);
-    final String severityLabel = severity.toUpperCase();
+    final String rawTag = result['tag'] as String? ?? '';
+    final DpwhDefectClass defectClass = DpwhStandards.classify(rawTag);
+    final String severity = DpwhStandards.evaluateSeverity(result);
+    final String dpwhCode = defectClass.code;
+    final Color boxColor = DpwhStandards.getCodeColor(dpwhCode);
+    final String label = '[$dpwhCode] ${defectClass.name} • ${confidence > 0 ? "${confidence.toStringAsFixed(0)}%" : ""}';
 
-    return Positioned(
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       left: left,
       top: top,
       width: width,
@@ -1121,7 +1138,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             child: Text(
-              "[$dpwhCode] $severityLabel • ${confidence.toStringAsFixed(0)}%",
+              label,
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12.0,

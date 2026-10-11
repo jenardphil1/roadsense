@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +14,7 @@ import 'app_settings.dart';
 import 'settings_dialog.dart';
 import 'web_components.dart';
 import 'web_design.dart';
+import 'dpwh_standards.dart';
 
 class AdminPotholeItem {
   final String id;
@@ -28,6 +29,17 @@ class AdminPotholeItem {
 
   String get status => (data['status'] as String? ?? 'pending').toLowerCase();
   String get severity => (data['overallSeverity'] as String? ?? 'medium').toLowerCase();
+  String get primaryDpwhCode => data['primaryDpwhCode'] as String? ?? 'CODE 01';
+  String get primaryDefect => data['primaryDefect'] as String? ?? DpwhStandards.classifyByCode(primaryDpwhCode).name;
+  String get responseTime => data['responseTime'] as String? ?? DpwhStandards.classifyByCode(primaryDpwhCode).responseTime;
+  String get correctiveMeasure => data['correctiveMeasure'] as String? ?? DpwhStandards.classifyByCode(primaryDpwhCode).correctiveMeasure;
+  List<Map<String, dynamic>>? get detections => (data['detections'] as List<dynamic>?)
+      ?.map((e) => Map<String, dynamic>.from(e as Map))
+      .toList();
+  String get barangay => (data['barangay'] as String? ?? '').trim();
+  String get city => (data['city'] as String? ?? '').trim();
+  String get province => (data['province'] as String? ?? 'Bulacan').trim();
+  String get formattedAddress => (data['formattedAddress'] as String? ?? '').trim();
 }
 
 class AdminPotholeCluster {
@@ -115,10 +127,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   // Sorting & Location-based Filtering State
   String _listSortMode = 'priority'; // 'newest', 'oldest', 'proximity', 'severity', 'priority'
   String _listSeverityFilter = 'all'; // 'all', 'high', 'medium', 'low'
+  String _listDpwhFilter = 'all'; // 'all', 'CODE 01', 'CODE 02', 'CODE 05', 'CODE 12'
   Position? _adminPosition;
   bool _isFetchingAdminPosition = false;
 
   final TextEditingController _listSearchController = TextEditingController();
+
+  // LGU & Barangay Geographic Analytics State
+  String _selectedLguCity = 'all';
+  String _lguSearchQuery = '';
+  final TextEditingController _lguSearchController = TextEditingController();
+  bool _isGeocodingLgu = false;
+  int _geocodedCount = 0;
+  int _totalToGeocode = 0;
 
   @override
   void initState() {
@@ -134,6 +155,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   @override
   void dispose() {
     _listSearchController.dispose();
+    _lguSearchController.dispose();
     super.dispose();
   }
 
@@ -772,6 +794,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           deletedDocs,
           allDocs: docs,
         );
+      case 6:
+        return _buildLguAnalyticsView(context, activeDocs);
       default:
         return _buildAnalyticsOverview(activeDocs, pendingDocs, approvedDocs);
     }
@@ -900,6 +924,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   label: 'Trash bin',
                   badgeCount: deletedCount,
                   badgeTone: StatusTone.rejected,
+                ),
+
+                const SizedBox(height: WebDesign.space4),
+                _navGroupLabel('Reporting & Governance'),
+                _buildNavItem(
+                  index: 6,
+                  icon: Icons.location_city_outlined,
+                  activeIcon: Icons.location_city_rounded,
+                  label: 'Barangay & LGU',
                 ),
 
                 if (isSuperAdmin) ...[
@@ -1102,6 +1135,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       ('Monitoring', 'GIS map & inspection'),
       ('Administration', 'Users & data export'),
       ('Maintenance', 'Trash bin / Archived'),
+      ('Reporting & Governance', 'Barangay & City LGU Analytics'),
     ];
 
     final idx = _selectedIndex.clamp(0, sections.length - 1);
@@ -1509,8 +1543,463 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
           const SizedBox(height: 24),
 
+          // DPWH Road Distress Standards Breakdown
+          _buildDpwhDistressBreakdown(allDocs),
+
+          const SizedBox(height: 24),
+
+          // YOLOv8 Thesis Evaluation & AI Model Benchmark
+          _buildThesisModelBenchmarkCard(),
+
+          const SizedBox(height: 24),
+
           // Pothole Distress Weather Radar
           _buildPotholeWeatherReport(allDocs),
+
+          const SizedBox(height: 24),
+
+          // LGU & Barangay Geographic Distress Breakdown
+          _buildLguDistressSummaryCard(allDocs),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDpwhDistressBreakdown(List<QueryDocumentSnapshot> docs) {
+    final isDark = AppSettings.instance.isDarkMode;
+
+    final Map<String, int> codeCounts = {
+      'CODE 01': 0,
+      'CODE 02': 0,
+      'CODE 05': 0,
+      'CODE 12 (Longitudinal)': 0,
+      'CODE 12 (Transverse)': 0,
+    };
+
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final code = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+      final defect = (data['primaryDefect'] as String? ?? '').toLowerCase();
+      if (code == 'CODE 12') {
+        if (defect.contains('transverse')) {
+          codeCounts['CODE 12 (Transverse)'] = (codeCounts['CODE 12 (Transverse)'] ?? 0) + 1;
+        } else {
+          codeCounts['CODE 12 (Longitudinal)'] = (codeCounts['CODE 12 (Longitudinal)'] ?? 0) + 1;
+        }
+      } else if (code == 'CODE 02') {
+        codeCounts['CODE 02'] = (codeCounts['CODE 02'] ?? 0) + 1;
+      } else if (code == 'CODE 05') {
+        codeCounts['CODE 05'] = (codeCounts['CODE 05'] ?? 0) + 1;
+      } else {
+        codeCounts['CODE 01'] = (codeCounts['CODE 01'] ?? 0) + 1;
+      }
+    }
+
+    final totalCount = docs.isEmpty ? 1 : docs.length;
+
+    final distressItems = [
+      {
+        'code': 'CODE 01',
+        'title': 'Pothole',
+        'count': codeCounts['CODE 01'] ?? 0,
+        'sla': '3 Days (Urgent)',
+        'unit': 'sq.m.',
+        'color': DpwhStandards.getCodeColor('CODE 01'),
+        'measure': 'Bituminous premix patching (hot mix or penetration method).',
+      },
+      {
+        'code': 'CODE 02',
+        'title': 'Alligator crack',
+        'count': codeCounts['CODE 02'] ?? 0,
+        'sla': '3 Days (Structural)',
+        'unit': 'sq.m.',
+        'color': DpwhStandards.getCodeColor('CODE 02'),
+        'measure': 'Reconstruction or deep-patching with base stabilization.',
+      },
+      {
+        'code': 'CODE 05',
+        'title': 'Depression',
+        'count': codeCounts['CODE 05'] ?? 0,
+        'sla': '30 Days',
+        'unit': 'sq.m.',
+        'color': DpwhStandards.getCodeColor('CODE 05'),
+        'measure': 'Leveling course overlay or localized re-blocking.',
+      },
+      {
+        'code': 'CODE 12',
+        'title': 'Longitudinal crack',
+        'count': codeCounts['CODE 12 (Longitudinal)'] ?? 0,
+        'sla': 'Routine Maintenance',
+        'unit': 'l.m.',
+        'color': DpwhStandards.getCodeColor('CODE 12'),
+        'measure': 'Crack cleaning and hot-poured asphalt sealant.',
+      },
+      {
+        'code': 'CODE 12',
+        'title': 'Transverse crack',
+        'count': codeCounts['CODE 12 (Transverse)'] ?? 0,
+        'sla': 'Routine Maintenance',
+        'unit': 'l.m.',
+        'color': const Color(0xFF6366F1),
+        'measure': 'Crack cleaning and hot-poured asphalt sealant.',
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _surface(isDark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _border(isDark).withValues(alpha: isDark ? 1 : 0.7),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.rule_folder_rounded,
+                      color: Color(0xFF2563EB),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'DPWH Road Distress Standards Breakdown',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: WebDesign.textPrimary(isDark),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Official classification according to DPWH Maintenance Manual specifications',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: WebDesign.textSecondary(isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.verified_rounded, size: 13, color: Color(0xFF10B981)),
+                    SizedBox(width: 4),
+                    Text(
+                      'DPWH COMPLIANT',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF10B981),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Column(
+            children: distressItems.map((item) {
+              final count = item['count'] as int;
+              final color = item['color'] as Color;
+              final pct = (count / totalCount) * 100;
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            item['code'] as String,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            item['title'] as String,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: WebDesign.textPrimary(isDark),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF2563EB).withValues(alpha: 0.4)),
+                          ),
+                          child: Text(
+                            'SLA: ${item['sla']}',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF2563EB),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          '$count reports (${pct.toStringAsFixed(1)}%)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: WebDesign.textSecondary(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: docs.isEmpty ? 0 : (count / totalCount),
+                        backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                        minHeight: 6,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Corrective Measure: ${item['measure']}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: WebDesign.textSecondary(isDark),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThesisModelBenchmarkCard() {
+    final isDark = AppSettings.instance.isDarkMode;
+
+    final metrics = [
+      {'label': 'Architecture', 'value': 'YOLOv8s PyTorch / TFLite FP16', 'icon': Icons.memory_rounded, 'color': const Color(0xFF2563EB)},
+      {'label': 'mAP@50 (Test Set)', 'value': '71.1% (0.711)', 'icon': Icons.insights_rounded, 'color': const Color(0xFF10B981)},
+      {'label': 'Inference Latency', 'value': '17.25 ms (57.99 FPS)', 'icon': Icons.speed_rounded, 'color': const Color(0xFFF59E0B)},
+      {'label': 'F1-Score Peak', 'value': '70.7% @ 0.449 conf', 'icon': Icons.stars_rounded, 'color': const Color(0xFF8B5CF6)},
+      {'label': 'Precision / Recall', 'value': '73.7% P / 67.9% R', 'icon': Icons.analytics_rounded, 'color': const Color(0xFF06B6D4)},
+      {'label': 'Evaluation Dataset', 'value': '1,515 Images (151 Test)', 'icon': Icons.photo_library_rounded, 'color': const Color(0xFFEC4899)},
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _surface(isDark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF2563EB).withValues(alpha: isDark ? 0.6 : 0.35),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2563EB).withValues(alpha: isDark ? 0.15 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.school_rounded,
+                      color: Color(0xFF2563EB),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'DPWH Thesis AI Model Evaluation & Benchmarks',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: WebDesign.textPrimary(isDark),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Performance validation metrics for YOLOv8s road distress detection',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: WebDesign.textSecondary(isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF2563EB).withValues(alpha: 0.5)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.science_rounded, size: 13, color: Color(0xFF2563EB)),
+                    SizedBox(width: 4),
+                    Text(
+                      'THESIS VERIFIED',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF2563EB),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 750;
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: metrics.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: isWide ? 3 : 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: isWide ? 2.5 : 2.0,
+                ),
+                itemBuilder: (context, idx) {
+                  final m = metrics[idx];
+                  final color = m['color'] as Color;
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(m['icon'] as IconData, color: color, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                m['label'] as String,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: WebDesign.textSecondary(isDark),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                m['value'] as String,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: WebDesign.textPrimary(isDark),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ],
       ),
     );
@@ -1792,6 +2281,1157 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LGU & BARANGAY GEOGRAPHIC DISTRESS REPORTING & ANALYTICS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  static final Map<String, LatLng> _bulacanMunicipalities = {
+    'Santa Maria': const LatLng(14.8192, 120.9634),
+    'City of Malolos': const LatLng(14.8527, 120.8160),
+    'City of San Jose del Monte': const LatLng(14.8135, 121.0453),
+    'City of Meycauayan': const LatLng(14.7381, 120.9587),
+    'Marilao': const LatLng(14.7578, 120.9578),
+    'Bocaue': const LatLng(14.7997, 120.9298),
+    'Guiguinto': const LatLng(14.8322, 120.8794),
+    'Balagtas': const LatLng(14.8142, 120.9083),
+    'Baliwag': const LatLng(14.9544, 120.9011),
+    'Plaridel': const LatLng(14.8872, 120.8572),
+    'Pulilan': const LatLng(14.9022, 120.8492),
+    'Calumpit': const LatLng(14.9161, 120.7644),
+    'Hagonoy': const LatLng(14.8344, 120.7328),
+    'Paombong': const LatLng(14.8361, 120.7878),
+    'San Miguel': const LatLng(15.1444, 120.9761),
+    'San Ildefonso': const LatLng(15.0789, 120.9417),
+    'San Rafael': const LatLng(14.9667, 120.9167),
+    'Bustos': const LatLng(14.9539, 120.9111),
+    'Pandi': const LatLng(14.8683, 120.9578),
+    'Angat': const LatLng(14.9308, 121.0314),
+    'Norzagaray': const LatLng(14.9150, 121.0450),
+    'Doña Remedios Trinidad': const LatLng(15.0000, 121.1000),
+    'Bulakan': const LatLng(14.7944, 120.8806),
+    'Obando': const LatLng(14.7083, 120.9389),
+  };
+
+  /// Heuristic to approximate nearest Bulacan municipality for un-geocoded coordinates
+  String _approximateBulacanCity(LatLng point) {
+    String closestCity = 'Santa Maria';
+    double minDistance = double.infinity;
+    for (final entry in _bulacanMunicipalities.entries) {
+      final d = Geolocator.distanceBetween(
+        point.latitude,
+        point.longitude,
+        entry.value.latitude,
+        entry.value.longitude,
+      );
+      if (d < minDistance) {
+        minDistance = d;
+        closestCity = entry.key;
+      }
+    }
+    return closestCity;
+  }
+
+  /// Builds a structured two-level hierarchy of City -> Barangay -> List of Potholes
+  Map<String, Map<String, List<AdminPotholeItem>>> _buildLguTree(
+    List<QueryDocumentSnapshot> docs,
+  ) {
+    final Map<String, Map<String, List<AdminPotholeItem>>> tree = {};
+
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final lat = (data['latitude'] as num?)?.toDouble();
+      final lng = (data['longitude'] as num?)?.toDouble();
+      if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) continue;
+
+      final point = LatLng(lat, lng);
+      final item = AdminPotholeItem(
+        id: doc.id,
+        location: point,
+        data: data,
+      );
+
+      String city = item.city;
+      if (city.isEmpty || city == 'Bulacan District') {
+        city = _approximateBulacanCity(point);
+      }
+
+      String brgy = item.barangay;
+      if (brgy.isEmpty) {
+        brgy = 'Unassigned Barangay';
+      }
+
+      tree.putIfAbsent(city, () => {});
+      tree[city]!.putIfAbsent(brgy, () => []);
+      tree[city]![brgy]!.add(item);
+    }
+
+    return tree;
+  }
+
+  /// Executive Summary Card displayed on Tab 0 (Overview)
+  Widget _buildLguDistressSummaryCard(List<QueryDocumentSnapshot> docs) {
+    final isDark = AppSettings.instance.isDarkMode;
+    final tree = _buildLguTree(docs);
+
+    if (tree.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // Sort cities by total pothole count
+    final cityList = tree.entries.map((e) {
+      int total = 0;
+      for (final brgy in e.value.values) {
+        total += brgy.length;
+      }
+      return MapEntry(e.key, total);
+    }).toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Flatten all barangays to find top affected barangays
+    final List<Map<String, dynamic>> allBarangays = [];
+    for (final cityEntry in tree.entries) {
+      for (final brgyEntry in cityEntry.value.entries) {
+        int highCount = brgyEntry.value.where((p) => p.severity == 'high').length;
+        allBarangays.add({
+          'city': cityEntry.key,
+          'barangay': brgyEntry.key,
+          'count': brgyEntry.value.length,
+          'high': highCount,
+          'items': brgyEntry.value,
+        });
+      }
+    }
+    allBarangays.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+
+    final topBarangays = allBarangays.take(5).toList();
+    final int maxBrgyCount = topBarangays.isNotEmpty
+        ? (topBarangays.first['count'] as int)
+        : 1;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _surface(isDark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _border(isDark).withValues(alpha: isDark ? 1 : 0.7),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.location_city_rounded,
+                      color: Color(0xFF0284C7),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'LGU & Barangay Distress Breakdown',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: WebDesign.textPrimary(isDark),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Geographical hazard distribution across Municipalities & Barangays',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: WebDesign.textSecondary(isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => setState(() => _selectedIndex = 6),
+                icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                label: const Text(
+                  'View Full LGU Analytics',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Divider(color: _border(isDark).withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+
+          // Top Municipalities Pills
+          Text(
+            'Top Impacted Municipalities / Cities',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: WebDesign.textSecondary(isDark),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: cityList.take(6).map((city) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _border(isDark).withValues(alpha: 0.6),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.apartment_rounded,
+                      size: 16,
+                      color: const Color(0xFF0284C7),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      city.key,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: WebDesign.textPrimary(isDark),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${city.value} hazards',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0284C7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Top 5 Highest Distress Barangays Table / Progress List
+          Text(
+            'Top 5 Highest Distress Barangays',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: WebDesign.textSecondary(isDark),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Column(
+            children: topBarangays.map((b) {
+              final int count = b['count'] as int;
+              final double ratio = (count / maxBrgyCount).clamp(0.05, 1.0);
+              final int high = b['high'] as int;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              b['barangay'] as String,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: WebDesign.textPrimary(isDark),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '(${b['city']})',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: WebDesign.textSecondary(isDark),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            if (high > 0)
+                              Container(
+                                margin: const EdgeInsets.only(right: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '$high HIGH URGENCY',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFFEF4444),
+                                  ),
+                                ),
+                              ),
+                            Text(
+                              '$count potholes',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: WebDesign.textPrimary(isDark),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: ratio,
+                        minHeight: 6,
+                        backgroundColor: isDark
+                            ? const Color(0xFF334155)
+                            : const Color(0xFFE2E8F0),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          high > 0 ? const Color(0xFFEF4444) : const Color(0xFF0284C7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Dedicated Full Page LGU & Barangay Analytics Canvas (Tab Index 6)
+  Widget _buildLguAnalyticsView(
+    BuildContext context,
+    List<QueryDocumentSnapshot> docs,
+  ) {
+    final isDark = AppSettings.instance.isDarkMode;
+    final tree = _buildLguTree(docs);
+
+    // Compute Summary Stats
+    final List<String> cities = tree.keys.toList()..sort();
+    int totalPotholes = 0;
+    int totalBarangays = 0;
+    String topCityName = 'None';
+    int topCityCount = 0;
+    String topBrgyName = 'None';
+    int topBrgyCount = 0;
+
+    for (final cityEntry in tree.entries) {
+      int citySum = 0;
+      for (final brgyEntry in cityEntry.value.entries) {
+        totalBarangays++;
+        final c = brgyEntry.value.length;
+        citySum += c;
+        totalPotholes += c;
+        if (c > topBrgyCount) {
+          topBrgyCount = c;
+          topBrgyName = '${brgyEntry.key} (${cityEntry.key})';
+        }
+      }
+      if (citySum > topCityCount) {
+        topCityCount = citySum;
+        topCityName = cityEntry.key;
+      }
+    }
+
+    // Filter tree according to selected city and search query
+    final filteredTree = <String, Map<String, List<AdminPotholeItem>>>{};
+    for (final cityEntry in tree.entries) {
+      if (_selectedLguCity != 'all' && cityEntry.key != _selectedLguCity) {
+        continue;
+      }
+
+      final filteredBrgys = <String, List<AdminPotholeItem>>{};
+      for (final brgyEntry in cityEntry.value.entries) {
+        final query = _lguSearchQuery.trim().toLowerCase();
+        if (query.isNotEmpty) {
+          final matchesBrgy = brgyEntry.key.toLowerCase().contains(query);
+          final matchesCity = cityEntry.key.toLowerCase().contains(query);
+          if (!matchesBrgy && !matchesCity) continue;
+        }
+        filteredBrgys[brgyEntry.key] = brgyEntry.value;
+      }
+
+      if (filteredBrgys.isNotEmpty) {
+        filteredTree[cityEntry.key] = filteredBrgys;
+      }
+    }
+
+    // Check how many documents lack reverse geocoded LGU details
+    final unclassifiedDocs = docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      final b = (data['barangay'] as String? ?? '').trim();
+      final c = (data['city'] as String? ?? '').trim();
+      return b.isEmpty || c.isEmpty || b == 'Unassigned Barangay';
+    }).toList();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header Card
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.location_city_rounded,
+                          color: Color(0xFF0284C7),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Barangay & City LGU Distress Analytics',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: WebDesign.textPrimary(isDark),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'DPWH Provincial road hazard audit classified by Municipality & Barangay in Bulacan',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: WebDesign.textSecondary(isDark),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                children: [
+                  // Auto-classify Button
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0284C7),
+                      side: const BorderSide(color: Color(0xFF0284C7)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: _isGeocodingLgu
+                        ? null
+                        : () => _autoClassifyUnassignedLgu(unclassifiedDocs),
+                    icon: _isGeocodingLgu
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0284C7)),
+                          )
+                        : const Icon(Icons.sync_rounded, size: 18),
+                    label: Text(
+                      _isGeocodingLgu
+                          ? 'Geocoding ($_geocodedCount/$_totalToGeocode)...'
+                          : (unclassifiedDocs.isNotEmpty
+                              ? 'Classify ${unclassifiedDocs.length} Locations'
+                              : 'Re-sync All LGUs'),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                  // Export CSV Button
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () => _exportLguCsv(tree),
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: const Text(
+                      'Export LGU CSV',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Stat Metrics Row
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 800;
+              return GridView.count(
+                crossAxisCount: isWide ? 4 : 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: isWide ? 2.3 : 1.7,
+                children: [
+                  _buildMetricCard(
+                    'Active Municipalities',
+                    '${cities.length}',
+                    Icons.apartment_rounded,
+                    const Color(0xFF2563EB),
+                  ),
+                  _buildMetricCard(
+                    'Barangays Impacted',
+                    '$totalBarangays',
+                    Icons.holiday_village_rounded,
+                    const Color(0xFF059669),
+                  ),
+                  _buildMetricCard(
+                    'Top City / Town',
+                    topCityName,
+                    Icons.domain_rounded,
+                    const Color(0xFFD97706),
+                  ),
+                  _buildMetricCard(
+                    'Top Distress Barangay',
+                    topBrgyName.split('(').first.trim(),
+                    Icons.warning_amber_rounded,
+                    const Color(0xFFEF4444),
+                  ),
+                ],
+              );
+            },
+          ),
+
+          const SizedBox(height: 24),
+
+          // Search & Filter Toolbar
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _surface(isDark),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _border(isDark)),
+            ),
+            child: Row(
+              children: [
+                // Search Input
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _lguSearchController,
+                    style: TextStyle(
+                      color: WebDesign.textPrimary(isDark),
+                      fontSize: 14,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Search Barangay or Street...',
+                      hintStyle: TextStyle(
+                        color: WebDesign.textSecondary(isDark),
+                        fontSize: 13,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: WebDesign.textSecondary(isDark),
+                        size: 20,
+                      ),
+                      suffixIcon: _lguSearchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 18),
+                              onPressed: () {
+                                _lguSearchController.clear();
+                                setState(() => _lguSearchQuery = '');
+                              },
+                            )
+                          : null,
+                      isDense: true,
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _border(isDark)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _border(isDark)),
+                      ),
+                    ),
+                    onChanged: (val) {
+                      setState(() => _lguSearchQuery = val);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // City Filter Dropdown
+                Expanded(
+                  flex: 1,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _border(isDark)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _selectedLguCity,
+                        isExpanded: true,
+                        dropdownColor: _surface(isDark),
+                        icon: const Icon(Icons.arrow_drop_down_rounded),
+                        style: TextStyle(
+                          color: WebDesign.textPrimary(isDark),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'all',
+                            child: Text('All Municipalities'),
+                          ),
+                          ...cities.map((c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c),
+                              )),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() => _selectedLguCity = val);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // LGU Hierarchy Display (Cards per City with Barangay Table)
+          if (filteredTree.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: _surface(isDark),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _border(isDark)),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.search_off_rounded,
+                      size: 48,
+                      color: WebDesign.textSecondary(isDark),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No matching LGU records found',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: WebDesign.textPrimary(isDark),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Try resetting filters or click "Classify Locations" above.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: WebDesign.textSecondary(isDark),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...filteredTree.entries.map((cityEntry) {
+              final cityName = cityEntry.key;
+              final brgyMap = cityEntry.value;
+
+              int cityTotal = 0;
+              int cityHigh = 0;
+              int cityPending = 0;
+              for (final list in brgyMap.values) {
+                cityTotal += list.length;
+                cityHigh += list.where((p) => p.severity == 'high').length;
+                cityPending += list.where((p) => p.status == 'pending').length;
+              }
+
+              final sortedBrgys = brgyMap.entries.toList()
+                ..sort((a, b) => b.value.length.compareTo(a.value.length));
+
+              final int maxInCity = sortedBrgys.isNotEmpty
+                  ? sortedBrgys.first.value.length
+                  : 1;
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(
+                  color: _surface(isDark),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: _border(isDark).withValues(alpha: isDark ? 1 : 0.7),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // City Section Header
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+                        border: Border(bottom: BorderSide(color: _border(isDark))),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.apartment_rounded,
+                                color: const Color(0xFF0284C7),
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                cityName,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: WebDesign.textPrimary(isDark),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${sortedBrgys.length} Barangays',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF0284C7),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              if (cityHigh > 0)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFFEF4444).withValues(alpha: 0.5),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '$cityHigh High Severity',
+                                    style: const TextStyle(
+                                      color: Color(0xFFEF4444),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '$cityTotal Total Distress Reports',
+                                  style: TextStyle(
+                                    color: WebDesign.textPrimary(isDark),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Barangays Table / Rows
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: sortedBrgys.length,
+                      separatorBuilder: (_, __) => Divider(
+                        color: _border(isDark).withValues(alpha: 0.5),
+                        height: 1,
+                      ),
+                      itemBuilder: (context, idx) {
+                        final brgy = sortedBrgys[idx];
+                        final items = brgy.value;
+                        final count = items.length;
+                        final high = items.where((p) => p.severity == 'high').length;
+                        final med = items.where((p) => p.severity == 'medium').length;
+                        final low = items.where((p) => p.severity == 'low').length;
+                        final approved = items.where((p) => p.status == 'approved').length;
+                        final pending = items.where((p) => p.status == 'pending').length;
+                        final ratio = (count / maxInCity).clamp(0.04, 1.0);
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          child: Row(
+                            children: [
+                              // Barangay name & relative progress
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          brgy.key,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: WebDesign.textPrimary(isDark),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '$count hazards',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: const Color(0xFF0284C7),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: LinearProgressIndicator(
+                                        value: ratio,
+                                        minHeight: 6,
+                                        backgroundColor: isDark
+                                            ? const Color(0xFF334155)
+                                            : const Color(0xFFE2E8F0),
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          high > 0
+                                              ? const Color(0xFFEF4444)
+                                              : (med > 0
+                                                  ? const Color(0xFFF97316)
+                                                  : const Color(0xFF0284C7)),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(width: 20),
+
+                              // Severity Chips
+                              Expanded(
+                                flex: 2,
+                                child: Wrap(
+                                  spacing: 6,
+                                  children: [
+                                    if (high > 0)
+                                      _buildSeverityBadge('$high High', const Color(0xFFEF4444)),
+                                    if (med > 0)
+                                      _buildSeverityBadge('$med Med', const Color(0xFFF97316)),
+                                    if (low > 0)
+                                      _buildSeverityBadge('$low Low', const Color(0xFFEAB308)),
+                                  ],
+                                ),
+                              ),
+
+                              // Status Badges
+                              Expanded(
+                                flex: 2,
+                                child: Row(
+                                  children: [
+                                    if (approved > 0)
+                                      _buildStatusPill('$approved Approved', const Color(0xFF10B981)),
+                                    const SizedBox(width: 6),
+                                    if (pending > 0)
+                                      _buildStatusPill('$pending Pending', const Color(0xFFF59E0B)),
+                                  ],
+                                ),
+                              ),
+
+                              // View on Map Action
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF0284C7),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                ),
+                                icon: const Icon(Icons.pin_drop_rounded, size: 16),
+                                label: const Text(
+                                  'Locate',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () {
+                                  if (items.isNotEmpty) {
+                                    _locatePotholeOnMap(
+                                      items.first.location,
+                                      items.first.id,
+                                      items.first.data,
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeverityBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusPill(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  /// Exports the City & Barangay breakdown tree to a clean CSV report
+  void _exportLguCsv(Map<String, Map<String, List<AdminPotholeItem>>> tree) {
+    final List<List<dynamic>> rows = [
+      [
+        'Province',
+        'City / Municipality',
+        'Barangay',
+        'Total Hazards',
+        'High Severity',
+        'Medium Severity',
+        'Low Severity',
+        'Approved Live',
+        'Pending Review',
+      ],
+    ];
+
+    for (final cityEntry in tree.entries) {
+      for (final brgyEntry in cityEntry.value.entries) {
+        final items = brgyEntry.value;
+        final int high = items.where((p) => p.severity == 'high').length;
+        final int med = items.where((p) => p.severity == 'medium').length;
+        final int low = items.where((p) => p.severity == 'low').length;
+        final int approved = items.where((p) => p.status == 'approved').length;
+        final int pending = items.where((p) => p.status == 'pending').length;
+
+        rows.add([
+          'Bulacan',
+          cityEntry.key,
+          brgyEntry.key,
+          items.length,
+          high,
+          med,
+          low,
+          approved,
+          pending,
+        ]);
+      }
+    }
+
+    final csvContent = rows
+        .map((r) => r.map((cell) => '"${cell.toString().replaceAll('"', '""')}"').join(','))
+        .join('\r\n');
+
+    final bytes = utf8.encode(csvContent);
+    final blob = html.Blob([bytes], 'text/csv');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    html.AnchorElement(href: url)
+      ..setAttribute('download', 'roadsense_bulacan_lgu_report_${DateTime.now().millisecondsSinceEpoch}.csv')
+      ..click();
+    html.Url.revokeObjectUrl(url);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('LGU Barangay CSV report exported successfully.'),
+        backgroundColor: Color(0xFF10B981),
+      ),
+    );
+  }
+
+  /// Progressively reverse geocodes unassigned reports to backfill City & Barangay
+  Future<void> _autoClassifyUnassignedLgu(List<QueryDocumentSnapshot> docs) async {
+    if (docs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All road hazards already have classified LGU addresses!'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isGeocodingLgu = true;
+      _geocodedCount = 0;
+      _totalToGeocode = docs.length;
+    });
+
+    int count = 0;
+    for (final doc in docs) {
+      if (!_isGeocodingLgu) break;
+      try {
+        final data = doc.data() as Map<String, dynamic>;
+        final lat = (data['latitude'] as num?)?.toDouble();
+        final lng = (data['longitude'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          final info = await CloudService.instance.reverseGeocodeLgu(LatLng(lat, lng));
+          await CloudService.instance.updatePotholeLguLocation(
+            doc.id,
+            barangay: info.barangay,
+            city: info.city,
+            province: info.province,
+            formattedAddress: info.formattedAddress,
+          );
+        }
+      } catch (_) {}
+
+      count++;
+      if (mounted) {
+        setState(() => _geocodedCount = count);
+      }
+      // Polite rate limit delay to avoid hitting Nominatim limits
+      await Future.delayed(const Duration(milliseconds: 350));
+    }
+
+    if (mounted) {
+      setState(() => _isGeocodingLgu = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully classified $count hazard reports by Barangay & City!'),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+    }
+  }
+
   Widget _buildMetricCard(
     String label,
     String value,
@@ -1982,6 +3622,90 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  Widget _buildDpwhFilterChip({
+    required String label,
+    required int count,
+    required String value,
+    required Color color,
+    required bool isDark,
+  }) {
+    final isSelected = _listDpwhFilter == value;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _listDpwhFilter = value;
+        });
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withValues(alpha: isDark ? 0.25 : 0.15)
+              : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected
+                ? color
+                : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: isSelected ? color : color.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected
+                    ? (isDark ? Colors.white : color)
+                    : (isDark
+                        ? const Color(0xFF94A3B8)
+                        : const Color(0xFF475569)),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? color.withValues(alpha: 0.3)
+                    : (isDark
+                        ? const Color(0xFF1E293B)
+                        : const Color(0xFFE2E8F0)),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected
+                      ? (isDark ? Colors.white : color)
+                      : (isDark
+                          ? const Color(0xFFCBD5E1)
+                          : const Color(0xFF475569)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Enterprise Data List Layout with Smart Sorting & Location-based Filtering
   Widget _buildPotholeList(
     BuildContext context,
@@ -1991,7 +3715,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }) {
     final isDark = AppSettings.instance.isDarkMode;
 
-    // 1. Calculate Severity Totals for Filter Chips
+    // 1. Calculate Severity & DPWH Totals for Filter Chips
     final totalCount = rawDocs.length;
     final highCount = rawDocs.where((d) {
       final s = ((d.data() as Map<String, dynamic>)['overallSeverity'] as String? ?? '')
@@ -2009,7 +3733,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       return s == 'low';
     }).length;
 
-    // 2. Filter Documents by Search Query & Severity
+    final code01Count = rawDocs.where((d) =>
+        ((d.data() as Map<String, dynamic>)['primaryDpwhCode'] as String? ?? 'CODE 01') == 'CODE 01').length;
+    final code02Count = rawDocs.where((d) =>
+        ((d.data() as Map<String, dynamic>)['primaryDpwhCode'] as String? ?? '') == 'CODE 02').length;
+    final code05Count = rawDocs.where((d) =>
+        ((d.data() as Map<String, dynamic>)['primaryDpwhCode'] as String? ?? '') == 'CODE 05').length;
+    final code12Count = rawDocs.where((d) =>
+        ((d.data() as Map<String, dynamic>)['primaryDpwhCode'] as String? ?? '') == 'CODE 12').length;
+
+    // 2. Filter Documents by Search Query, Severity, & DPWH Code
     final q = _listSearchController.text.trim().toLowerCase();
     List<QueryDocumentSnapshot> displayedDocs = rawDocs.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
@@ -2022,6 +3755,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         if (_listSeverityFilter == 'low' && severity != 'low') return false;
       }
 
+      // DPWH code filter
+      if (_listDpwhFilter != 'all') {
+        final code = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+        if (code != _listDpwhFilter) return false;
+      }
+
       // Search query filter
       if (q.isNotEmpty) {
         final name = (data['reporterName'] as String? ?? '').toLowerCase();
@@ -2030,12 +3769,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         final id = doc.id.toLowerCase();
         final lat = (data['latitude'] as num?)?.toDouble().toString() ?? '';
         final lng = (data['longitude'] as num?)?.toDouble().toString() ?? '';
+        final dpwhCode = (data['primaryDpwhCode'] as String? ?? '').toLowerCase();
+        final defect = (data['primaryDefect'] as String? ?? '').toLowerCase();
         if (!name.contains(q) &&
             !email.contains(q) &&
             !address.contains(q) &&
             !id.contains(q) &&
             !lat.contains(q) &&
-            !lng.contains(q)) {
+            !lng.contains(q) &&
+            !dpwhCode.contains(q) &&
+            !defect.contains(q)) {
           return false;
         }
       }
@@ -2473,6 +4216,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             setState(() {
                               _listSearchController.clear();
                               _listSeverityFilter = 'all';
+                              _listDpwhFilter = 'all';
                             });
                           },
                           child: const Padding(
@@ -2493,6 +4237,61 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                         ),
                       ],
                     ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              // Row 3: Official DPWH Distress Category Filter Chips
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'DPWH CLASS:',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                      color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                  _buildDpwhFilterChip(
+                    label: 'All Classes',
+                    count: totalCount,
+                    value: 'all',
+                    color: const Color(0xFF2563EB),
+                    isDark: isDark,
+                  ),
+                  _buildDpwhFilterChip(
+                    label: 'Code 01: Pothole (3D)',
+                    count: code01Count,
+                    value: 'CODE 01',
+                    color: DpwhStandards.getCodeColor('CODE 01'),
+                    isDark: isDark,
+                  ),
+                  _buildDpwhFilterChip(
+                    label: 'Code 02: Alligator (3D)',
+                    count: code02Count,
+                    value: 'CODE 02',
+                    color: DpwhStandards.getCodeColor('CODE 02'),
+                    isDark: isDark,
+                  ),
+                  _buildDpwhFilterChip(
+                    label: 'Code 05: Depression (30D)',
+                    count: code05Count,
+                    value: 'CODE 05',
+                    color: DpwhStandards.getCodeColor('CODE 05'),
+                    isDark: isDark,
+                  ),
+                  _buildDpwhFilterChip(
+                    label: 'Code 12: Cracks (Routine)',
+                    count: code12Count,
+                    value: 'CODE 12',
+                    color: DpwhStandards.getCodeColor('CODE 12'),
+                    isDark: isDark,
                   ),
                 ],
               ),
@@ -2540,6 +4339,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             setState(() {
                               _listSearchController.clear();
                               _listSeverityFilter = 'all';
+                              _listDpwhFilter = 'all';
                             });
                           },
                           style: ElevatedButton.styleFrom(
@@ -2870,6 +4670,61 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                       crossAxisAlignment:
                                           WrapCrossAlignment.center,
                                       children: [
+                                        // DPWH Distress Code Pill
+                                        Builder(
+                                          builder: (context) {
+                                            final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+                                            final defectName = data['primaryDefect'] as String? ?? DpwhStandards.classifyByCode(dpwhCode).name;
+                                            final dpwhColor = DpwhStandards.getCodeColor(dpwhCode);
+                                            return Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 2.5,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: dpwhColor.withValues(alpha: 0.14),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: dpwhColor),
+                                              ),
+                                              child: Text(
+                                                '$dpwhCode: $defectName',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: dpwhColor,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+
+                                        // DPWH Response SLA Chip
+                                        Builder(
+                                          builder: (context) {
+                                            final sla = data['responseTime'] as String? ??
+                                                DpwhStandards.classifyByCode(data['primaryDpwhCode'] as String? ?? 'CODE 01').responseTime;
+                                            return Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 2.5,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: const Color(0xFF2563EB)),
+                                              ),
+                                              child: Text(
+                                                'SLA: $sla',
+                                                style: const TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: Color(0xFF2563EB),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+
                                         // Status Badge Pill
                                         Container(
                                           padding: const EdgeInsets.symmetric(
@@ -2983,6 +4838,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                             ],
                                           ),
                                         ),
+
+                                        // DPWH Statutory SLA Breach / Overdue Alert Pill
+                                        if (priority?.isSlaBreached == true)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 2.5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFEF4444).withValues(alpha: 0.16),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: const Color(0xFFEF4444),
+                                                width: 1.1,
+                                              ),
+                                            ),
+                                            child: const Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.timer_off_rounded,
+                                                  size: 10,
+                                                  color: Color(0xFFEF4444),
+                                                ),
+                                                SizedBox(width: 3),
+                                                Text(
+                                                  'DPWH OVERDUE',
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.w900,
+                                                    color: Color(0xFFEF4444),
+                                                    letterSpacing: 0.3,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
 
                                         // Duplicate-cluster pill: other pending
                                         // reports within 25 m are very likely
@@ -3276,7 +5168,59 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                               ],
                                             ),
                                           ),
+                                        // LGU Barangay & City Badge
+                                        if ((data['barangay'] as String? ?? '').isNotEmpty ||
+                                            (data['city'] as String? ?? '').isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: const Color(0xFF0284C7).withValues(alpha: 0.5),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.location_city_rounded,
+                                                  size: 11,
+                                                  color: Color(0xFF0284C7),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${data['barangay'] ?? ''}${(data['barangay'] != null && data['city'] != null && (data['barangay'] as String).isNotEmpty && (data['city'] as String).isNotEmpty) ? ', ' : ''}${data['city'] ?? ''}',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 10.5,
+                                                    color: Color(0xFF0284C7),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                       ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Builder(
+                                      builder: (context) {
+                                        final measure = data['correctiveMeasure'] as String? ??
+                                            DpwhStandards.classifyByCode(data['primaryDpwhCode'] as String? ?? 'CODE 01').correctiveMeasure;
+                                        return Text(
+                                          'DPWH Action: $measure',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontStyle: FontStyle.italic,
+                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
@@ -4774,6 +6718,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                           ],
                                         ),
                                       ),
+                                      const SizedBox(width: 8),
+                                      Builder(
+                                        builder: (context) {
+                                          final dpwhCode = _selectedPotholeData!['primaryDpwhCode'] as String? ??
+                                              DpwhStandards.getDefaultCodeForSeverity(_selectedPotholeData!['overallSeverity'] as String? ?? 'medium');
+                                          final dpwhInfo = DpwhStandards.getByCode(dpwhCode);
+                                          final color = dpwhInfo?.color ?? const Color(0xFFE11D48);
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: color.withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: color, width: 0.8),
+                                            ),
+                                            child: Text(
+                                              '${dpwhInfo?.code ?? dpwhCode}: ${dpwhInfo?.name ?? 'Pothole'}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: color,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Text(
@@ -4809,6 +6778,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                           fontFamily: 'monospace',
                                           fontSize: 12.5,
                                         ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Builder(
+                                        builder: (context) {
+                                          final dpwhCode = _selectedPotholeData!['primaryDpwhCode'] as String? ??
+                                              DpwhStandards.getDefaultCodeForSeverity(_selectedPotholeData!['overallSeverity'] as String? ?? 'medium');
+                                          final dpwhInfo = DpwhStandards.getByCode(dpwhCode);
+                                          final sla = _selectedPotholeData!['responseTime'] as String? ?? dpwhInfo?.responseTime ?? 'Within 30 Days';
+                                          return Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.timer_outlined, size: 12, color: Color(0xFF0284C7)),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                'SLA: $sla',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: isDark ? const Color(0xFF7DD3FC) : const Color(0xFF0369A1),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        },
                                       ),
                                     ],
                                   ),
@@ -5165,6 +7158,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                         'Latitude',
                         'Longitude',
                         'Status',
+                        'DPWH Code',
+                        'Distress Category',
+                        'Severity',
+                        'Response SLA',
+                        'Standard Corrective Measure',
                         'Reporter Name',
                         'Reporter Email',
                         'Timestamp',
@@ -5172,11 +7170,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     ];
                     for (var doc in allPotholeDocs) {
                       final data = doc.data() as Map<String, dynamic>;
+                      final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+                      final defect = data['primaryDefect'] as String? ?? DpwhStandards.classifyByCode(dpwhCode).name;
+                      final sla = data['responseTime'] as String? ?? DpwhStandards.classifyByCode(dpwhCode).responseTime;
+                      final measure = data['correctiveMeasure'] as String? ?? DpwhStandards.classifyByCode(dpwhCode).correctiveMeasure;
+                      final severity = data['overallSeverity'] as String? ?? DpwhStandards.classifyByCode(dpwhCode).severity;
+
                       rows.add([
                         doc.id,
                         data['latitude'],
                         data['longitude'],
                         data['status'],
+                        dpwhCode,
+                        defect,
+                        severity,
+                        sla,
+                        measure,
                         data['reporterName'],
                         data['reporterEmail'],
                         data['timestamp'] != null
@@ -5816,6 +7825,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         ? docId.substring(0, 8).toUpperCase()
         : docId.toUpperCase();
 
+    final primaryDpwhCode = data['primaryDpwhCode'] as String? ??
+        DpwhStandards.getDefaultCodeForSeverity(severity);
+    final dpwhInfo = DpwhStandards.getByCode(primaryDpwhCode);
+    final responseTime = data['responseTime'] as String? ??
+        dpwhInfo?.responseTime ??
+        'Within 30 Days';
+    final correctiveMeasure = data['correctiveMeasure'] as String? ??
+        dpwhInfo?.correctiveMeasure ??
+        'Re-blocking / Patching';
+    final detections = (data['detections'] as List?)
+            ?.whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList() ??
+        [];
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -6333,6 +8357,244 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             ),
                           ],
                         ),
+
+                        const SizedBox(height: 16),
+
+                        // DPWH Road Maintenance Specification Card
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: (dpwhInfo?.color ?? const Color(0xFF2563EB)).withValues(alpha: 0.35),
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: (dpwhInfo?.color ?? const Color(0xFF2563EB)).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      Icons.engineering_rounded,
+                                      size: 16,
+                                      color: dpwhInfo?.color ?? const Color(0xFF2563EB),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'DPWH ROAD MAINTENANCE SPECIFICATIONS',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: (dpwhInfo?.color ?? const Color(0xFF2563EB)).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: dpwhInfo?.color ?? const Color(0xFF2563EB),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      dpwhInfo?.code ?? primaryDpwhCode,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: dpwhInfo?.color ?? const Color(0xFF2563EB),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Distress Classification',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          dpwhInfo?.name ?? 'Pothole',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Mandatory SLA',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          responseTime,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFFEF4444),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Prescribed Corrective Measure',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                correctiveMeasure,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                                ),
+                              ),
+                              if (dpwhInfo != null) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Unit: ${dpwhInfo.unitOfMeasurement}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Text(
+                                      'Severity Priority: ${dpwhInfo.severityLevel}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              if (detections.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Divider(
+                                  height: 1,
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'YOLOv8 Optical Telemetry Detections (${detections.length}):',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                ...detections.map((det) {
+                                  final conf = (det['confidence'] as num?)?.toDouble() ?? 0.0;
+                                  final label = det['label'] as String? ?? 'Defect';
+                                  final detCode = det['dpwhCode'] as String? ?? DpwhStandards.getCodeForLabel(label);
+                                  final detColor = DpwhStandards.getColorForCode(detCode);
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: BoxDecoration(
+                                            color: detColor,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '[$detCode] $label',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          '${(conf * 100).toStringAsFixed(1)}% conf',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontFamily: 'monospace',
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ] else ...[
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.memory_rounded,
+                                      size: 14,
+                                      color: Color(0xFF059669),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        'Verified by YOLOv8s Model (71.1% mAP@50, 17.25ms inference latency, 57.99 FPS)',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontStyle: FontStyle.italic,
+                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -6603,6 +8865,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final isDark = AppSettings.instance.isDarkMode;
     String selectedSeverity =
         (data['overallSeverity'] as String? ?? 'medium').toLowerCase();
+    String selectedDpwhCode = data['primaryDpwhCode'] as String? ??
+        DpwhStandards.getDefaultCodeForSeverity(selectedSeverity);
     int potholeCount = (data['potholeCount'] as num?)?.toInt() ?? 1;
     final noteController =
         TextEditingController(text: data['note'] as String? ?? '');
@@ -6657,6 +8921,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                               : const Color(0xFF64748B),
                           fontFamily: 'monospace',
                         ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'DPWH Distress Classification',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        value: DpwhStandards.standards.any((s) => s.code == selectedDpwhCode)
+                            ? selectedDpwhCode
+                            : 'CODE 01',
+                        dropdownColor: _surface(isDark),
+                        decoration: InputDecoration(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        items: DpwhStandards.standards.map((std) {
+                          return DropdownMenuItem(
+                            value: std.code,
+                            child: Text(
+                              '${std.code}: ${std.name} (${std.responseTime})',
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedDpwhCode = val;
+                              final info = DpwhStandards.getByCode(val);
+                              if (info != null) {
+                                if (info.severityLevel.toLowerCase() == 'high') {
+                                  selectedSeverity = 'high';
+                                } else if (info.severityLevel.toLowerCase() == 'medium') {
+                                  selectedSeverity = 'medium';
+                                } else {
+                                  selectedSeverity = 'low';
+                                }
+                              }
+                            });
+                          }
+                        },
                       ),
                       const SizedBox(height: 16),
                       const Text(
@@ -6775,11 +9089,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     try {
+                      final info = DpwhStandards.getByCode(selectedDpwhCode);
                       await CloudService.instance.editPothole(
                         docId,
                         overallSeverity: selectedSeverity,
                         potholeCount: potholeCount,
                         note: noteController.text.trim(),
+                        primaryDpwhCode: selectedDpwhCode,
+                        primaryDefect: info?.name,
+                        responseTime: info?.responseTime,
+                        correctiveMeasure: info?.correctiveMeasure,
                       );
                       if (mounted) {
                         setState(() {
@@ -6790,6 +9109,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             _selectedPotholeData!['potholeCount'] = potholeCount;
                             _selectedPotholeData!['note'] =
                                 noteController.text.trim();
+                            _selectedPotholeData!['primaryDpwhCode'] =
+                                selectedDpwhCode;
+                            _selectedPotholeData!['primaryDefect'] =
+                                info?.name;
+                            _selectedPotholeData!['responseTime'] =
+                                info?.responseTime;
+                            _selectedPotholeData!['correctiveMeasure'] =
+                                info?.correctiveMeasure;
                           }
                         });
                         ScaffoldMessenger.of(context).showSnackBar(

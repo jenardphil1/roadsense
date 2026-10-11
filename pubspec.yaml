@@ -84,6 +84,8 @@ flutter:
     - assets/best_saved_model/best_float32.tflite
     - assets/best_saved_model/best_float16.tflite
     - assets/labels.txt
+    - assets/dpwh_metadata.json
+    - assets/thesis_results/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

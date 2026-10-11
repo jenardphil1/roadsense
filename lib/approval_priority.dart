@@ -1,13 +1,13 @@
 import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dpwh_standards.dart';
 
 /// Triage band for one pending report, most to least urgent.
 enum PriorityBand { critical, high, normal, low }
 
-/// The individual normalised factors behind one priority score, kept so the
-/// dashboard can explain *why* a report ranked where it did.
+/// The individual normalised factors behind one priority score according to DPWH protocol.
 class PriorityFactors {
-  final double harm; // 0.21 .. 1.00
+  final double harm; // 0.20 .. 1.00
   final double credibility; // 0.15 .. 1.00
   final double exposure; // 0.40 .. 1.00
   final double aging; // 0 .. unbounded
@@ -18,6 +18,10 @@ class PriorityFactors {
   final double corroboration;
 
   final String severity;
+  final String dpwhCode;
+  final String responseTime;
+  final double dpwhSlaHours;
+  final bool isSlaBreached;
   final int potholeCount;
   final int witnesses; // distinct OTHER reporters within dupRadiusM
   final int nearbyReporters; // distinct reporters within exposureRadiusM
@@ -34,6 +38,10 @@ class PriorityFactors {
     required this.reporterTrust,
     required this.corroboration,
     required this.severity,
+    required this.dpwhCode,
+    required this.responseTime,
+    required this.dpwhSlaHours,
+    required this.isSlaBreached,
     required this.potholeCount,
     required this.witnesses,
     required this.nearbyReporters,
@@ -49,12 +57,15 @@ class ReportPriority {
   final PriorityBand band;
   final PriorityFactors factors;
 
-  /// Short human-readable chips explaining the ranking.
+  /// Short human-readable chips explaining the ranking according to DPWH protocol.
   final List<String> reasons;
 
-  /// Ids of other PENDING reports within [ApprovalPriority.dupRadiusM] — very
-  /// likely the same physical pothole, so one decision should cover them all.
+  /// Ids of other PENDING reports within [ApprovalPriority.dupRadiusM] - very
+  /// likely the same physical pothole, so one decision covers them all.
   final List<String> duplicateIds;
+
+  /// Whether the report has exceeded its official DPWH Response Time SLA.
+  final bool isSlaBreached;
 
   const ReportPriority({
     required this.id,
@@ -63,6 +74,7 @@ class ReportPriority {
     required this.factors,
     required this.reasons,
     required this.duplicateIds,
+    this.isSlaBreached = false,
   });
 
   String get bandLabel => switch (band) {
@@ -83,45 +95,62 @@ class _Rec {
   const _Rec(this.id, this.lat, this.lon, this.uid, this.status);
 }
 
-/// Ranks pending pothole reports by the expected cost of leaving them pending.
+/// Ranks pending road distress reports according to official DPWH Protocol:
 ///
-///   urgency = harm x credibility x exposure
-///   score   = 100 * (0.75 * urgency + 0.25 * aging)
+///   DPWH Urgency = Harm(DPWH Defect Class, Severity, Scale)
+///                x Credibility(YOLOv8s, Reporter Bayesian Trust, Corroboration, Photo)
+///                x Exposure(Traffic Density Proxy)
 ///
-/// Multiplicative urgency because the three factors gate each other: a report
-/// nobody can verify costs little to delay however severe the claim. Aging is
-/// additive and uncapped so nothing can starve at the bottom of the queue.
+///   Score = 100 * (0.70 * DPWH Urgency + 0.30 * DPWH SLA Aging)
 ///
-/// See CALCULATION_DOCUMENTATION.md section 7 for the full derivation.
+/// DPWH Statutory Response Time Standards (Department Order / Highway Maintenance Manual):
+/// - CODE 01: Pothole -> 3 Days (72 Hours) max response time (Emergency safety hazard).
+/// - CODE 02: Alligator Crack -> 3 Days (72 Hours) max response time (Structural base failure).
+/// - CODE 05: Depression -> 30 Days (720 Hours) response time (Pavement re-blocking).
+/// - CODE 12: Longitudinal / Transverse Crack -> 60 Days (1440 Hours) routine maintenance sealant.
+///
+/// When a report exceeds its DPWH SLA, non-compliance escalation accelerates superlinearly.
 class ApprovalPriority {
   ApprovalPriority._();
 
-  // ---- Tunables -----------------------------------------------------------
-  /// Two reports this close are treated as the same physical pothole.
+  // ---- DPWH Statutory SLA Tunables (Hours) --------------------------------
+  /// DPWH Code 01: Pothole - 3 days (72h) emergency repair standard.
+  static const double slaCode01PotholeHours = 72.0;
+
+  /// DPWH Code 02: Alligator Cracking - 3 days (72h) structural base repair standard.
+  static const double slaCode02AlligatorHours = 72.0;
+
+  /// DPWH Code 05: Depression - 30 days (720h) pavement re-blocking standard.
+  static const double slaCode05DepressionHours = 720.0;
+
+  /// DPWH Code 12: Longitudinal / Transverse Crack - 60 days (1440h) routine maintenance standard.
+  static const double slaCode12CrackHours = 1440.0;
+
+  /// Default baseline turnaround when defect code is unspecified.
+  static const double defaultSlaHours = 72.0;
+
+  // ---- Spatial & Weighting Constants --------------------------------------
+  /// Two reports this close (25m) are treated as the same physical pothole.
   static const double dupRadiusM = 25.0;
 
-  /// Neighbourhood used as a traffic-exposure proxy.
+  /// Neighbourhood used as a traffic-exposure proxy (300m).
   static const double exposureRadiusM = 300.0;
 
-  /// Target turnaround. Aging reaches 1.0 here.
-  static const double slaHours = 48.0;
-
   static const double agingExponent = 1.5;
-  static const double urgencyWeight = 0.75;
-  static const double agingWeight = 0.25;
+  static const double urgencyWeight = 0.70;
+  static const double agingWeight = 0.30;
   static const double credibilityFloor = 0.15;
 
-  /// Band thresholds. Recalibrate once a week of real scores has been observed.
+  /// Band thresholds for triage.
   static const double criticalAt = 45.0;
   static const double highAt = 28.0;
   static const double normalAt = 12.0;
 
-  /// Grid cell in degrees latitude (~332 m). Must be >= [exposureRadiusM] so a
-  /// 3x3 cell scan is guaranteed exhaustive.
+  /// Grid cell in degrees latitude (~332 m) for O(N) spatial hashing.
   static const double _cellLat = 0.003;
 
   // ---- Geometry -----------------------------------------------------------
-  /// Local-plane metres, consistent with CALCULATION_DOCUMENTATION.md 2.3.
+  /// Local-plane metres approximation.
   static double metresBetween(
     double aLat,
     double aLon,
@@ -136,8 +165,6 @@ class ApprovalPriority {
 
   static int _latIdx(double lat) => (lat / _cellLat).floor();
 
-  /// Longitude cell width for a latitude band, widened near the poles so a
-  /// cell always spans at least [exposureRadiusM].
   static double _lonCellFor(int latIdx) {
     final bandLat = latIdx * _cellLat;
     final c = math.cos(bandLat * math.pi / 180).abs();
@@ -148,9 +175,7 @@ class ApprovalPriority {
       (lon / _lonCellFor(latIdx)).floor();
 
   // ---- Public API ---------------------------------------------------------
-  /// Scores every pending report in [allDocs], keyed by document id.
-  /// Pass the FULL collection: approved and rejected docs are the evidence
-  /// base for reporter trust, corroboration and exposure.
+  /// Scores and ranks every pending report in [allDocs] according to DPWH Protocol.
   static Map<String, ReportPriority> rankAll(
     List<QueryDocumentSnapshot> allDocs, {
     DateTime? now,
@@ -190,7 +215,7 @@ class ApprovalPriority {
       (grid[key] ??= <_Rec>[]).add(_Rec(doc.id, lat, lon, uid, status));
     }
 
-    // Pass 2: score each pending report.
+    // Pass 2: score each pending report based on DPWH Protocol.
     final out = <String, ReportPriority>{};
     for (final doc in pending) {
       final data = doc.data() as Map<String, dynamic>;
@@ -198,22 +223,56 @@ class ApprovalPriority {
       final lon = (data['longitude'] as num).toDouble();
       final uid = data['reporterUid'] as String? ?? '';
 
-      // --- Harm: how bad if the report is real.
+      // --- 1. DPWH Defect Classification & Harm Assessment ---
+      final rawDpwh = (data['primaryDpwhCode'] as String? ?? '').toUpperCase().trim();
+      final rawLabel = (data['primaryDefect'] as String? ?? '');
+      final defectClass = rawDpwh.isNotEmpty
+          ? DpwhStandards.classifyByCode(rawDpwh)
+          : DpwhStandards.classify(rawLabel.isNotEmpty ? rawLabel : data['overallSeverity'] as String?);
+
+      final String dpwhCode = defectClass.code;
+      final String responseTime = data['responseTime'] as String? ?? defectClass.responseTime;
       final severity =
-          (data['overallSeverity'] as String? ?? 'medium').toLowerCase();
+          (data['overallSeverity'] as String? ?? defectClass.severity).toLowerCase();
+
+      // DPWH Statutory SLA Hours:
+      final double dpwhSlaHours = switch (dpwhCode) {
+        'CODE 01' => slaCode01PotholeHours,
+        'CODE 02' => slaCode02AlligatorHours,
+        'CODE 05' => slaCode05DepressionHours,
+        'CODE 12' => slaCode12CrackHours,
+        _ => defaultSlaHours,
+      };
+
+      // DPWH Defect Statutory Weight:
+      // Code 01 (Pothole): 1.00 (High-impact road crash risk)
+      // Code 02 (Alligator Crack): 0.90 (Base failure, rapidly collapses to potholes)
+      // Code 05 (Depression): 0.55 (Ponding/hydroplaning hazard)
+      // Code 12 (Joint/Crack): 0.35 (Preventative moisture ingress)
+      final double dpwhWeight = switch (dpwhCode) {
+        'CODE 01' => 1.00,
+        'CODE 02' => 0.90,
+        'CODE 05' => 0.55,
+        'CODE 12' => 0.35,
+        _ => 0.60,
+      };
+
       final sevW = switch (severity) {
         'high' => 1.0,
         'low' => 0.3,
         _ => 0.6,
       };
+
       final count =
           ((data['potholeCount'] as num?)?.toInt() ?? 1).clamp(1, 100);
       final scale = count <= 1
           ? 0.0
           : (math.log(count) / math.log(6)).clamp(0.0, 1.0);
-      final harm = 0.70 * sevW + 0.30 * scale;
 
-      // --- Credibility: will this survive review?
+      // DPWH Harm: 50% statutory defect hazard + 30% reported severity + 20% count scale
+      final harm = (0.50 * dpwhWeight + 0.30 * sevW + 0.20 * scale).clamp(0.20, 1.0);
+
+      // --- 2. Credibility & Evidence Verification ---
       final confs = <double>[];
       final dets = data['detections'];
       if (dets is List) {
@@ -265,10 +324,10 @@ class ApprovalPriority {
                   (hasPhoto ? 1.0 : 0.5))
               .clamp(credibilityFloor, 1.0);
 
-      // --- Exposure: how many drivers are affected (reporter density proxy).
+      // --- 3. Traffic Exposure Proxy ---
       final exposure = 0.40 + 0.60 * math.min(1.0, nearbyUids.length / 5);
 
-      // --- Aging: uncapped, so nothing rots at the bottom forever.
+      // --- 4. DPWH SLA Aging & Statutory Escalation ---
       final ts = data['timestamp'];
       DateTime? created;
       if (ts is Timestamp) {
@@ -279,14 +338,29 @@ class ApprovalPriority {
       final waiting =
           created == null ? Duration.zero : clock.difference(created);
       final waitH = math.max(0.0, waiting.inMinutes / 60.0);
-      final aging = math.pow(waitH / slaHours, agingExponent).toDouble();
+
+      final bool isSlaBreached = waitH > dpwhSlaHours;
+      final double slaRatio = waitH / dpwhSlaHours;
+
+      // When within statutory SLA, aging curves at power 1.5.
+      // Once SLA is breached, DPWH non-compliance escalation accelerates superlinearly.
+      final double aging = isSlaBreached
+          ? (1.0 + 2.0 * math.pow(slaRatio - 1.0, 1.25)).toDouble()
+          : math.pow(slaRatio, agingExponent).toDouble();
 
       final urgency = harm * credibility * exposure;
       final score = 100 * (urgencyWeight * urgency + agingWeight * aging);
 
-      // Hard override: a corroborated high-severity hazard must never be
-      // blurred into the middle of the queue by a weighted average.
-      final forcedCritical = severity == 'high' && witnesses.length >= 2;
+      // --- 5. DPWH Hard Overrides ---
+      // Rule A: High severity Code 01/02 with >= 2 independent witnesses is an immediate hazard.
+      final isCorroboratedHazard =
+          (severity == 'high' || dpwhCode == 'CODE 01') && witnesses.length >= 2;
+
+      // Rule B: Any Code 01 (Pothole) that has breached its 72h SLA with photo proof.
+      final isOverdueEmergencyPothole =
+          dpwhCode == 'CODE 01' && isSlaBreached && hasPhoto && modelConf >= 0.40;
+
+      final bool forcedCritical = isCorroboratedHazard || isOverdueEmergencyPothole;
       final band = (forcedCritical || score >= criticalAt)
           ? PriorityBand.critical
           : score >= highAt
@@ -301,6 +375,11 @@ class ApprovalPriority {
         band: band,
         reasons: _reasons(
           severity: severity,
+          dpwhCode: dpwhCode,
+          responseTime: responseTime,
+          isSlaBreached: isSlaBreached,
+          isOverdueEmergencyPothole: isOverdueEmergencyPothole,
+          isCorroboratedHazard: isCorroboratedHazard,
           count: count,
           witnesses: witnesses.length,
           trust: trust,
@@ -308,8 +387,10 @@ class ApprovalPriority {
           hasPhoto: hasPhoto,
           nearby: nearbyUids.length,
           waitH: waitH,
+          dpwhSlaHours: dpwhSlaHours,
         ),
         duplicateIds: duplicateIds,
+        isSlaBreached: isSlaBreached,
         factors: PriorityFactors(
           harm: harm,
           credibility: credibility,
@@ -320,6 +401,10 @@ class ApprovalPriority {
           reporterTrust: trust,
           corroboration: corro,
           severity: severity,
+          dpwhCode: dpwhCode,
+          responseTime: responseTime,
+          dpwhSlaHours: dpwhSlaHours,
+          isSlaBreached: isSlaBreached,
           potholeCount: count,
           witnesses: witnesses.length,
           nearbyReporters: nearbyUids.length,
@@ -332,8 +417,7 @@ class ApprovalPriority {
     return out;
   }
 
-  /// Pending reports ordered most urgent first. Ties break toward the older
-  /// report so the ordering is stable across rebuilds.
+  /// Pending reports ordered most urgent first according to DPWH Protocol.
   static List<ReportPriority> rankPending(
     List<QueryDocumentSnapshot> allDocs, {
     DateTime? now,
@@ -349,6 +433,11 @@ class ApprovalPriority {
 
   static List<String> _reasons({
     required String severity,
+    required String dpwhCode,
+    required String responseTime,
+    required bool isSlaBreached,
+    required bool isOverdueEmergencyPothole,
+    required bool isCorroboratedHazard,
     required int count,
     required int witnesses,
     required double trust,
@@ -356,22 +445,47 @@ class ApprovalPriority {
     required bool hasPhoto,
     required int nearby,
     required double waitH,
+    required double dpwhSlaHours,
   }) {
     final out = <String>[];
+
+    // DPWH SLA Overdue Badge
+    if (isSlaBreached) {
+      final days = (waitH / 24).toStringAsFixed(1);
+      out.add('DPWH SLA OVERDUE (${days}d / ${(dpwhSlaHours / 24).round()}d)');
+    }
+
+    // DPWH Code & Standard SLA
+    if (dpwhCode == 'CODE 01') {
+      out.add('DPWH Code 01: 3-Day Emergency SLA');
+    } else if (dpwhCode == 'CODE 02') {
+      out.add('DPWH Code 02: 3-Day Structural SLA');
+    } else if (dpwhCode == 'CODE 05') {
+      out.add('DPWH Code 05: 30-Day Re-blocking');
+    } else if (dpwhCode == 'CODE 12') {
+      out.add('DPWH Code 12: Routine Maintenance');
+    }
+
+    if (isOverdueEmergencyPothole) {
+      out.add('DPWH Critical Overdue Escalation');
+    }
+    if (isCorroboratedHazard) {
+      out.add('Corroborated Hazard ($witnesses witnesses)');
+    }
     if (severity == 'high') out.add('High severity');
-    if (count >= 3) out.add('$count potholes in frame');
-    if (witnesses >= 1) {
+    if (count >= 3) out.add('$count hazards in cluster');
+    if (witnesses >= 1 && !isCorroboratedHazard) {
       out.add('$witnesses independent report${witnesses == 1 ? '' : 's'}');
     }
-    if (!hasPhoto) out.add('No photo evidence');
+    if (!hasPhoto) out.add('No photo proof');
     if (trust >= 0.80) {
-      out.add('Trusted reporter');
+      out.add('Trusted surveyor');
     } else if (trust <= 0.40) {
       out.add('Low reporter trust');
     }
-    if (modelConf < 0.40) out.add('Weak detection');
-    if (nearby >= 4) out.add('Busy area');
-    if (waitH > 72) out.add('Waiting ${(waitH / 24).floor()} days');
+    if (modelConf < 0.40) out.add('Weak AI detection');
+    if (nearby >= 4) out.add('High traffic area');
+
     return out;
   }
 }

@@ -1683,6 +1683,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                         imageUrl,
                                                         width: double.infinity,
                                                         fit: BoxFit.cover,
+                                                        cacheWidth: 360,
                                                         errorBuilder: (ctx, e, st) => Container(color: AppDesign.surface(isDark)),
                                                       )
                                                     : Container(color: AppDesign.surface(isDark)),
@@ -1871,6 +1872,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                         imageUrl,
                                                         width: double.infinity,
                                                         fit: BoxFit.cover,
+                                                        cacheWidth: 360,
                                                         errorBuilder: (ctx, e, st) => Container(color: AppDesign.surface(isDark)),
                                                       )
                                                     : Container(color: AppDesign.surface(isDark)),

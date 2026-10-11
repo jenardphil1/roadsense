@@ -1,0 +1,51 @@
+{
+    "system": "DPWH Road Distress Detection System",
+    "input_size": [
+        640,
+        640
+    ],
+    "confidence_threshold": 0.25,
+    "iou_threshold": 0.45,
+    "classes": [
+        {
+            "class_id": 0,
+            "class_name": "Pothole",
+            "dpwh_code": "Code 01",
+            "response_time": "3 Days",
+            "corrective_measure": "Bituminous premix (hot) or penetration patching; add base material if needed.",
+            "unit": "sq.m."
+        },
+        {
+            "class_id": 1,
+            "class_name": "Alligator crack",
+            "dpwh_code": "Code 02",
+            "response_time": "3 Days",
+            "corrective_measure": "Bituminous premix (hot) or penetration patching of affected area.",
+            "unit": "sq.m."
+        },
+        {
+            "class_id": 2,
+            "class_name": "Depression",
+            "dpwh_code": "Code 05",
+            "response_time": "30 Days",
+            "corrective_measure": "Re-blocking / replacement of concrete pavement including base correction.",
+            "unit": "sq.m."
+        },
+        {
+            "class_id": 3,
+            "class_name": "Longitudinal crack",
+            "dpwh_code": "Code 12",
+            "response_time": "Routine maintenance / sealing",
+            "corrective_measure": "Crack sealing with hot or cold applied elastomeric sealant.",
+            "unit": "l.m."
+        },
+        {
+            "class_id": 4,
+            "class_name": "Transverse crack",
+            "dpwh_code": "Code 12",
+            "response_time": "Routine maintenance / sealing",
+            "corrective_measure": "Crack sealing with hot or cold applied elastomeric sealant.",
+            "unit": "l.m."
+        }
+    ]
+}

@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'app_settings.dart';
 import 'app_design.dart';
+import 'dpwh_standards.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -89,6 +90,11 @@ class PotholeMarker {
   final int potholeCount;
   final String? reporterEmail;
   final String? reporterUid;
+  final String primaryDpwhCode;
+  final String primaryDefect;
+  final String responseTime;
+  final String correctiveMeasure;
+  final List<Map<String, dynamic>>? detections;
 
   PotholeMarker({
     this.id,
@@ -101,6 +107,12 @@ class PotholeMarker {
     this.potholeCount = 1,
     this.reporterEmail,
     this.reporterUid,
+    this.primaryDpwhCode = 'CODE 01',
+    this.primaryDefect = 'Pothole',
+    this.responseTime = '3 Days',
+    this.correctiveMeasure =
+        'Bituminous premix (hot) or penetration patching; add base material if needed.',
+    this.detections,
   });
 }
 
@@ -254,6 +266,8 @@ class MapScreenState extends State<MapScreen>
       } catch (_) {}
     }
     if (target == null && data != null) {
+      final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+      final defectClass = DpwhStandards.classifyByCode(dpwhCode);
       target = PotholeMarker(
         docId: docId ?? '',
         location: location,
@@ -261,8 +275,16 @@ class MapScreenState extends State<MapScreen>
         timestamp:
             (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         status: data['status'] as String? ?? 'pending',
+        overallSeverity: data['overallSeverity'] as String? ?? defectClass.severity,
         reporterEmail: data['reporterEmail'] as String? ?? '',
         potholeCount: (data['potholeCount'] as num?)?.toInt() ?? 1,
+        primaryDpwhCode: dpwhCode,
+        primaryDefect: data['primaryDefect'] as String? ?? defectClass.name,
+        responseTime: data['responseTime'] as String? ?? defectClass.responseTime,
+        correctiveMeasure: data['correctiveMeasure'] as String? ?? defectClass.correctiveMeasure,
+        detections: (data['detections'] as List<dynamic>?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList(),
       );
     } else {
       target ??= PotholeMarker(
@@ -3712,6 +3734,166 @@ class MapScreenState extends State<MapScreen>
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          'DPWH ROAD MAINTENANCE SPECIFICATIONS',
+                          style: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : const Color(0xFF64748B),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                .withValues(alpha: isDark ? 0.12 : 0.07),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                  .withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      pothole.primaryDpwhCode,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      pothole.primaryDefect,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: const Color(0xFF2563EB)),
+                                    ),
+                                    child: Text(
+                                      'SLA: ${pothole.responseTime}',
+                                      style: const TextStyle(
+                                        color: Color(0xFF2563EB),
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Standard Corrective Measure:',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                pothole.correctiveMeasure,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                  color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                                ),
+                              ),
+                              if (pothole.detections != null && pothole.detections!.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Divider(
+                                  height: 1,
+                                  color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode).withValues(alpha: 0.2),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'YOLOv8 Distress Detections (${pothole.detections!.length}):',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                ...pothole.detections!.map((det) {
+                                  final name = det['className'] as String? ?? 'Distress';
+                                  final conf = (det['confidence'] as num?)?.toDouble() ?? 0.0;
+                                  final code = det['dpwhCode'] as String? ?? '';
+                                  final cls = DpwhStandards.classifyByName(name);
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2.5),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: BoxDecoration(
+                                            color: cls.color,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          code.isNotEmpty ? '[$code] ' : '',
+                                          style: TextStyle(
+                                            fontFamily: 'monospace',
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 11,
+                                            color: cls.color,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isDark ? Colors.white70 : Colors.black87,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          '${(conf * 100).toStringAsFixed(1)}% conf',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 20),
                         SizedBox(
@@ -9550,6 +9732,54 @@ class MapScreenState extends State<MapScreen>
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
+                                    color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                        .withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                          .withValues(alpha: 0.7),
+                                      width: 1.1,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '${pothole.primaryDpwhCode}: ${pothole.primaryDefect}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.6),
+                                      width: 1.1,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'SLA: ${pothole.responseTime}',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF2563EB),
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
                                     color: statusColor.withValues(alpha: 0.14),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
@@ -9716,6 +9946,17 @@ class MapScreenState extends State<MapScreen>
                                     ],
                                   ),
                                 ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'DPWH Action: ${pothole.correctiveMeasure}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                fontStyle: FontStyle.italic,
                               ),
                             ),
                           ],

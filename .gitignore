@@ -47,3 +47,8 @@ app.*.map.json
 # Binaries and packages
 *.apk
 *.dill
+DPWH_Thesis_and_App_Package/
+*.pt
+*.onnx
+*.torchscript
+

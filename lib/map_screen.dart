@@ -1,10 +1,11 @@
-﻿import 'dart:math' as math;
+import 'dart:math' as math;
 import 'dart:math' show cos, sin, sqrt, atan2;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'app_settings.dart';
 import 'app_design.dart';
+import 'dpwh_standards.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -72,6 +73,15 @@ class PotholeMarker {
   final int potholeCount;
   final String? reporterEmail;
   final String? reporterUid;
+  final String primaryDpwhCode;
+  final String primaryDefect;
+  final String responseTime;
+  final String correctiveMeasure;
+  final List<Map<String, dynamic>>? detections;
+  final String barangay;
+  final String city;
+  final String province;
+  final String formattedAddress;
 
   PotholeMarker({
     this.id,
@@ -84,6 +94,16 @@ class PotholeMarker {
     this.potholeCount = 1,
     this.reporterEmail,
     this.reporterUid,
+    this.primaryDpwhCode = 'CODE 01',
+    this.primaryDefect = 'Pothole',
+    this.responseTime = '3 Days',
+    this.correctiveMeasure =
+        'Bituminous premix (hot) or penetration patching; add base material if needed.',
+    this.detections,
+    this.barangay = '',
+    this.city = '',
+    this.province = '',
+    this.formattedAddress = '',
   });
 }
 
@@ -266,14 +286,28 @@ class MapScreenState extends State<MapScreen>
         }
       } catch (_) {}
 
+      final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
+      final defectClass = DpwhStandards.classifyByCode(dpwhCode);
       target = PotholeMarker(
         docId: docId ?? '',
         location: location,
         imagePath: data['imageUrl'] as String? ?? '',
         timestamp: markerDate,
         status: data['status'] as String? ?? 'pending',
+        overallSeverity: data['overallSeverity'] as String? ?? defectClass.severity,
         reporterEmail: data['reporterEmail'] as String? ?? '',
         potholeCount: (data['potholeCount'] as num?)?.toInt() ?? 1,
+        primaryDpwhCode: dpwhCode,
+        primaryDefect: data['primaryDefect'] as String? ?? defectClass.name,
+        responseTime: data['responseTime'] as String? ?? defectClass.responseTime,
+        correctiveMeasure: data['correctiveMeasure'] as String? ?? defectClass.correctiveMeasure,
+        detections: (data['detections'] as List<dynamic>?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList(),
+        barangay: data['barangay'] as String? ?? '',
+        city: data['city'] as String? ?? '',
+        province: data['province'] as String? ?? '',
+        formattedAddress: data['formattedAddress'] as String? ?? '',
       );
     } else {
       target ??= PotholeMarker(
@@ -1075,9 +1109,7 @@ class MapScreenState extends State<MapScreen>
           }
 
           final newPos = gpsPos;
-          if (mounted) {
-            setState(() => _currentPosition = newPos);
-          }
+          _currentPosition = newPos;
           _checkPotholeProximity(newPos);
           unawaited(_autoAdjustRouteToCurrentPath(newPos));
 
@@ -1115,14 +1147,6 @@ class MapScreenState extends State<MapScreen>
 
         if (_followMode == FollowMode.compass) {
           _mapController.rotate((360 - heading) % 360);
-
-          if (_currentPosition != null) {
-            final LatLng cameraCenter = _getVisibleMapOffsetCameraCenter(
-              _currentPosition!,
-              _mapController.camera.zoom,
-            );
-            _mapController.move(cameraCenter, _mapController.camera.zoom);
-          }
         }
       });
     }
@@ -1260,6 +1284,7 @@ class MapScreenState extends State<MapScreen>
     }
 
     setState(() {
+      _currentPosition = userPos;
       _inProximityWarning = inProximity;
       _nearestPotholeInfo = nearestInfo;
       _nextPotholeEta = nextPotholeEta;
@@ -1277,6 +1302,7 @@ class MapScreenState extends State<MapScreen>
         _alertedAt50m.add(closestPotholeKey);
 
         if (_showMarkers) {
+          HapticFeedback.lightImpact();
           setState(() => _showWarningBanner = true);
           if (!_isInitialStartup && !kIsWeb) {
             final String etaSpeech = (_destination != null && nextPotholeEta != null)
@@ -3598,6 +3624,158 @@ class MapScreenState extends State<MapScreen>
                         ),
                       ],
 
+                      const SizedBox(height: 18),
+
+                      // Official DPWH Specifications Section
+                      Text(
+                        'DPWH ROAD MAINTENANCE SPECIFICATIONS',
+                        style: TextStyle(
+                          color: AppDesign.textSecondary(
+                            AppSettings.instance.isDarkMode,
+                          ),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                              .withValues(alpha: AppSettings.instance.isDarkMode ? 0.12 : 0.07),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                .withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    pothole.primaryDpwhCode,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    pothole.primaryDefect,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppDesign.textPrimary(AppSettings.instance.isDarkMode),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: const Color(0xFF2563EB)),
+                                  ),
+                                  child: Text(
+                                    'SLA: ${pothole.responseTime}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF2563EB),
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Standard Corrective Measure:',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppDesign.textSecondary(AppSettings.instance.isDarkMode),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              pothole.correctiveMeasure,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.35,
+                                color: AppDesign.textPrimary(AppSettings.instance.isDarkMode),
+                              ),
+                            ),
+                            if (pothole.detections != null && pothole.detections!.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Divider(
+                                color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                                    .withValues(alpha: 0.25),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'AI Detected Hazards in Frame (${pothole.detections!.length}):',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppDesign.textSecondary(AppSettings.instance.isDarkMode),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              ...pothole.detections!.map((d) {
+                                final dCode = d['dpwhCode'] as String? ?? 'CODE 01';
+                                final dName = d['defectType'] as String? ?? d['className'] as String? ?? 'Hazard';
+                                final dConf = (d['confidence'] as num?)?.toDouble() ?? 0.0;
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 2.5),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.check_circle_rounded,
+                                        size: 13,
+                                        color: DpwhStandards.getCodeColor(dCode),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '[$dCode] $dName',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppDesign.textPrimary(AppSettings.instance.isDarkMode),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        dConf > 0
+                                            ? '${(dConf > 1 ? dConf : dConf * 100).toStringAsFixed(0)}% confidence'
+                                            : 'Detected',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: AppDesign.textSecondary(AppSettings.instance.isDarkMode),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ],
+                        ),
+                      ),
+
                       // Admin Administrative Bar
                       if (isAdminUser) ...[
                         const SizedBox(height: 24),
@@ -4550,6 +4728,55 @@ class MapScreenState extends State<MapScreen>
     return clusters;
   }
 
+  List<PotholeCluster>? _cachedPotholeClusters;
+  int _cachedPotholeSignature = 0;
+
+  /// Memoizes cluster generation so O(N^2) geodesic calculations only run
+  /// when the pothole collection is modified, rather than on every animation frame.
+  List<PotholeCluster> _getMemoizedClusters() {
+    final active = widget.detectedPotholes
+        .where((p) => p.status != 'deleted' && p.status != 'rejected')
+        .toList();
+
+    int signature = active.length;
+    for (int i = 0; i < active.length; i++) {
+      final p = active[i];
+      signature = 31 * signature +
+          (p.docId?.hashCode ?? p.timestamp.millisecondsSinceEpoch);
+    }
+
+    if (_cachedPotholeClusters != null && _cachedPotholeSignature == signature) {
+      return _cachedPotholeClusters!;
+    }
+
+    _cachedPotholeSignature = signature;
+    _cachedPotholeClusters = _clusterPotholes(active, radiusMeters: 10.0);
+    return _cachedPotholeClusters!;
+  }
+
+  /// Culls markers that are far outside the camera's viewport (+2km buffer)
+  /// to dramatically reduce Flutter layer tree memory and eliminate pan jank.
+  Iterable<PotholeCluster> _getVisibleClusters() {
+    final clusters = _getMemoizedClusters();
+    try {
+      final camera = _mapController.camera;
+      final bounds = camera.visibleBounds;
+      const double margin = 0.02; // ~2.2km buffer to prevent edge pop-in
+      final south = bounds.south - margin;
+      final north = bounds.north + margin;
+      final west = bounds.west - margin;
+      final east = bounds.east + margin;
+
+      return clusters.where((c) {
+        final lat = c.center.latitude;
+        final lng = c.center.longitude;
+        return lat >= south && lat <= north && lng >= west && lng <= east;
+      });
+    } catch (_) {
+      return clusters;
+    }
+  }
+
   /// Builds the radial Spider Tree marker with connecting stems and anchor ring
   Widget _buildSpiderClusterMarker(
     PotholeCluster cluster,
@@ -5096,14 +5323,7 @@ class MapScreenState extends State<MapScreen>
                                       ),
 
                                     if (showMarkers) ...[
-                                      ..._clusterPotholes(
-                                        widget.detectedPotholes
-                                            .where((p) =>
-                                                p.status != 'deleted' &&
-                                                p.status != 'rejected')
-                                            .toList(),
-                                        radiusMeters: 10.0,
-                                      ).map((cluster) {
+                                      ..._getVisibleClusters().map((cluster) {
                                         if (cluster.isSingle) {
                                           final pothole = cluster.singleItem;
                                           final bool isSelected =
@@ -5144,6 +5364,7 @@ class MapScreenState extends State<MapScreen>
                                             height: dynamicSize,
                                             child: GestureDetector(
                                               onTap: () {
+                                                HapticFeedback.selectionClick();
                                                 setState(() {
                                                   _selectedPothole = pothole;
                                                   _expandedClusterId = null;
@@ -9275,6 +9496,30 @@ class MapScreenState extends State<MapScreen>
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
+                        color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
+                            .withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        '${pothole.primaryDpwhCode}: ${pothole.primaryDefect}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
                         color: statusColor.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
@@ -9347,7 +9592,7 @@ class MapScreenState extends State<MapScreen>
                 ),
                 const SizedBox(height: 6),
 
-                // GPS Location Tag
+                // GPS Location Tag & SLA
                 Row(
                   children: [
                     const Icon(
@@ -9356,16 +9601,43 @@ class MapScreenState extends State<MapScreen>
                       size: 14,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      'GPS: ${pothole.location.latitude.toStringAsFixed(5)}, ${pothole.location.longitude.toStringAsFixed(5)}',
-                      style: TextStyle(
-                        color: AppDesign.textPrimary(isDark),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12.5,
+                    Expanded(
+                      child: Text(
+                        'GPS: ${pothole.location.latitude.toStringAsFixed(5)}, ${pothole.location.longitude.toStringAsFixed(5)} • SLA: ${pothole.responseTime}',
+                        style: TextStyle(
+                          color: AppDesign.textPrimary(isDark),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
+                if (pothole.barangay.isNotEmpty || pothole.city.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_city_rounded,
+                        color: Color(0xFF0284C7),
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'LGU: ${pothole.barangay.isNotEmpty ? pothole.barangay : 'Bulacan'}${pothole.city.isNotEmpty ? ', ${pothole.city}' : ''}',
+                          style: const TextStyle(
+                            color: Color(0xFF0284C7),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 10),
 
                 // Action: Full Report & Edit
