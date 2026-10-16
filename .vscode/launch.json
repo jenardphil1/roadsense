@@ -5,9 +5,38 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "chrome",
+            "name": "RoadSense Mobile",
             "request": "launch",
-            "name": "Launch Chrome against localhost",
+            "type": "dart",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "RoadSense Web (Edge)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/web_main.dart",
+            "args": [
+                "-d",
+                "edge"
+            ]
+        },
+        {
+            "name": "RoadSense Web (Brave)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/web_main.dart",
+            "args": [
+                "-d",
+                "chrome"
+            ],
+            "env": {
+                "CHROME_EXECUTABLE": "C:\\Users\\jenar\\AppData\\Local\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+            }
+        },
+        {
+            "name": "Launch Edge against localhost:8080",
+            "type": "msedge",
+            "request": "launch",
             "url": "http://localhost:8080",
             "webRoot": "${workspaceFolder}"
         }

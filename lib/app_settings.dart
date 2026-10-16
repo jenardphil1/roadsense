@@ -22,6 +22,9 @@ class AppSettings {
   /// High-Contrast Black & White (Monochrome) Display Notifier
   final ValueNotifier<bool> highContrastMonochromeNotifier = ValueNotifier<bool>(false);
 
+  /// Active Navigation Route State Notifier
+  final ValueNotifier<bool> isRouteActiveNotifier = ValueNotifier<bool>(false);
+
   bool get isBlackAndWhite => highContrastMonochromeNotifier.value;
 
   bool get isDarkMode {
@@ -70,7 +73,7 @@ class AppSettings {
   }
 
   // ── Web Platform Settings ──────────────────────────────────────────────
-  final ValueNotifier<String> webMapStyleNotifier = ValueNotifier<String>('OpenStreetMap');
+  final ValueNotifier<String> webMapStyleNotifier = ValueNotifier<String>('Google Maps');
   String get webMapStyle => webMapStyleNotifier.value;
   set webMapStyle(String value) => webMapStyleNotifier.value = value;
   double webConfidenceFilter = 0.20;
@@ -80,7 +83,7 @@ class AppSettings {
 
   void resetWebSettingsToDefaults() {
     themeModeNotifier.value = ThemeMode.system;
-    webMapStyleNotifier.value = 'OpenStreetMap';
+    webMapStyleNotifier.value = 'Google Maps';
     webConfidenceFilter = 0.20;
     webLiveSyncEnabled = true;
     webExportFormat = 'GeoJSON';

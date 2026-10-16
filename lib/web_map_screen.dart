@@ -200,12 +200,66 @@ class MapScreenState extends State<MapScreen>
   PotholeMarker? _selectedPothole;
   String? _expandedClusterId;
 
-  /// Smoothly glides the GIS map camera to a target location and zoom level
-  void _animatedMapMove(LatLng destLocation, double destZoom) {
+  late final AnimationController _puckPulseController;
+  Timer? _urlSyncDebounce;
+  LatLng? _initialUrlCenter;
+  double? _initialUrlZoom;
+
+  /// Parses deep-linked coordinates from URL hash, mirroring Google Maps Web (e.g. #/@14.8832256,120.9663488,14.5z)
+  void _parseInitialUrlLocation() {
+    if (!kIsWeb) return;
+    try {
+      final hash = html.window.location.hash;
+      if (hash.isNotEmpty) {
+        final match = RegExp(
+          r'@(-?\d+\.?\d*),(-?\d+\.?\d*),?(\d+\.?\d*)?z?',
+        ).firstMatch(hash);
+        if (match != null) {
+          final lat = double.tryParse(match.group(1) ?? '');
+          final lng = double.tryParse(match.group(2) ?? '');
+          final zoom = double.tryParse(match.group(3) ?? '');
+          if (lat != null && lng != null) {
+            _initialUrlCenter = LatLng(lat, lng);
+            if (zoom != null) _initialUrlZoom = zoom;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Debounce synchronizes browser URL hash with current map viewport coordinates
+  void _syncUrlCoordinates(LatLng center, double zoom) {
+    if (!kIsWeb) return;
+    _urlSyncDebounce?.cancel();
+    _urlSyncDebounce = Timer(const Duration(milliseconds: 350), () {
+      try {
+        final latStr = center.latitude.toStringAsFixed(7);
+        final lngStr = center.longitude.toStringAsFixed(7);
+        final zoomStr = zoom.toStringAsFixed(1);
+        final newHash = '#/@$latStr,$lngStr,${zoomStr}z';
+        if (html.window.location.hash != newHash) {
+          html.window.history.replaceState(null, 'Map', newHash);
+        }
+      } catch (_) {}
+    });
+  }
+  void _animatedMapMove(
+    LatLng destLocation,
+    double destZoom, {
+    bool offsetForSidebar = false,
+  }) {
     try {
       final startLat = _mapController.camera.center.latitude;
       final startLng = _mapController.camera.center.longitude;
       final startZoom = _mapController.camera.zoom;
+
+      double targetLng = destLocation.longitude;
+      if (offsetForSidebar && kIsWeb && !_isSidePanelCollapsed) {
+        // Compensate for left drawer so the destination is centered in the open map area
+        final double lngOffset =
+            (198.0 * 360.0) / (256.0 * math.pow(2, destZoom));
+        targetLng -= lngOffset;
+      }
 
       final latTween = Tween<double>(
         begin: startLat,
@@ -213,7 +267,7 @@ class MapScreenState extends State<MapScreen>
       );
       final lngTween = Tween<double>(
         begin: startLng,
-        end: destLocation.longitude,
+        end: targetLng,
       );
       final zoomTween = Tween<double>(begin: startZoom, end: destZoom);
 
@@ -224,7 +278,7 @@ class MapScreenState extends State<MapScreen>
 
       final Animation<double> animation = CurvedAnimation(
         parent: controller,
-        curve: Curves.fastOutSlowIn,
+        curve: Curves.easeOutCubic,
       );
 
       controller.addListener(() {
@@ -376,6 +430,7 @@ class MapScreenState extends State<MapScreen>
 
   LatLng? _customOrigin;
   bool _isRoutePlanningMode = false;
+  bool _isSidePanelCollapsed = false;
   bool _isEditingOrigin = false;
   List<LatLng> _routePoints = [];
   List<List<LatLng>> _alternativeRoutes = [];
@@ -466,6 +521,11 @@ class MapScreenState extends State<MapScreen>
   @override
   void initState() {
     super.initState();
+    _parseInitialUrlLocation();
+    _puckPulseController = AnimationController(
+      duration: const Duration(milliseconds: 1800),
+      vsync: this,
+    )..repeat();
     if (_cachedGlobalPosition != null) {
       _currentPosition = _cachedGlobalPosition;
       _isLoadingLocation = false;
@@ -1086,6 +1146,8 @@ class MapScreenState extends State<MapScreen>
     _originController.dispose();
     _debounceTimer?.cancel();
     _liveRerouteTimer?.cancel();
+    _urlSyncDebounce?.cancel();
+    _puckPulseController.dispose();
     _positionSubscription?.cancel();
     _compassSubscription?.cancel();
     if (!kIsWeb) _tts.stop();
@@ -1653,6 +1715,8 @@ class MapScreenState extends State<MapScreen>
   }
 
   void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
+    _syncUrlCoordinates(camera.center, camera.zoom);
+
     if (hasGesture && _followMode != FollowMode.none) {
       _followMode = FollowMode.none;
       if (mounted) setState(() {});
@@ -2059,14 +2123,11 @@ class MapScreenState extends State<MapScreen>
         ? allSteps[initialRouteIndex]
         : [];
 
-    final bool compactViewport = mounted
-        ? MediaQuery.sizeOf(context).width < 600
-        : false;
     setState(() {
       _alternativeRoutes = routes;
       _alternativeRouteSteps = allSteps;
       _routeSteps = initialSteps;
-      _showTurnByTurnSheet = initialSteps.isNotEmpty && !compactViewport;
+      _showTurnByTurnSheet = false;
       _routePotholeCounts = potholeCounts;
       _routeDurations = durations;
       _routeDistances = distances;
@@ -2154,21 +2215,211 @@ class MapScreenState extends State<MapScreen>
     setState(() => _potholesOnRoute = onRoute);
   }
 
+  // Pre-indexed Bulacan LGUs & Key Barangays for zero-latency local geocoding
+  static const List<Map<String, dynamic>> _bulacanBarangays = [
+    // Santa Maria
+    {'name': 'Barangay Poblacion', 'municipality': 'Santa Maria', 'lat': 14.8197, 'lon': 120.9575},
+    {'name': 'Barangay Bagbaguin', 'municipality': 'Santa Maria', 'lat': 14.8083, 'lon': 120.9542},
+    {'name': 'Barangay Caypombo', 'municipality': 'Santa Maria', 'lat': 14.8427, 'lon': 120.9739},
+    {'name': 'Barangay Catmon', 'municipality': 'Santa Maria', 'lat': 14.8315, 'lon': 120.9858},
+    {'name': 'Barangay Guyong', 'municipality': 'Santa Maria', 'lat': 14.8236, 'lon': 120.9712},
+    {'name': 'Barangay Balasing', 'municipality': 'Santa Maria', 'lat': 14.8584, 'lon': 121.0062},
+    {'name': 'Barangay Pulong Buhangin', 'municipality': 'Santa Maria', 'lat': 14.8633, 'lon': 121.0022},
+    {'name': 'Barangay San Gabriel', 'municipality': 'Santa Maria', 'lat': 14.8251, 'lon': 120.9631},
+    {'name': 'Barangay Santa Clara', 'municipality': 'Santa Maria', 'lat': 14.8164, 'lon': 120.9501},
+    {'name': 'Barangay Buenavista', 'municipality': 'Santa Maria', 'lat': 14.8521, 'lon': 120.9934},
+    {'name': 'Barangay Camangyanan', 'municipality': 'Santa Maria', 'lat': 14.8115, 'lon': 120.9412},
+    {'name': 'Barangay Caysio', 'municipality': 'Santa Maria', 'lat': 14.8458, 'lon': 120.9812},
+    {'name': 'Barangay Lalakhan', 'municipality': 'Santa Maria', 'lat': 14.8123, 'lon': 120.9621},
+    {'name': 'Barangay Mag-asawang Sapa', 'municipality': 'Santa Maria', 'lat': 14.8711, 'lon': 121.0189},
+    {'name': 'Barangay Mahabang Parang', 'municipality': 'Santa Maria', 'lat': 14.8654, 'lon': 121.0211},
+    {'name': 'Barangay Manggahan', 'municipality': 'Santa Maria', 'lat': 14.8389, 'lon': 120.9689},
+    {'name': 'Barangay Parada', 'municipality': 'Santa Maria', 'lat': 14.8012, 'lon': 120.9642},
+    {'name': 'Barangay San Jose Patag', 'municipality': 'Santa Maria', 'lat': 14.8091, 'lon': 120.9782},
+    {'name': 'Barangay San Vicente', 'municipality': 'Santa Maria', 'lat': 14.8291, 'lon': 120.9521},
+    {'name': 'Barangay Silangan', 'municipality': 'Santa Maria', 'lat': 14.8412, 'lon': 121.0142},
+    {'name': 'Barangay Tumana', 'municipality': 'Santa Maria', 'lat': 14.8178, 'lon': 120.9712},
+
+    // Malolos City
+    {'name': 'Barangay Guinhawa', 'municipality': 'Malolos', 'lat': 14.8569, 'lon': 120.8167},
+    {'name': 'Barangay Liang', 'municipality': 'Malolos', 'lat': 14.8489, 'lon': 120.8123},
+    {'name': 'Barangay San Agustin', 'municipality': 'Malolos', 'lat': 14.8411, 'lon': 120.8178},
+    {'name': 'Barangay Sumapang Matanda', 'municipality': 'Malolos', 'lat': 14.8612, 'lon': 120.8251},
+    {'name': 'Barangay Cofradia', 'municipality': 'Malolos', 'lat': 14.8689, 'lon': 120.8312},
+    {'name': 'Barangay Bulihan', 'municipality': 'Malolos', 'lat': 14.8512, 'lon': 120.8354},
+    {'name': 'Barangay Caingin', 'municipality': 'Malolos', 'lat': 14.8432, 'lon': 120.8211},
+    {'name': 'Barangay Catmon', 'municipality': 'Malolos', 'lat': 14.8471, 'lon': 120.8192},
+    {'name': 'Barangay Dakila', 'municipality': 'Malolos', 'lat': 14.8589, 'lon': 120.8412},
+    {'name': 'Barangay Ligas', 'municipality': 'Malolos', 'lat': 14.8641, 'lon': 120.8491},
+    {'name': 'Barangay Lugam', 'municipality': 'Malolos', 'lat': 14.8712, 'lon': 120.8211},
+    {'name': 'Barangay Mabolo', 'municipality': 'Malolos', 'lat': 14.8391, 'lon': 120.8291},
+    {'name': 'Barangay Mojon', 'municipality': 'Malolos', 'lat': 14.8621, 'lon': 120.8152},
+    {'name': 'Barangay Panasahan', 'municipality': 'Malolos', 'lat': 14.8281, 'lon': 120.8241},
+    {'name': 'Barangay Santisima Trinidad', 'municipality': 'Malolos', 'lat': 14.8541, 'lon': 120.8212},
+    {'name': 'Barangay Santo Rosario', 'municipality': 'Malolos', 'lat': 14.8439, 'lon': 120.8115},
+    {'name': 'Barangay Tikay', 'municipality': 'Malolos', 'lat': 14.8491, 'lon': 120.8482},
+
+    // City of San Jose del Monte (CSJDM)
+    {'name': 'Barangay Tungkong Mangga', 'municipality': 'San Jose del Monte', 'lat': 14.8021, 'lon': 121.0742},
+    {'name': 'Barangay Muzon', 'municipality': 'San Jose del Monte', 'lat': 14.8062, 'lon': 121.0315},
+    {'name': 'Barangay Gaya-Gaya', 'municipality': 'San Jose del Monte', 'lat': 14.8112, 'lon': 121.0541},
+    {'name': 'Barangay Graceville', 'municipality': 'San Jose del Monte', 'lat': 14.8191, 'lon': 121.0421},
+    {'name': 'Barangay Francisco Homes', 'municipality': 'San Jose del Monte', 'lat': 14.8212, 'lon': 121.0612},
+    {'name': 'Barangay Kaypian', 'municipality': 'San Jose del Monte', 'lat': 14.8312, 'lon': 121.0712},
+    {'name': 'Barangay Minuyan', 'municipality': 'San Jose del Monte', 'lat': 14.8251, 'lon': 121.0821},
+    {'name': 'Barangay Sapang Palay', 'municipality': 'San Jose del Monte', 'lat': 14.8412, 'lon': 121.0651},
+    {'name': 'Barangay Santo Cristo', 'municipality': 'San Jose del Monte', 'lat': 14.8091, 'lon': 121.0851},
+
+    // Meycauayan City
+    {'name': 'Barangay Calvario', 'municipality': 'Meycauayan', 'lat': 14.7391, 'lon': 120.9582},
+    {'name': 'Barangay Camalig', 'municipality': 'Meycauayan', 'lat': 14.7451, 'lon': 120.9821},
+    {'name': 'Barangay Iba', 'municipality': 'Meycauayan', 'lat': 14.7321, 'lon': 120.9841},
+    {'name': 'Barangay Langka', 'municipality': 'Meycauayan', 'lat': 14.7491, 'lon': 120.9912},
+    {'name': 'Barangay Lawa', 'municipality': 'Meycauayan', 'lat': 14.7312, 'lon': 120.9612},
+    {'name': 'Barangay Malhacan', 'municipality': 'Meycauayan', 'lat': 14.7381, 'lon': 120.9712},
+    {'name': 'Barangay Perez', 'municipality': 'Meycauayan', 'lat': 14.7412, 'lon': 120.9951},
+    {'name': 'Barangay Saluysoy', 'municipality': 'Meycauayan', 'lat': 14.7351, 'lon': 120.9521},
+
+    // Marilao
+    {'name': 'Barangay Ibayo', 'municipality': 'Marilao', 'lat': 14.7551, 'lon': 120.9482},
+    {'name': 'Barangay Lambakin', 'municipality': 'Marilao', 'lat': 14.7681, 'lon': 120.9712},
+    {'name': 'Barangay Lias', 'municipality': 'Marilao', 'lat': 14.7612, 'lon': 120.9612},
+    {'name': 'Barangay Loma de Gato', 'municipality': 'Marilao', 'lat': 14.7812, 'lon': 120.9982},
+    {'name': 'Barangay Patubig', 'municipality': 'Marilao', 'lat': 14.7721, 'lon': 120.9551},
+    {'name': 'Barangay Poblacion I', 'municipality': 'Marilao', 'lat': 14.7581, 'lon': 120.9512},
+    {'name': 'Barangay Prenza I', 'municipality': 'Marilao', 'lat': 14.7791, 'lon': 120.9812},
+    {'name': 'Barangay Saog', 'municipality': 'Marilao', 'lat': 14.7641, 'lon': 120.9421},
+    {'name': 'Barangay Tabing Ilog', 'municipality': 'Marilao', 'lat': 14.7512, 'lon': 120.9541},
+
+    // Bocaue
+    {'name': 'Barangay Bagumbayan', 'municipality': 'Bocaue', 'lat': 14.7981, 'lon': 120.9291},
+    {'name': 'Barangay Bambang', 'municipality': 'Bocaue', 'lat': 14.7921, 'lon': 120.9312},
+    {'name': 'Barangay Batia', 'municipality': 'Bocaue', 'lat': 14.8151, 'lon': 120.9182},
+    {'name': 'Barangay Bundukan', 'municipality': 'Bocaue', 'lat': 14.8021, 'lon': 120.9451},
+    {'name': 'Barangay Lolomboy', 'municipality': 'Bocaue', 'lat': 14.7881, 'lon': 120.9412},
+    {'name': 'Barangay Poblacion', 'municipality': 'Bocaue', 'lat': 14.7991, 'lon': 120.9341},
+    {'name': 'Barangay Taal', 'municipality': 'Bocaue', 'lat': 14.8112, 'lon': 120.9381},
+    {'name': 'Barangay Turo', 'municipality': 'Bocaue', 'lat': 14.8051, 'lon': 120.9281},
+
+    // Guiguinto & Balagtas
+    {'name': 'Barangay Tuktukan', 'municipality': 'Guiguinto', 'lat': 14.8321, 'lon': 120.8812},
+    {'name': 'Barangay Tabang', 'municipality': 'Guiguinto', 'lat': 14.8412, 'lon': 120.8712},
+    {'name': 'Barangay Santa Rita', 'municipality': 'Guiguinto', 'lat': 14.8351, 'lon': 120.8912},
+    {'name': 'Barangay Wawa', 'municipality': 'Balagtas', 'lat': 14.8191, 'lon': 120.9082},
+    {'name': 'Barangay Borol 1st', 'municipality': 'Balagtas', 'lat': 14.8112, 'lon': 120.9141},
+    {'name': 'Barangay Santol', 'municipality': 'Balagtas', 'lat': 14.8251, 'lon': 120.9121},
+
+    // Baliuag & Plaridel
+    {'name': 'Barangay Poblacion', 'municipality': 'Baliuag', 'lat': 14.9541, 'lon': 120.9012},
+    {'name': 'Barangay Subic', 'municipality': 'Baliuag', 'lat': 14.9612, 'lon': 120.8951},
+    {'name': 'Barangay Bagong Nayon', 'municipality': 'Baliuag', 'lat': 14.9481, 'lon': 120.9051},
+    {'name': 'Barangay Banga 1st', 'municipality': 'Plaridel', 'lat': 14.8871, 'lon': 120.8582},
+    {'name': 'Barangay Poblacion', 'municipality': 'Plaridel', 'lat': 14.8891, 'lon': 120.8612},
+    {'name': 'Barangay Dampol', 'municipality': 'Plaridel', 'lat': 14.9012, 'lon': 120.8451},
+    {'name': 'Barangay Tabang', 'municipality': 'Plaridel', 'lat': 14.8781, 'lon': 120.8691},
+
+    // Pandi & Norzagaray
+    {'name': 'Barangay Poblacion', 'municipality': 'Pandi', 'lat': 14.8681, 'lon': 120.9572},
+    {'name': 'Barangay Bunsuran 1st', 'municipality': 'Pandi', 'lat': 14.8812, 'lon': 120.9481},
+    {'name': 'Barangay Masuso', 'municipality': 'Pandi', 'lat': 14.8721, 'lon': 120.9712},
+    {'name': 'Barangay Poblacion', 'municipality': 'Norzagaray', 'lat': 14.9121, 'lon': 121.0421},
+    {'name': 'Barangay Bigte', 'municipality': 'Norzagaray', 'lat': 14.8951, 'lon': 121.0612},
+    {'name': 'Barangay Minuyan', 'municipality': 'Norzagaray', 'lat': 14.9041, 'lon': 121.0741},
+  ];
+
+  /// Instant local search matcher for Philippine & Bulacan Barangays
+  List<Map<String, dynamic>> _fetchLocalBarangayCandidates(String query) {
+    final clean = query
+        .toLowerCase()
+        .replaceAll(RegExp(r'\b(barangay|brgy\.?|bgy\.?)\b', caseSensitive: false), '')
+        .trim();
+    if (clean.length < 2) return [];
+
+    final refPos = _currentPosition ?? _bulacanCenter;
+    final List<Map<String, dynamic>> matches = [];
+
+    for (final b in _bulacanBarangays) {
+      final name = b['name'] as String;
+      final mun = b['municipality'] as String;
+      final lat = (b['lat'] as num).toDouble();
+      final lon = (b['lon'] as num).toDouble();
+      final nameClean = name.toLowerCase().replaceAll('barangay', '').trim();
+      final munClean = mun.toLowerCase();
+
+      final loc = LatLng(lat, lon);
+      final dist = _calculateDistanceKm(refPos, loc);
+
+      double score = 0.0;
+      if (nameClean == clean) {
+        score = 220.0;
+      } else if (nameClean.startsWith(clean)) {
+        score = 170.0;
+      } else if (nameClean.contains(clean)) {
+        score = 140.0;
+      } else if ('$nameClean $munClean'.contains(clean) ||
+          '$munClean $nameClean'.contains(clean)) {
+        score = 130.0;
+      }
+
+      if (score > 0) {
+        if (dist != double.infinity) {
+          score += (1.0 / (dist + 1.0)) * 50.0;
+        }
+        matches.add({
+          'lat': lat.toString(),
+          'lon': lon.toString(),
+          '_name': name,
+          '_short_addr': '$mun, Bulacan',
+          'display_name': '$name, $mun, Bulacan',
+          '_distance_km': dist,
+          '_score': score,
+          '_is_barangay': true,
+          '_source': 'Bulacan LGU Registry',
+        });
+      }
+    }
+
+    matches.sort(
+      (a, b) => (b['_score'] as double).compareTo(a['_score'] as double),
+    );
+    return matches.take(5).toList();
+  }
+
   String _normalizeQuery(String rawQuery) {
     String normalized = rawQuery.trim();
     if (normalized.length > 100) {
       normalized = normalized.substring(0, 100).trim();
     }
-    final lower = normalized.toLowerCase();
 
-    // Standardize abbreviation aliases (e.g. Sta. -> Santa)
+    // Expand Philippine barangay abbreviations
+    normalized = normalized.replaceAll(
+      RegExp(r'\b(brgy\.?|bgy\.?)\b', caseSensitive: false),
+      'Barangay ',
+    );
+
+    // Standardize road and religious place prefix aliases
     normalized = normalized.replaceAll(
       RegExp(r'\bsta\.?\b', caseSensitive: false),
       'Santa',
     );
+    normalized = normalized.replaceAll(
+      RegExp(r'\bsto\.?\b', caseSensitive: false),
+      'Santo',
+    );
+    normalized = normalized.replaceAll(
+      RegExp(r'\bsn\.?\b', caseSensitive: false),
+      'San',
+    );
+    normalized = normalized.replaceAll(
+      RegExp(r'\b(pob\.?)\b', caseSensitive: false),
+      'Poblacion',
+    );
 
     // Popular local search aliases
-    if (lower.contains('sm sta maria') ||
+    final lower = normalized.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (lower == 'sjdm' || lower == 'csjdm' || lower == 'sjdm bulacan') {
+      normalized = 'San Jose del Monte Bulacan';
+    } else if (lower.contains('sm sta maria') ||
         lower.contains('sm santa maria') ||
         lower.contains('sm city sta maria') ||
         lower.contains('sm city santa maria')) {
@@ -2181,7 +2432,7 @@ class MapScreenState extends State<MapScreen>
       normalized = 'Bulacan Philippines';
     }
 
-    return normalized;
+    return normalized.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   double _calculateDistanceKm(LatLng p1, LatLng p2) {
@@ -2428,11 +2679,13 @@ class MapScreenState extends State<MapScreen>
         'format': 'json',
         'addressdetails': '1',
         'countrycodes': 'ph',
+        'viewbox': '120.55,15.25,121.35,14.65', // Bias results toward Bulacan & Central Luzon
+        'bounded': '0',
         'limit': '10',
       });
 
       final res = await http
-          .get(url, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
 
       if (res.statusCode != 200) return [];
@@ -2446,15 +2699,66 @@ class MapScreenState extends State<MapScreen>
 
         final LatLng candidateLoc = LatLng(lat, lon);
         final String displayName = (item['display_name'] ?? '').toString();
-        final String name = (item['name'] ?? displayName.split(',').first)
-            .toString();
         final addr = (item['address'] as Map<String, dynamic>?) ?? {};
-        final String shortAddr = [
-          addr['road'] ?? addr['suburb'] ?? '',
-          addr['city'] ?? addr['town'] ?? addr['municipality'] ?? '',
-          addr['state'] ?? addr['province'] ?? '',
-        ].where((e) => e.isNotEmpty).join(', ');
 
+        // Extract Philippine Barangay
+        String rawBrgy = (addr['suburb'] ??
+                addr['village'] ??
+                addr['quarter'] ??
+                addr['neighbourhood'] ??
+                addr['city_district'] ??
+                '')
+            .toString()
+            .trim();
+        String brgy = '';
+        if (rawBrgy.isNotEmpty) {
+          final lower = rawBrgy.toLowerCase();
+          if (lower.startsWith('brgy.') || lower.startsWith('brgy ')) {
+            brgy = 'Barangay ${rawBrgy.substring(5).trim()}';
+          } else if (lower.startsWith('barangay')) {
+            brgy = rawBrgy;
+          } else {
+            brgy = 'Barangay $rawBrgy';
+          }
+        }
+
+        String city = (addr['city'] ??
+                addr['town'] ??
+                addr['municipality'] ??
+                addr['county'] ??
+                '')
+            .toString()
+            .trim();
+        String province =
+            (addr['state'] ?? addr['province'] ?? '').toString().trim();
+
+        final type = (item['type'] ?? item['addresstype'] ?? '')
+            .toString()
+            .toLowerCase();
+        final bool isBarangay = type == 'suburb' ||
+            type == 'village' ||
+            type == 'quarter' ||
+            (rawBrgy.isNotEmpty &&
+                (item['name'] ?? '')
+                    .toString()
+                    .toLowerCase()
+                    .contains(rawBrgy.toLowerCase()));
+
+        String name = (item['name'] ?? displayName.split(',').first)
+            .toString()
+            .trim();
+        if (isBarangay && !name.toLowerCase().startsWith('barangay')) {
+          name = 'Barangay $name';
+        }
+
+        // Clean structured subtitle: [Barangay], [City], [Province]
+        List<String> subParts = [];
+        if (!isBarangay && brgy.isNotEmpty) subParts.add(brgy);
+        if (city.isNotEmpty) subParts.add(city);
+        if (province.isNotEmpty && province != city) subParts.add(province);
+
+        final String shortAddr =
+            subParts.isNotEmpty ? subParts.join(', ') : displayName;
         final double distanceKm = _calculateDistanceKm(refPos, candidateLoc);
 
         double score = 0.0;
@@ -2462,13 +2766,19 @@ class MapScreenState extends State<MapScreen>
         final String queryLower = normalizedQuery.toLowerCase();
 
         if (nameLower == queryLower) {
-          score += 110.0;
+          score += 130.0;
         } else if (nameLower.startsWith(queryLower)) {
-          score += 55.0;
+          score += 70.0;
         } else if (nameLower.contains(queryLower)) {
-          score += 28.0;
+          score += 35.0;
         }
 
+        if (isBarangay) {
+          score += 45.0; // Boost official Barangay entities
+        }
+        if (nameLower.contains('barangay') || queryLower.contains('barangay')) {
+          score += 30.0;
+        }
         if (displayName.toLowerCase().contains('bulacan')) {
           score += 40.0;
         }
@@ -2484,6 +2794,7 @@ class MapScreenState extends State<MapScreen>
           'display_name': displayName,
           '_distance_km': distanceKm,
           '_score': score,
+          '_is_barangay': isBarangay,
           '_source': 'OSM Nominatim',
         });
       }
@@ -2508,6 +2819,12 @@ class MapScreenState extends State<MapScreen>
     String normalizedQuery,
   ) async {
     final List<Map<String, dynamic>> allCandidates = [];
+
+    // Local instant Bulacan Barangay matches (<1ms)
+    final localMatches = _fetchLocalBarangayCandidates(normalizedQuery);
+    allCandidates.addAll(localMatches);
+
+    // Asynchronous network geocoders
     final results = await Future.wait([
       _fetchPhotonOsmCandidates(normalizedQuery),
       _fetchNominatimCandidates(normalizedQuery),
@@ -2693,32 +3010,82 @@ class MapScreenState extends State<MapScreen>
         'addressdetails': '1',
       });
       final res = await http
-          .get(url, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final addr = (data['address'] as Map<String, dynamic>?) ?? {};
-        String primary = addr['house_number'] != null
+
+        // 1. Street / Road / Landmark
+        String road = addr['house_number'] != null
             ? '${addr['house_number']} ${addr['road'] ?? ''}'.trim()
-            : (addr['road'] ?? '').toString();
-        if (primary.trim().isEmpty) {
-          primary = [
-            addr['pedestrian'],
-            addr['neighbourhood'],
-            addr['quarter'],
-            addr['suburb'],
-            addr['village'],
-            addr['hamlet'],
-          ].where((e) => e != null && e.toString().isNotEmpty).join(' ');
+            : (addr['road'] ??
+                    addr['pedestrian'] ??
+                    addr['amenity'] ??
+                    addr['building'] ??
+                    '')
+                .toString()
+                .trim();
+
+        // 2. Philippine Barangay (Suburb, Village, Quarter, Neighbourhood, District)
+        String rawBrgy = (addr['suburb'] ??
+                addr['village'] ??
+                addr['quarter'] ??
+                addr['neighbourhood'] ??
+                addr['city_district'] ??
+                '')
+            .toString()
+            .trim();
+        String brgy = '';
+        if (rawBrgy.isNotEmpty) {
+          final lower = rawBrgy.toLowerCase();
+          if (lower.startsWith('brgy.') || lower.startsWith('brgy ')) {
+            brgy = 'Barangay ${rawBrgy.substring(5).trim()}';
+          } else if (lower.startsWith('barangay')) {
+            brgy = rawBrgy;
+          } else {
+            brgy = 'Barangay $rawBrgy';
+          }
         }
-        final String secondary = [
-          addr['city'] ??
-              addr['town'] ??
-              addr['municipality'] ??
-              addr['village'],
-          addr['state'] ?? addr['province'],
-        ].where((e) => e != null && e.toString().isNotEmpty).join(', ');
-        List<String> parts = [primary.trim(), secondary];
+
+        // 3. City / Municipality
+        String city = (addr['city'] ??
+                addr['town'] ??
+                addr['municipality'] ??
+                addr['county'] ??
+                '')
+            .toString()
+            .trim();
+
+        // 4. Province
+        String province =
+            (addr['province'] ?? addr['state'] ?? 'Bulacan').toString().trim();
+
+        // Structured Philippine Address Format
+        String primary = '';
+        String secondary = '';
+
+        if (road.isNotEmpty) {
+          primary = road;
+          secondary = [
+            if (brgy.isNotEmpty && brgy != road) brgy,
+            if (city.isNotEmpty) city,
+            if (province.isNotEmpty && province != city) province,
+          ].join(', ');
+        } else if (brgy.isNotEmpty) {
+          primary = brgy;
+          secondary = [
+            if (city.isNotEmpty) city,
+            if (province.isNotEmpty && province != city) province,
+          ].join(', ');
+        } else {
+          primary = city.isNotEmpty
+              ? city
+              : (data['display_name'] ?? '').toString().split(',').first.trim();
+          secondary = province;
+        }
+
+        List<String> parts = [primary.trim(), secondary.trim()];
         if (parts[0].isEmpty) {
           parts[0] = (data['display_name'] ?? '')
               .toString()
@@ -2756,16 +3123,29 @@ class MapScreenState extends State<MapScreen>
   }
 
   Future<LatLng?> _geocodeQueryUncached(String text) async {
-    // 1. Primary: OSM Nominatim Geocoding API
+    final normalized = _normalizeQuery(text);
+
+    // 0. Instant Check: Local Bulacan Barangay Registry (<1ms)
+    final localMatches = _fetchLocalBarangayCandidates(normalized);
+    if (localMatches.isNotEmpty) {
+      final best = localMatches.first;
+      final lat = double.tryParse(best['lat'].toString());
+      final lon = double.tryParse(best['lon'].toString());
+      if (lat != null && lon != null) return LatLng(lat, lon);
+    }
+
+    // 1. Primary: OSM Nominatim Geocoding API with Bulacan viewbox bias
     try {
       final nomUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': text,
+        'q': normalized,
         'format': 'json',
         'limit': '1',
         'countrycodes': 'ph',
+        'viewbox': '120.55,15.25,121.35,14.65',
+        'bounded': '0',
       });
       final nomRes = await http
-          .get(nomUrl, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(nomUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
       if (nomRes.statusCode == 200) {
         final List data = jsonDecode(nomRes.body) as List;
@@ -2779,17 +3159,41 @@ class MapScreenState extends State<MapScreen>
       print('OSM Nominatim Geocode Error: $e');
     }
 
+    // 1b. Fallback: Query with Province & Country Context if not specified
+    if (!normalized.toLowerCase().contains('bulacan') &&
+        !normalized.toLowerCase().contains('philippines')) {
+      try {
+        final fallbackUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
+          'q': '$normalized, Bulacan, Philippines',
+          'format': 'json',
+          'limit': '1',
+          'countrycodes': 'ph',
+        });
+        final fallbackRes = await http
+            .get(fallbackUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+            .timeout(const Duration(seconds: 4));
+        if (fallbackRes.statusCode == 200) {
+          final List data = jsonDecode(fallbackRes.body) as List;
+          if (data.isNotEmpty) {
+            final lat = double.tryParse(data.first['lat'].toString());
+            final lon = double.tryParse(data.first['lon'].toString());
+            if (lat != null && lon != null) return LatLng(lat, lon);
+          }
+        }
+      } catch (_) {}
+    }
+
     // 2. Secondary: Photon OSM Geocoding API
     try {
       final refPos = _currentPosition ?? _bulacanCenter;
       final photUrl = Uri.https('photon.komoot.io', '/api/', {
-        'q': text,
+        'q': normalized,
         'lat': refPos.latitude.toString(),
         'lon': refPos.longitude.toString(),
         'limit': '1',
       });
       final photRes = await http
-          .get(photUrl, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(photUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
       if (photRes.statusCode == 200) {
         final payload = jsonDecode(photRes.body) as Map<String, dynamic>;
@@ -5189,9 +5593,10 @@ class MapScreenState extends State<MapScreen>
                             child: FlutterMap(
                               mapController: _mapController,
                               options: MapOptions(
-                                initialCenter:
-                                    _currentPosition ?? _bulacanCenter,
-                                initialZoom: 15.0,
+                                initialCenter: _initialUrlCenter ??
+                                    _currentPosition ??
+                                    _bulacanCenter,
+                                initialZoom: _initialUrlZoom ?? 15.0,
                                 minZoom: 3.0,
                                 maxZoom: 19.0,
                                 interactionOptions: const InteractionOptions(
@@ -5293,19 +5698,25 @@ class MapScreenState extends State<MapScreen>
                                       AppSettings.instance.webMapStyleNotifier,
                                   builder: (context, mapStyle, _) {
                                     String url;
+                                    List<String>? subdomains;
                                     if (mapStyle == 'Satellite') {
                                       url =
                                           'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
                                     } else if (mapStyle == 'Dark Canvas') {
                                       url =
                                           'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
-                                    } else {
+                                    } else if (mapStyle == 'OpenStreetMap') {
                                       url =
                                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+                                    } else {
+                                      url =
+                                          'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+                                      subdomains = const ['0', '1', '2', '3'];
                                     }
                                     return TileLayer(
                                       key: ValueKey(mapStyle),
                                       urlTemplate: url,
+                                      subdomains: subdomains ?? const ['a', 'b', 'c'],
                                       userAgentPackageName:
                                           'com.example.pothole_scanner',
                                       tileDisplay: const TileDisplay.fadeIn(
@@ -5314,8 +5725,8 @@ class MapScreenState extends State<MapScreen>
                                       panBuffer: 2,
                                       keepBuffer: 6,
                                       minZoom: 3,
-                                      maxZoom: 19,
-                                      maxNativeZoom: 19,
+                                      maxZoom: 20,
+                                      maxNativeZoom: 20,
                                     );
                                   },
                                 ),
@@ -5422,27 +5833,57 @@ class MapScreenState extends State<MapScreen>
                                     if (_currentPosition != null)
                                       Marker(
                                         point: _currentPosition!,
-                                        width: 28,
-                                        height: 28,
+                                        width: 48,
+                                        height: 48,
                                         child: Center(
-                                          child: Container(
-                                            width: 20,
-                                            height: 20,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: const Color(0xFF2563EB),
-                                              boxShadow: const [
-                                                BoxShadow(
-                                                  color: Colors.black26,
-                                                  blurRadius: 6,
-                                                  spreadRadius: 1,
-                                                ),
-                                              ],
-                                              border: Border.all(
-                                                color: Colors.white,
-                                                width: 2.5,
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              // Google Maps Breathing Radar Pulse Halo
+                                              AnimatedBuilder(
+                                                animation: _puckPulseController,
+                                                builder: (context, _) {
+                                                  final t =
+                                                      _puckPulseController.value;
+                                                  final haloSize =
+                                                      18.0 + t * 28.0;
+                                                  final haloOpacity =
+                                                      (1.0 - t) * 0.42;
+                                                  return Container(
+                                                    width: haloSize,
+                                                    height: haloSize,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: const Color(
+                                                        0xFF1A73E8,
+                                                      ).withValues(
+                                                        alpha: haloOpacity,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
                                               ),
-                                            ),
+                                              // Core Google Blue Dot
+                                              Container(
+                                                width: 18,
+                                                height: 18,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: const Color(0xFF1A73E8),
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                      color: Colors.black26,
+                                                      blurRadius: 6,
+                                                      spreadRadius: 1,
+                                                    ),
+                                                  ],
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 2.5,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                       ),
@@ -5523,6 +5964,7 @@ class MapScreenState extends State<MapScreen>
                                               _animatedMapMove(
                                                 pothole.location,
                                                 17.5,
+                                                offsetForSidebar: true,
                                               );
                                             },
                                             child: _buildUnifiedPotholeIcon(
@@ -6043,71 +6485,83 @@ class MapScreenState extends State<MapScreen>
                                     (MediaQuery.of(context).size.height - 32)
                                         .clamp(200.0, 760.0),
                               ),
-                              child: _isRoutePlanningMode
-                                  ? Container(
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? const Color(0xFF1E293B)
-                                            : Colors.white,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                          color: isDark
-                                              ? const Color(0xFF334155)
-                                              : const Color(0xFFE2E8F0),
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: isDark ? 0.45 : 0.15,
+                              child: _isSidePanelCollapsed
+                                  ? _buildCollapsedPanelPill(isDark)
+                                  : (_isRoutePlanningMode
+                                      ? Container(
+                                          decoration: BoxDecoration(
+                                            color: isDark
+                                                ? const Color(0xFF1E293B)
+                                                : Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            border: Border.all(
+                                              color: isDark
+                                                  ? const Color(0xFF334155)
+                                                  : const Color(0xFFE2E8F0),
                                             ),
-                                            blurRadius: 18,
-                                            offset: const Offset(0, 4),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(
+                                                  alpha: isDark ? 0.45 : 0.15,
+                                                ),
+                                                blurRadius: 18,
+                                                offset: const Offset(0, 4),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                      clipBehavior: Clip.antiAlias,
-                                      child: _buildRoutePlanningContent(
-                                        isDark: isDark,
-                                        isClearAhead: isClearAhead,
-                                        distStr: distStr,
-                                        totalEtaStr: totalEtaStr,
-                                        activePotholeCount: activePotholeCount,
-                                      ),
-                                    )
-                                  : Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        _buildFloatingSearchBar(
-                                          isDark: isDark,
-                                          isCompactViewport: isCompactViewport,
-                                        ),
-                                        if (_suggestions.isNotEmpty) ...[
-                                          const SizedBox(height: 6),
-                                          ConstrainedBox(
-                                            constraints: const BoxConstraints(
-                                              maxHeight: 280,
-                                            ),
-                                            child: _buildSuggestionsDropdown(
-                                              isDark,
-                                            ),
+                                          clipBehavior: Clip.antiAlias,
+                                          child: _buildRoutePlanningContent(
+                                            isDark: isDark,
+                                            isClearAhead: isClearAhead,
+                                            distStr: distStr,
+                                            totalEtaStr: totalEtaStr,
+                                            activePotholeCount:
+                                                activePotholeCount,
                                           ),
-                                        ] else if (_isSearchHistoryOpen &&
-                                            _searchController.text.isEmpty &&
-                                            _searchHistory.isNotEmpty) ...[
-                                          const SizedBox(height: 6),
-                                          ConstrainedBox(
-                                            constraints: const BoxConstraints(
-                                              maxHeight: 340,
+                                        )
+                                      : Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            _buildFloatingSearchBar(
+                                              isDark: isDark,
+                                              isCompactViewport:
+                                                  isCompactViewport,
                                             ),
-                                            child: _buildSearchHistoryDropdown(
-                                              isDark,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
+                                            if (_suggestions.isNotEmpty) ...[
+                                              const SizedBox(height: 6),
+                                              ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxHeight: 280,
+                                                ),
+                                                child:
+                                                    _buildSuggestionsDropdown(
+                                                  isDark,
+                                                ),
+                                              ),
+                                            ] else if (_isSearchHistoryOpen &&
+                                                _searchController.text.isEmpty &&
+                                                _searchHistory.isNotEmpty) ...[
+                                              const SizedBox(height: 6),
+                                              ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxHeight: 340,
+                                                ),
+                                                child:
+                                                    _buildSearchHistoryDropdown(
+                                                  isDark,
+                                                ),
+                                              ),
+                                            ] else ...[
+                                              const SizedBox(height: 8),
+                                              _buildCategoryChipsRow(isDark),
+                                            ],
+                                          ],
+                                        )),
                             ),
                           ),
 
@@ -6560,7 +7014,7 @@ class MapScreenState extends State<MapScreen>
                               ),
                               const SizedBox(height: 12),
 
-                              // 1. Google Maps Navigation / Compass Mode Toggle
+                              // 1. Google Maps Navigation / Compass Mode Toggle with Bearing Indicator
                               Container(
                                 width: 44,
                                 height: 44,
@@ -6581,17 +7035,32 @@ class MapScreenState extends State<MapScreen>
                                   ],
                                 ),
                                 child: IconButton(
-                                  icon: Icon(
-                                    _followMode == FollowMode.compass
-                                        ? Icons.explore_rounded
-                                        : Icons.navigation_rounded,
-                                    color: _followMode == FollowMode.compass
-                                        ? AppDesign.accent(isDark)
-                                        : AppDesign.textSecondary(isDark),
-                                    size: 22,
+                                  icon: Transform.rotate(
+                                    angle: -(_mapController.camera.rotation * math.pi / 180.0),
+                                    child: Icon(
+                                      _mapController.camera.rotation.abs() > 0.5
+                                          ? Icons.explore_rounded
+                                          : (_followMode == FollowMode.compass
+                                              ? Icons.explore_rounded
+                                              : Icons.navigation_rounded),
+                                      color: _mapController.camera.rotation.abs() > 0.5
+                                          ? const Color(0xFFEF4444)
+                                          : (_followMode == FollowMode.compass
+                                              ? AppDesign.accent(isDark)
+                                              : AppDesign.textSecondary(isDark)),
+                                      size: 22,
+                                    ),
                                   ),
-                                  onPressed: _toggleFollowMode,
-                                  tooltip: 'Toggle Compass / Navigation Mode',
+                                  onPressed: () {
+                                    if (_mapController.camera.rotation.abs() > 0.5) {
+                                      _mapController.rotate(0.0);
+                                    } else {
+                                      _toggleFollowMode();
+                                    }
+                                  },
+                                  tooltip: _mapController.camera.rotation.abs() > 0.5
+                                      ? 'Reset to North (0°)'
+                                      : 'Toggle Compass / Navigation Mode',
                                 ),
                               ),
 
@@ -6798,23 +7267,17 @@ class MapScreenState extends State<MapScreen>
                           Positioned(
                             left: isCompactViewport
                                 ? 16
-                                : (_showTurnByTurnSheet &&
-                                          _routePoints.isNotEmpty
-                                      ? null
-                                      : 16),
+                                : (_isRoutePlanningMode ? null : 20),
                             right: isCompactViewport
                                 ? 16
-                                : (_showTurnByTurnSheet &&
-                                          _routePoints.isNotEmpty
-                                      ? 16
-                                      : null),
+                                : (_isRoutePlanningMode ? 80 : null),
                             bottom: 24,
                             child: SafeArea(
                               child: ConstrainedBox(
                                 constraints: BoxConstraints(
                                   maxWidth: isCompactViewport
                                       ? (viewportWidth - 32)
-                                      : 520.0,
+                                      : 480.0,
                                 ),
                                 child: _buildSelectedPotholeCard(
                                   _selectedPothole!,
@@ -6843,33 +7306,401 @@ class MapScreenState extends State<MapScreen>
                               ),
                             ),
                           ),
-
-                        // 6. Turn-by-Turn Directions Left-Aligned / Bottom Overlay Sheet
-                        if (_showTurnByTurnSheet &&
-                            _routePoints.isNotEmpty &&
-                            _routeSteps.isNotEmpty &&
-                            (!isCompactViewport || _selectedPothole == null))
-                          Positioned(
-                            left: isCompactViewport ? 12 : 16,
-                            right: isCompactViewport ? 12 : null,
-                            bottom: 16,
-                            child: SafeArea(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: isCompactViewport
-                                      ? (viewportWidth - 24)
-                                      : 420.0,
-                                ),
-                                child: _buildTurnByTurnSheet(isDark),
-                              ),
-                            ),
-                          ),
                       ],
                     ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildCollapsedPanelPill(bool isDark) {
+    final Color cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final Color cardBorder =
+        isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
+    final Color textColor = isDark ? Colors.white : const Color(0xFF0F172A);
+    final Color subtextColor =
+        isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    const Color brandBlue = Color(0xFF2563EB);
+
+    String label = 'Search RoadSense';
+    if (_isRoutePlanningMode) {
+      if (_searchController.text.isNotEmpty) {
+        label = _searchController.text;
+      } else {
+        label = 'Route Planner';
+      }
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => setState(() => _isSidePanelCollapsed = false),
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: cardBorder, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _isRoutePlanningMode
+                    ? Icons.directions_rounded
+                    : Icons.search_rounded,
+                color: brandBlue,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                height: 20,
+                width: 1,
+                color: cardBorder,
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: subtextColor,
+                size: 22,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryChipsRow(bool isDark) {
+    final bool isSatellite =
+        AppSettings.instance.webMapStyle == 'Satellite';
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildQuickActionChip(
+            icon: Icons.shield_rounded,
+            iconColor: const Color(0xFF10B981),
+            label: 'Safe Route',
+            isActive: false,
+            isDark: isDark,
+            onTap: () {
+              setState(() {
+                _isRoutePlanningMode = true;
+                _originController.text = 'Your location';
+                _customOrigin = null;
+                _isEditingOrigin = false;
+              });
+              _destinationFocusNode.requestFocus();
+            },
+          ),
+          const SizedBox(width: 8),
+          _buildQuickActionChip(
+            icon: Icons.warning_amber_rounded,
+            iconColor: const Color(0xFFEF4444),
+            label: 'Hazards (${widget.detectedPotholes.length})',
+            isActive: false,
+            isDark: isDark,
+            onTap: () {
+              if (widget.detectedPotholes.isNotEmpty) {
+                final LatLng ref = _currentPosition ?? _bulacanCenter;
+                PotholeMarker? nearest;
+                double minD = double.infinity;
+                for (final p in widget.detectedPotholes) {
+                  final d = Geolocator.distanceBetween(
+                    ref.latitude,
+                    ref.longitude,
+                    p.location.latitude,
+                    p.location.longitude,
+                  );
+                  if (d < minD) {
+                    minD = d;
+                    nearest = p;
+                  }
+                }
+                if (nearest != null) {
+                  setState(() {
+                    _selectedPothole = nearest;
+                    _expandedClusterId = null;
+                  });
+                  _animatedMapMove(nearest.location, 17.5, offsetForSidebar: true);
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('No reported hazards in this survey area.'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+          const SizedBox(width: 8),
+          _buildQuickActionChip(
+            icon: Icons.local_fire_department_rounded,
+            iconColor: _showHeatmap ? Colors.white : const Color(0xFFF97316),
+            label: 'Heatmap',
+            isActive: _showHeatmap,
+            activeBg: const Color(0xFFF97316),
+            isDark: isDark,
+            onTap: () {
+              setState(() => _showHeatmap = !_showHeatmap);
+            },
+          ),
+          const SizedBox(width: 8),
+          _buildQuickActionChip(
+            icon: Icons.satellite_alt_rounded,
+            iconColor: isSatellite ? Colors.white : const Color(0xFF0284C7),
+            label: isSatellite ? 'Satellite' : 'Default Map',
+            isActive: isSatellite,
+            activeBg: const Color(0xFF0284C7),
+            isDark: isDark,
+            onTap: () {
+              setState(() {
+                AppSettings.instance.webMapStyle =
+                    isSatellite ? 'Google Maps' : 'Satellite';
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActionChip({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required bool isActive,
+    Color? activeBg,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    final Color bg = isActive
+        ? (activeBg ?? const Color(0xFF2563EB))
+        : (isDark ? const Color(0xFF1E293B) : Colors.white);
+    final Color border = isActive
+        ? Colors.transparent
+        : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0));
+    final Color textCol = isActive
+        ? Colors.white
+        : (isDark ? Colors.white : const Color(0xFF1E293B));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: border, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: isActive ? Colors.white : iconColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: textCol,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTurnByTurnInPlanner({
+    required bool isDark,
+    required String distStr,
+    required String durStr,
+  }) {
+    final Color cardBorder = AppDesign.border(isDark);
+    final Color textColor = AppDesign.textPrimary(isDark);
+    final Color subtextColor = AppDesign.textSecondary(isDark);
+    const Color brandBlue = Color(0xFF2563EB);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Subheader with Back Button and Steps Count
+        Container(
+          padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+            border: Border(
+              bottom: BorderSide(color: cardBorder, width: 1),
+            ),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                color: brandBlue,
+                tooltip: 'Back to route overview',
+                onPressed: () => setState(() => _showTurnByTurnSheet = false),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Turn-by-Turn Steps',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                      ),
+                    ),
+                    Text(
+                      '${_routeSteps.length} maneuvers • $distStr ($durStr)',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: subtextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.close_rounded, size: 18, color: subtextColor),
+                tooltip: 'Close directions steps',
+                onPressed: () => setState(() => _showTurnByTurnSheet = false),
+              ),
+            ],
+          ),
+        ),
+
+        // Scrollable Step List
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          itemCount: _routeSteps.length,
+          separatorBuilder: (ctx, i) => Divider(
+            height: 1,
+            thickness: 0.8,
+            color: isDark
+                ? const Color(0xFF334155).withValues(alpha: 0.5)
+                : const Color(0xFFF1F5F9),
+          ),
+          itemBuilder: (ctx, i) {
+            final step = _routeSteps[i];
+            final isFirst = i == 0;
+            final isLast = i == _routeSteps.length - 1;
+            final isSelected = _selectedStepIndex == i;
+            final bool isCurrent =
+                _selectedStepIndex == null &&
+                !isSelected &&
+                i == _computedCurrentStepIndex();
+
+            return InkWell(
+              onTap: () {
+                if (_selectedStepIndex == i) {
+                  setState(() => _selectedStepIndex = null);
+                  return;
+                }
+                setState(() {
+                  _selectedStepIndex = i;
+                });
+                _animatedMapMove(step.location, 17.5, offsetForSidebar: true);
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSelected ? 10 : 8,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? brandBlue.withValues(alpha: isDark ? 0.20 : 0.08)
+                      : isCurrent
+                      ? const Color(0xFF10B981).withValues(alpha: isDark ? 0.18 : 0.07)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: isSelected
+                      ? const Border(
+                          left: BorderSide(
+                            color: brandBlue,
+                            width: 3.5,
+                          ),
+                        )
+                      : isCurrent
+                      ? const Border(
+                          left: BorderSide(
+                            color: Color(0xFF10B981),
+                            width: 3.5,
+                          ),
+                        )
+                      : null,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _buildManeuverIcon(step, isFirst, isLast, isDark),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildStepText(step, isDark)),
+                    const SizedBox(width: 10),
+                    if (!isLast)
+                      _formatStepDistanceWidget(
+                        step.distanceMeters,
+                        isDark,
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -6886,7 +7717,9 @@ class MapScreenState extends State<MapScreen>
     const Color brandBlue = Color(0xFF2563EB);
 
     return Container(
-      constraints: const BoxConstraints(maxHeight: 580),
+      constraints: BoxConstraints(
+        maxHeight: (MediaQuery.sizeOf(context).height - 48).clamp(360.0, 780.0),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -6945,6 +7778,26 @@ class MapScreenState extends State<MapScreen>
                   ),
                 ),
 
+                // Collapse Panel Button
+                IconButton(
+                  icon: Icon(
+                    Icons.chevron_left_rounded,
+                    color: subtextColor,
+                    size: 22,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  tooltip: 'Collapse directions panel',
+                  onPressed: () {
+                    setState(() {
+                      _isSidePanelCollapsed = true;
+                    });
+                  },
+                ),
+
                 // Close Button
                 IconButton(
                   icon: Icon(
@@ -6961,6 +7814,7 @@ class MapScreenState extends State<MapScreen>
                   onPressed: () {
                     setState(() {
                       _isRoutePlanningMode = false;
+                      _showTurnByTurnSheet = false;
                       _suggestions = [];
                       _isEditingOrigin = false;
                     });
@@ -7245,19 +8099,25 @@ class MapScreenState extends State<MapScreen>
 
           Divider(height: 1, thickness: 1, color: cardBorder),
 
-          // ── Scrollable Body: Route Summary OR Suggestions OR History & Presets ──
+          // ── Scrollable Body: Route Summary OR Suggestions OR History & Presets OR Turn-by-Turn Steps ──
           Flexible(
             child: SingleChildScrollView(
               child: _suggestions.isNotEmpty
                   ? _buildSuggestionsListInPlanner(isDark)
                   : (_routePoints.isNotEmpty
-                        ? _buildRouteSummaryInPlanner(
-                            isDark: isDark,
-                            isClearAhead: isClearAhead,
-                            distStr: distStr,
-                            totalEtaStr: totalEtaStr,
-                            activePotholeCount: activePotholeCount,
-                          )
+                        ? (_showTurnByTurnSheet && _routeSteps.isNotEmpty
+                              ? _buildTurnByTurnInPlanner(
+                                  isDark: isDark,
+                                  distStr: distStr,
+                                  durStr: totalEtaStr,
+                                )
+                              : _buildRouteSummaryInPlanner(
+                                  isDark: isDark,
+                                  isClearAhead: isClearAhead,
+                                  distStr: distStr,
+                                  totalEtaStr: totalEtaStr,
+                                  activePotholeCount: activePotholeCount,
+                                ))
                         : _buildHistoryAndPresetsInPlanner(isDark)),
             ),
           ),
@@ -7428,6 +8288,18 @@ class MapScreenState extends State<MapScreen>
                   ],
                 ),
               ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  'Road conditions & hazards factored into ETA',
+                  style: TextStyle(
+                    fontSize: 11.0,
+                    fontWeight: FontWeight.w500,
+                    color: subtextColor.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -7435,9 +8307,10 @@ class MapScreenState extends State<MapScreen>
         // 2. Alternative Routes Selection (if any)
         if (_alternativeRoutes.length > 1)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Wrap(
               spacing: 8,
+              runSpacing: 6,
               children: List.generate(_alternativeRoutes.length, (idx) {
                 final isSelected = _selectedRouteIndex == idx;
                 final int hazardsOnRoute = idx < _routePotholeCounts.length
@@ -7485,50 +8358,6 @@ class MapScreenState extends State<MapScreen>
               }),
             ),
           ),
-
-        // 3. Delays & Road Disruptions Footer
-        Container(
-          margin: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Delays & Hazards',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Usual road conditions calculated in ETA',
-                style: TextStyle(fontSize: 11.5, color: subtextColor),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                activePotholeCount > 0
-                    ? '$activePotholeCount pothole hazard${activePotholeCount > 1 ? 's' : ''} located directly on your route path.'
-                    : 'No reported pothole hazards along this route path.',
-                style: TextStyle(
-                  fontSize: 11.0,
-                  fontWeight: FontWeight.w600,
-                  color: activePotholeCount > 0
-                      ? const Color(0xFFEF4444)
-                      : subtextColor.withValues(alpha: 0.85),
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -7963,8 +8792,12 @@ class MapScreenState extends State<MapScreen>
       ),
       itemBuilder: (ctx, i) {
         final s = _suggestions[i];
-        final name = s['_name'] ?? s['display_name'];
-        final shortAddr = s['_short_addr'] ?? '';
+        final name = (s['_name'] ?? s['display_name']).toString();
+        final shortAddr = (s['_short_addr'] ?? '').toString();
+        final bool isBarangay = s['_is_barangay'] == true ||
+            name.toLowerCase().contains('barangay');
+        const Color brgyTeal = Color(0xFF0D9488);
+
         return InkWell(
           onTap: () => _selectSuggestion(s),
           child: Padding(
@@ -7975,12 +8808,14 @@ class MapScreenState extends State<MapScreen>
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: brandBlue.withValues(alpha: 0.12),
+                    color: isBarangay
+                        ? brgyTeal.withValues(alpha: 0.14)
+                        : brandBlue.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.place_rounded,
-                    color: brandBlue,
+                  child: Icon(
+                    isBarangay ? Icons.holiday_village_rounded : Icons.place_rounded,
+                    color: isBarangay ? brgyTeal : brandBlue,
                     size: 18,
                   ),
                 ),
@@ -7989,15 +8824,48 @@ class MapScreenState extends State<MapScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        name,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: textColor,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: textColor,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isBarangay) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: brgyTeal.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: brgyTeal.withValues(alpha: 0.35),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: const Text(
+                                'BARANGAY',
+                                style: TextStyle(
+                                  fontSize: 9.0,
+                                  fontWeight: FontWeight.bold,
+                                  color: brgyTeal,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (shortAddr.isNotEmpty && shortAddr != name)
                         Text(
@@ -8782,359 +9650,7 @@ class MapScreenState extends State<MapScreen>
     );
   }
 
-  Widget _buildTravelModeSelector(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          _buildModeTab(
-            mode: OsrmTravelMode.car,
-            label: 'Car',
-            icon: Icons.directions_car_rounded,
-            isDark: isDark,
-          ),
-          _buildModeTab(
-            mode: OsrmTravelMode.bike,
-            label: 'Bike',
-            icon: Icons.directions_bike_rounded,
-            isDark: isDark,
-          ),
-          _buildModeTab(
-            mode: OsrmTravelMode.foot,
-            label: 'Foot',
-            icon: Icons.directions_walk_rounded,
-            isDark: isDark,
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildModeTab({
-    required OsrmTravelMode mode,
-    required String label,
-    required IconData icon,
-    required bool isDark,
-  }) {
-    final isSelected = _travelMode == mode;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          if (_travelMode != mode) {
-            setState(() => _travelMode = mode);
-            final dest =
-                _destination ??
-                (_routePoints.isNotEmpty ? _routePoints.last : null);
-            if (dest != null) {
-              _calculateRoute(dest);
-            }
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? (isDark ? const Color(0xFF1E293B) : Colors.white)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                        alpha: isDark ? 0.3 : 0.08,
-                      ),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected
-                    ? const Color(0xFF2563EB)
-                    : (isDark
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF64748B)),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  color: isSelected
-                      ? (isDark ? Colors.white : const Color(0xFF0F172A))
-                      : (isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTurnByTurnSheet(bool isDark) {
-    if (_routePoints.isEmpty || _routeSteps.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final Set<String> roads = {};
-    for (final step in _routeSteps) {
-      if (step.roadName.isNotEmpty) roads.add(step.roadName);
-    }
-    final String roadSummary = roads.isNotEmpty
-        ? roads.take(2).join(', ')
-        : (_searchController.text.isNotEmpty
-              ? _searchController.text
-              : 'Selected Route');
-
-    final double activeDistance =
-        _routeDistances.isNotEmpty &&
-            _selectedRouteIndex < _routeDistances.length
-        ? _routeDistances[_selectedRouteIndex]
-        : 0.0;
-    final double activeDuration =
-        _routeDurations.isNotEmpty &&
-            _selectedRouteIndex < _routeDurations.length
-        ? _routeDurations[_selectedRouteIndex]
-        : 0.0;
-
-    final String distStr = activeDistance >= 1000
-        ? '${(activeDistance / 1000).toStringAsFixed(1)} km'
-        : '${activeDistance.round()} m';
-    final String durStr = _formatEta(
-      activeDuration,
-      distanceMeters: activeDistance,
-      potholeCount: _selectedRouteIndex < _routePotholeCounts.length
-          ? _routePotholeCounts[_selectedRouteIndex]
-          : _potholesOnRoute.length,
-    );
-
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 440),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-          width: 1.2,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black38,
-            blurRadius: 20,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header Bar with OSRM Brand and Title
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.alt_route_rounded,
-                        color: Color(0xFF2563EB),
-                        size: 16,
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'OSRM',
-                        style: TextStyle(
-                          color: Color(0xFF2563EB),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        roadSummary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isDark
-                              ? Colors.white
-                              : const Color(0xFF1E293B),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$distStr, $durStr',
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : const Color(0xFF64748B),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    size: 20,
-                    color: isDark ? Colors.white60 : const Color(0xFF64748B),
-                  ),
-                  onPressed: () => setState(() => _showTurnByTurnSheet = false),
-                ),
-              ],
-            ),
-          ),
-
-          // 3 Travel Modes Selector Bar (Car, Bike, Foot)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: _buildTravelModeSelector(isDark),
-          ),
-
-          const SizedBox(height: 10),
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-          ),
-
-          // Turn-by-Turn Steps List
-          Flexible(
-            child: ListView.separated(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              itemCount: _routeSteps.length,
-              separatorBuilder: (ctx, i) => Divider(
-                height: 1,
-                thickness: 0.8,
-                color: isDark
-                    ? const Color(0xFF334155).withValues(alpha: 0.5)
-                    : const Color(0xFFF1F5F9),
-              ),
-              itemBuilder: (ctx, i) {
-                final step = _routeSteps[i];
-                final isFirst = i == 0;
-                final isLast = i == _routeSteps.length - 1;
-                final isSelected = _selectedStepIndex == i;
-                final bool isCurrent =
-                    _selectedStepIndex == null &&
-                    !isSelected &&
-                    i == _computedCurrentStepIndex();
-
-                return InkWell(
-                  onTap: () {
-                    if (_selectedStepIndex == i) {
-                      setState(() => _selectedStepIndex = null);
-                      return;
-                    }
-                    setState(() {
-                      _selectedStepIndex = i;
-                    });
-                    _animatedMapMove(step.location, 17.5);
-                  },
-                  borderRadius: BorderRadius.circular(10),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isSelected ? 10 : 8,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(
-                              0xFF2563EB,
-                            ).withValues(alpha: isDark ? 0.20 : 0.08)
-                          : isCurrent
-                          ? const Color(
-                              0xFF10B981,
-                            ).withValues(alpha: isDark ? 0.18 : 0.07)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      border: isSelected
-                          ? const Border(
-                              left: BorderSide(
-                                color: Color(0xFF2563EB),
-                                width: 3.5,
-                              ),
-                            )
-                          : isCurrent
-                          ? const Border(
-                              left: BorderSide(
-                                color: Color(0xFF10B981),
-                                width: 3.5,
-                              ),
-                            )
-                          : null,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        // Maneuver Icon
-                        _buildManeuverIcon(step, isFirst, isLast, isDark),
-                        const SizedBox(width: 14),
-                        // Step text with bold road name
-                        Expanded(child: _buildStepText(step, isDark)),
-                        const SizedBox(width: 12),
-                        // Distance label on right
-                        if (!isLast)
-                          _formatStepDistanceWidget(
-                            step.distanceMeters,
-                            isDark,
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _onEndpointPanStart(int kind) {
     final LatLng? point = kind == 1
@@ -10443,6 +10959,17 @@ class MapScreenState extends State<MapScreen>
           ),
           IconButton(
             padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            tooltip: 'Collapse search bar',
+            icon: Icon(
+              Icons.chevron_left_rounded,
+              size: 22,
+              color: subtextColor,
+            ),
+            onPressed: () => setState(() => _isSidePanelCollapsed = true),
+          ),
+          IconButton(
+            padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             tooltip: 'Directions / Plan Route',
             icon: const Icon(
@@ -10492,14 +11019,20 @@ class MapScreenState extends State<MapScreen>
         ),
         itemBuilder: (ctx, i) {
           final s = _suggestions[i];
-          final name = s['_name'] ?? s['display_name'];
-          final shortAddr = s['_short_addr'] ?? '';
+          final name = (s['_name'] ?? s['display_name']).toString();
+          final shortAddr = (s['_short_addr'] ?? '').toString();
           final bool isHighlighted = i == _highlightedSuggestionIndex;
+          final bool isBarangay = s['_is_barangay'] == true ||
+              name.toLowerCase().contains('barangay');
+          const Color brgyTeal = Color(0xFF0D9488);
+
           return InkWell(
             onTap: () => _selectSuggestion(s),
             child: Container(
               color: isHighlighted
-                  ? const Color(0xFF2563EB).withValues(alpha: 0.10)
+                  ? (isBarangay
+                      ? brgyTeal.withValues(alpha: 0.15)
+                      : const Color(0xFF2563EB).withValues(alpha: 0.10))
                   : Colors.transparent,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
@@ -10509,15 +11042,19 @@ class MapScreenState extends State<MapScreen>
                     height: 32,
                     decoration: BoxDecoration(
                       color: isHighlighted
-                          ? const Color(0xFF2563EB)
-                          : const Color(0xFF2563EB).withValues(alpha: 0.12),
+                          ? (isBarangay ? brgyTeal : const Color(0xFF2563EB))
+                          : (isBarangay
+                              ? brgyTeal.withValues(alpha: 0.14)
+                              : const Color(0xFF2563EB).withValues(alpha: 0.12)),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      Icons.place_rounded,
+                      isBarangay
+                          ? Icons.holiday_village_rounded
+                          : Icons.place_rounded,
                       color: isHighlighted
                           ? Colors.white
-                          : const Color(0xFF2563EB),
+                          : (isBarangay ? brgyTeal : const Color(0xFF2563EB)),
                       size: 18,
                     ),
                   ),
@@ -10526,17 +11063,50 @@ class MapScreenState extends State<MapScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          name,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? Colors.white
-                                : const Color(0xFF0F172A),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                name,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF0F172A),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (isBarangay) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: brgyTeal.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: brgyTeal.withValues(alpha: 0.35),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'BARANGAY',
+                                  style: TextStyle(
+                                    fontSize: 9.0,
+                                    fontWeight: FontWeight.bold,
+                                    color: brgyTeal,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         if (shortAddr.isNotEmpty && shortAddr != name)
                           Text(

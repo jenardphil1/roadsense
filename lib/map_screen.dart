@@ -199,6 +199,71 @@ class MapScreenState extends State<MapScreen>
   bool _dismissedLocationPrompt = false;
   PotholeMarker? _selectedPothole;
 
+  late final AnimationController _puckPulseController;
+  AnimationController? _puckMoveController;
+  final ValueNotifier<LatLng?> _animatedPuckPositionNotifier =
+      ValueNotifier<LatLng?>(null);
+
+  /// Smoothly interpolates the user location marker between GPS fixes (Google Maps 60 FPS puck motion)
+  void _animatePuckTo(LatLng targetPos) {
+    final current = _animatedPuckPositionNotifier.value ?? _currentPosition;
+    if (current == null) {
+      _animatedPuckPositionNotifier.value = targetPos;
+      return;
+    }
+
+    final startLat = current.latitude;
+    final startLng = current.longitude;
+    final endLat = targetPos.latitude;
+    final endLng = targetPos.longitude;
+
+    final dist = Geolocator.distanceBetween(startLat, startLng, endLat, endLng);
+    if (dist > 300 || dist < 0.1) {
+      _puckMoveController?.stop();
+      _animatedPuckPositionNotifier.value = targetPos;
+      if (_followMode != FollowMode.none) {
+        final cameraCenter = _getVisibleMapOffsetCameraCenter(
+          targetPos,
+          _mapController.camera.zoom,
+        );
+        _mapController.move(cameraCenter, _mapController.camera.zoom);
+      }
+      return;
+    }
+
+    _puckMoveController?.stop();
+    _puckMoveController?.dispose();
+
+    _puckMoveController = AnimationController(
+      duration: const Duration(milliseconds: 850),
+      vsync: this,
+    );
+
+    final curved = CurvedAnimation(
+      parent: _puckMoveController!,
+      curve: Curves.easeOutCubic,
+    );
+
+    _puckMoveController!.addListener(() {
+      if (!mounted) return;
+      final t = curved.value;
+      final interpLat = startLat + (endLat - startLat) * t;
+      final interpLng = startLng + (endLng - startLng) * t;
+      final interpPos = LatLng(interpLat, interpLng);
+      _animatedPuckPositionNotifier.value = interpPos;
+
+      if (_followMode != FollowMode.none) {
+        final cameraCenter = _getVisibleMapOffsetCameraCenter(
+          interpPos,
+          _mapController.camera.zoom,
+        );
+        _mapController.move(cameraCenter, _mapController.camera.zoom);
+      }
+    });
+
+    _puckMoveController!.forward();
+  }
+
   /// Smoothly glides the GIS map camera to a target location and zoom level
   void _animatedMapMove(LatLng destLocation, double destZoom) {
     try {
@@ -560,8 +625,11 @@ class MapScreenState extends State<MapScreen>
   String? _nextPotholeEta;
   bool _inProximityWarning = false;
   final Set<String> _alertedAt50m = {};
+  final Set<String> _alertedAtPreWarning = {};
   bool _isInitialStartup = true;
   bool _showWarningBanner = false;
+  late final AnimationController _warningBannerCountdownController;
+  String _selectedHazardCategory = 'All';
   bool _isSearchVisible = true;
   bool _isSearchPageActive = false;
   bool _isChoosingLocationOnMap = false;
@@ -591,8 +659,17 @@ class MapScreenState extends State<MapScreen>
   @override
   void initState() {
     super.initState();
+    _puckPulseController = AnimationController(
+      duration: const Duration(milliseconds: 1800),
+      vsync: this,
+    )..repeat();
+    _warningBannerCountdownController = AnimationController(
+      duration: const Duration(seconds: 8),
+      vsync: this,
+    );
     if (_cachedGlobalPosition != null) {
       _currentPosition = _cachedGlobalPosition;
+      _animatedPuckPositionNotifier.value = _cachedGlobalPosition;
       _isLoadingLocation = false;
     }
     _determinePosition(requestPermission: false);
@@ -776,6 +853,11 @@ class MapScreenState extends State<MapScreen>
     _debounceTimer?.cancel();
     _positionSubscription?.cancel();
     _compassSubscription?.cancel();
+    _puckPulseController.dispose();
+    _warningBannerCountdownController.dispose();
+    _puckMoveController?.stop();
+    _puckMoveController?.dispose();
+    _animatedPuckPositionNotifier.dispose();
     if (!kIsWeb) _tts.stop();
     AppSettings.instance.setRouteActive(false);
     super.dispose();
@@ -1112,35 +1194,25 @@ class MapScreenState extends State<MapScreen>
           _currentPosition = newPos;
           _checkPotholeProximity(newPos);
           unawaited(_autoAdjustRouteToCurrentPath(newPos));
-
-          if (_followMode != FollowMode.none) {
-            final LatLng cameraCenter = _getVisibleMapOffsetCameraCenter(
-              newPos,
-              _mapController.camera.zoom,
-            );
-            _mapController.move(cameraCenter, _mapController.camera.zoom);
-          }
+          _animatePuckTo(newPos);
         });
 
     if (!kIsWeb) {
-      int lastCompassTime = 0;
       _compassSubscription = FlutterCompass.events?.listen((
         CompassEvent event,
       ) {
         if (!widget.isMapActive || !mounted) return;
         if (event.heading == null) return;
 
-        final int now = DateTime.now().millisecondsSinceEpoch;
         double heading = event.heading!;
 
         if (_lastHeadingNotifier.value != null) {
-          double diff =
-              (heading - _lastHeadingNotifier.value! + 180) % 360 - 180;
-          if (diff.abs() < 2.0 && (now - lastCompassTime) < 100) return;
-          heading = _lastHeadingNotifier.value! + diff * 0.2;
+          final double prev = _lastHeadingNotifier.value!;
+          final double diff = (heading - prev + 180) % 360 - 180;
+          // Continuous exponential moving average without stutter-inducing deadband
+          heading = (prev + diff * 0.25 + 360) % 360;
         }
 
-        lastCompassTime = now;
         if (mounted) {
           _lastHeadingNotifier.value = heading;
         }
@@ -1297,6 +1369,21 @@ class MapScreenState extends State<MapScreen>
       }
     });
 
+    // Multi-Stage Vocal Cues (Stage 1): Pre-warning at 150m - 320m along route
+    if (_destination != null &&
+        nearestDistMeters <= 320 &&
+        nearestDistMeters >= 120 &&
+        closestPotholeKey != null &&
+        !_alertedAtPreWarning.contains(closestPotholeKey)) {
+      _alertedAtPreWarning.add(closestPotholeKey);
+      if (_showMarkers && !_isInitialStartup && !kIsWeb) {
+        final String prePrompt = _travelMode == OsrmTravelMode.bike
+            ? 'Motorcycle advisory: Pothole cluster reported ${nearestDistMeters.round()} meters ahead.'
+            : 'Caution: Pothole cluster reported ${nearestDistMeters.round()} meters ahead.';
+        _tts.speak(prePrompt);
+      }
+    }
+
     if (inProximity && closestPotholeKey != null) {
       if (!_alertedAt50m.contains(closestPotholeKey)) {
         _alertedAt50m.add(closestPotholeKey);
@@ -1304,6 +1391,7 @@ class MapScreenState extends State<MapScreen>
         if (_showMarkers) {
           HapticFeedback.lightImpact();
           setState(() => _showWarningBanner = true);
+          _triggerWarningBannerCountdown();
           if (!_isInitialStartup && !kIsWeb) {
             final String etaSpeech = (_destination != null && nextPotholeEta != null)
                 ? ', estimated arrival in $nextPotholeEta'
@@ -1311,11 +1399,11 @@ class MapScreenState extends State<MapScreen>
             final String routeHazardPrompt =
                 (_routePoints.isNotEmpty && pendingPotholes.isNotEmpty)
                     ? (_travelMode == OsrmTravelMode.bike
-                        ? 'Motorcycle warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. Ride with caution. ${pendingPotholes.length} hazard${pendingPotholes.length == 1 ? '' : 's'} remaining on route.'
-                        : 'Warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. ${pendingPotholes.length} hazard${pendingPotholes.length == 1 ? '' : 's'} remaining on route.')
+                        ? 'Motorcycle warning! Pothole detected ahead in ${absoluteMin.round()} meters$etaSpeech. Slow down now.'
+                        : 'Warning! Slow down now, pothole ahead in ${absoluteMin.round()} meters$etaSpeech.')
                     : (_travelMode == OsrmTravelMode.bike
-                        ? 'Motorcycle alert! Pothole nearby in ${absoluteMin.round()} meters. Slow down.'
-                        : 'Warning! Pothole nearby in ${absoluteMin.round()} meters.');
+                        ? 'Motorcycle alert! Pothole nearby in ${absoluteMin.round()} meters. Slow down now.'
+                        : 'Warning! Slow down now, pothole nearby.');
             _tts.speak(routeHazardPrompt);
             PotholeNotifier.instance.showPotholeAlert(
               '${absoluteMin.round()} m',
@@ -1325,10 +1413,98 @@ class MapScreenState extends State<MapScreen>
       }
     } else if (absoluteMin > 60) {
       _alertedAt50m.clear();
-      if (_showWarningBanner) setState(() => _showWarningBanner = false);
+      _alertedAtPreWarning.clear();
+      if (_showWarningBanner) {
+        _dismissWarningBanner();
+      }
     }
 
     _isInitialStartup = false;
+  }
+
+  void _triggerWarningBannerCountdown() {
+    _warningBannerCountdownController.stop();
+    _warningBannerCountdownController.reset();
+    _warningBannerCountdownController.forward().then((_) {
+      if (mounted && _showWarningBanner) {
+        setState(() => _showWarningBanner = false);
+      }
+    });
+  }
+
+  void _dismissWarningBanner() {
+    _warningBannerCountdownController.stop();
+    if (mounted && _showWarningBanner) {
+      setState(() => _showWarningBanner = false);
+    }
+  }
+
+  int? _findBetterDetourRouteIndex() {
+    if (_alternativeRoutes.length <= 1) return null;
+    final int currentCount = _selectedRouteIndex < _routePotholeCounts.length
+        ? _routePotholeCounts[_selectedRouteIndex]
+        : 999;
+    int? bestIndex;
+    int lowestPotholes = currentCount;
+    for (int i = 0; i < _alternativeRoutes.length; i++) {
+      if (i == _selectedRouteIndex) continue;
+      final int count = i < _routePotholeCounts.length ? _routePotholeCounts[i] : 0;
+      if (count < lowestPotholes) {
+        lowestPotholes = count;
+        bestIndex = i;
+      }
+    }
+    if (bestIndex == null && currentCount > 0 && _alternativeRoutes.length > 1) {
+      bestIndex = (_selectedRouteIndex + 1) % _alternativeRoutes.length;
+    }
+    return bestIndex;
+  }
+
+  void _takeDetourAroundHazard(int betterIndex) {
+    HapticFeedback.heavyImpact();
+    _selectActiveRoute(betterIndex);
+    _dismissWarningBanner();
+    if (!kIsWeb) {
+      _tts.speak('Rerouting to bypass pothole hazard ahead. Alternate path selected.');
+    }
+  }
+
+  Future<void> _submitHazardFeedback(PotholeMarker pothole, bool stillThere) async {
+    HapticFeedback.mediumImpact();
+    Navigator.of(context).pop();
+    if (pothole.docId != null) {
+      try {
+        await CloudService.instance.submitHazardFeedback(pothole.docId!, stillThere);
+      } catch (_) {}
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                stillThere ? Icons.thumb_up_alt_rounded : Icons.thumb_down_alt_rounded,
+                color: stillThere ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  stillThere
+                      ? 'Thanks! Hazard freshness verified for all drivers.'
+                      : 'Thanks! Report logged — hazard marked for decay.',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF0F172A),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
@@ -1869,21 +2045,211 @@ class MapScreenState extends State<MapScreen>
     setState(() => _potholesOnRoute = onRoute);
   }
 
+  // Pre-indexed Bulacan LGUs & Key Barangays for zero-latency local geocoding
+  static const List<Map<String, dynamic>> _bulacanBarangays = [
+    // Santa Maria
+    {'name': 'Barangay Poblacion', 'municipality': 'Santa Maria', 'lat': 14.8197, 'lon': 120.9575},
+    {'name': 'Barangay Bagbaguin', 'municipality': 'Santa Maria', 'lat': 14.8083, 'lon': 120.9542},
+    {'name': 'Barangay Caypombo', 'municipality': 'Santa Maria', 'lat': 14.8427, 'lon': 120.9739},
+    {'name': 'Barangay Catmon', 'municipality': 'Santa Maria', 'lat': 14.8315, 'lon': 120.9858},
+    {'name': 'Barangay Guyong', 'municipality': 'Santa Maria', 'lat': 14.8236, 'lon': 120.9712},
+    {'name': 'Barangay Balasing', 'municipality': 'Santa Maria', 'lat': 14.8584, 'lon': 121.0062},
+    {'name': 'Barangay Pulong Buhangin', 'municipality': 'Santa Maria', 'lat': 14.8633, 'lon': 121.0022},
+    {'name': 'Barangay San Gabriel', 'municipality': 'Santa Maria', 'lat': 14.8251, 'lon': 120.9631},
+    {'name': 'Barangay Santa Clara', 'municipality': 'Santa Maria', 'lat': 14.8164, 'lon': 120.9501},
+    {'name': 'Barangay Buenavista', 'municipality': 'Santa Maria', 'lat': 14.8521, 'lon': 120.9934},
+    {'name': 'Barangay Camangyanan', 'municipality': 'Santa Maria', 'lat': 14.8115, 'lon': 120.9412},
+    {'name': 'Barangay Caysio', 'municipality': 'Santa Maria', 'lat': 14.8458, 'lon': 120.9812},
+    {'name': 'Barangay Lalakhan', 'municipality': 'Santa Maria', 'lat': 14.8123, 'lon': 120.9621},
+    {'name': 'Barangay Mag-asawang Sapa', 'municipality': 'Santa Maria', 'lat': 14.8711, 'lon': 121.0189},
+    {'name': 'Barangay Mahabang Parang', 'municipality': 'Santa Maria', 'lat': 14.8654, 'lon': 121.0211},
+    {'name': 'Barangay Manggahan', 'municipality': 'Santa Maria', 'lat': 14.8389, 'lon': 120.9689},
+    {'name': 'Barangay Parada', 'municipality': 'Santa Maria', 'lat': 14.8012, 'lon': 120.9642},
+    {'name': 'Barangay San Jose Patag', 'municipality': 'Santa Maria', 'lat': 14.8091, 'lon': 120.9782},
+    {'name': 'Barangay San Vicente', 'municipality': 'Santa Maria', 'lat': 14.8291, 'lon': 120.9521},
+    {'name': 'Barangay Silangan', 'municipality': 'Santa Maria', 'lat': 14.8412, 'lon': 121.0142},
+    {'name': 'Barangay Tumana', 'municipality': 'Santa Maria', 'lat': 14.8178, 'lon': 120.9712},
+
+    // Malolos City
+    {'name': 'Barangay Guinhawa', 'municipality': 'Malolos', 'lat': 14.8569, 'lon': 120.8167},
+    {'name': 'Barangay Liang', 'municipality': 'Malolos', 'lat': 14.8489, 'lon': 120.8123},
+    {'name': 'Barangay San Agustin', 'municipality': 'Malolos', 'lat': 14.8411, 'lon': 120.8178},
+    {'name': 'Barangay Sumapang Matanda', 'municipality': 'Malolos', 'lat': 14.8612, 'lon': 120.8251},
+    {'name': 'Barangay Cofradia', 'municipality': 'Malolos', 'lat': 14.8689, 'lon': 120.8312},
+    {'name': 'Barangay Bulihan', 'municipality': 'Malolos', 'lat': 14.8512, 'lon': 120.8354},
+    {'name': 'Barangay Caingin', 'municipality': 'Malolos', 'lat': 14.8432, 'lon': 120.8211},
+    {'name': 'Barangay Catmon', 'municipality': 'Malolos', 'lat': 14.8471, 'lon': 120.8192},
+    {'name': 'Barangay Dakila', 'municipality': 'Malolos', 'lat': 14.8589, 'lon': 120.8412},
+    {'name': 'Barangay Ligas', 'municipality': 'Malolos', 'lat': 14.8641, 'lon': 120.8491},
+    {'name': 'Barangay Lugam', 'municipality': 'Malolos', 'lat': 14.8712, 'lon': 120.8211},
+    {'name': 'Barangay Mabolo', 'municipality': 'Malolos', 'lat': 14.8391, 'lon': 120.8291},
+    {'name': 'Barangay Mojon', 'municipality': 'Malolos', 'lat': 14.8621, 'lon': 120.8152},
+    {'name': 'Barangay Panasahan', 'municipality': 'Malolos', 'lat': 14.8281, 'lon': 120.8241},
+    {'name': 'Barangay Santisima Trinidad', 'municipality': 'Malolos', 'lat': 14.8541, 'lon': 120.8212},
+    {'name': 'Barangay Santo Rosario', 'municipality': 'Malolos', 'lat': 14.8439, 'lon': 120.8115},
+    {'name': 'Barangay Tikay', 'municipality': 'Malolos', 'lat': 14.8491, 'lon': 120.8482},
+
+    // City of San Jose del Monte (CSJDM)
+    {'name': 'Barangay Tungkong Mangga', 'municipality': 'San Jose del Monte', 'lat': 14.8021, 'lon': 121.0742},
+    {'name': 'Barangay Muzon', 'municipality': 'San Jose del Monte', 'lat': 14.8062, 'lon': 121.0315},
+    {'name': 'Barangay Gaya-Gaya', 'municipality': 'San Jose del Monte', 'lat': 14.8112, 'lon': 121.0541},
+    {'name': 'Barangay Graceville', 'municipality': 'San Jose del Monte', 'lat': 14.8191, 'lon': 121.0421},
+    {'name': 'Barangay Francisco Homes', 'municipality': 'San Jose del Monte', 'lat': 14.8212, 'lon': 121.0612},
+    {'name': 'Barangay Kaypian', 'municipality': 'San Jose del Monte', 'lat': 14.8312, 'lon': 121.0712},
+    {'name': 'Barangay Minuyan', 'municipality': 'San Jose del Monte', 'lat': 14.8251, 'lon': 121.0821},
+    {'name': 'Barangay Sapang Palay', 'municipality': 'San Jose del Monte', 'lat': 14.8412, 'lon': 121.0651},
+    {'name': 'Barangay Santo Cristo', 'municipality': 'San Jose del Monte', 'lat': 14.8091, 'lon': 121.0851},
+
+    // Meycauayan City
+    {'name': 'Barangay Calvario', 'municipality': 'Meycauayan', 'lat': 14.7391, 'lon': 120.9582},
+    {'name': 'Barangay Camalig', 'municipality': 'Meycauayan', 'lat': 14.7451, 'lon': 120.9821},
+    {'name': 'Barangay Iba', 'municipality': 'Meycauayan', 'lat': 14.7321, 'lon': 120.9841},
+    {'name': 'Barangay Langka', 'municipality': 'Meycauayan', 'lat': 14.7491, 'lon': 120.9912},
+    {'name': 'Barangay Lawa', 'municipality': 'Meycauayan', 'lat': 14.7312, 'lon': 120.9612},
+    {'name': 'Barangay Malhacan', 'municipality': 'Meycauayan', 'lat': 14.7381, 'lon': 120.9712},
+    {'name': 'Barangay Perez', 'municipality': 'Meycauayan', 'lat': 14.7412, 'lon': 120.9951},
+    {'name': 'Barangay Saluysoy', 'municipality': 'Meycauayan', 'lat': 14.7351, 'lon': 120.9521},
+
+    // Marilao
+    {'name': 'Barangay Ibayo', 'municipality': 'Marilao', 'lat': 14.7551, 'lon': 120.9482},
+    {'name': 'Barangay Lambakin', 'municipality': 'Marilao', 'lat': 14.7681, 'lon': 120.9712},
+    {'name': 'Barangay Lias', 'municipality': 'Marilao', 'lat': 14.7612, 'lon': 120.9612},
+    {'name': 'Barangay Loma de Gato', 'municipality': 'Marilao', 'lat': 14.7812, 'lon': 120.9982},
+    {'name': 'Barangay Patubig', 'municipality': 'Marilao', 'lat': 14.7721, 'lon': 120.9551},
+    {'name': 'Barangay Poblacion I', 'municipality': 'Marilao', 'lat': 14.7581, 'lon': 120.9512},
+    {'name': 'Barangay Prenza I', 'municipality': 'Marilao', 'lat': 14.7791, 'lon': 120.9812},
+    {'name': 'Barangay Saog', 'municipality': 'Marilao', 'lat': 14.7641, 'lon': 120.9421},
+    {'name': 'Barangay Tabing Ilog', 'municipality': 'Marilao', 'lat': 14.7512, 'lon': 120.9541},
+
+    // Bocaue
+    {'name': 'Barangay Bagumbayan', 'municipality': 'Bocaue', 'lat': 14.7981, 'lon': 120.9291},
+    {'name': 'Barangay Bambang', 'municipality': 'Bocaue', 'lat': 14.7921, 'lon': 120.9312},
+    {'name': 'Barangay Batia', 'municipality': 'Bocaue', 'lat': 14.8151, 'lon': 120.9182},
+    {'name': 'Barangay Bundukan', 'municipality': 'Bocaue', 'lat': 14.8021, 'lon': 120.9451},
+    {'name': 'Barangay Lolomboy', 'municipality': 'Bocaue', 'lat': 14.7881, 'lon': 120.9412},
+    {'name': 'Barangay Poblacion', 'municipality': 'Bocaue', 'lat': 14.7991, 'lon': 120.9341},
+    {'name': 'Barangay Taal', 'municipality': 'Bocaue', 'lat': 14.8112, 'lon': 120.9381},
+    {'name': 'Barangay Turo', 'municipality': 'Bocaue', 'lat': 14.8051, 'lon': 120.9281},
+
+    // Guiguinto & Balagtas
+    {'name': 'Barangay Tuktukan', 'municipality': 'Guiguinto', 'lat': 14.8321, 'lon': 120.8812},
+    {'name': 'Barangay Tabang', 'municipality': 'Guiguinto', 'lat': 14.8412, 'lon': 120.8712},
+    {'name': 'Barangay Santa Rita', 'municipality': 'Guiguinto', 'lat': 14.8351, 'lon': 120.8912},
+    {'name': 'Barangay Wawa', 'municipality': 'Balagtas', 'lat': 14.8191, 'lon': 120.9082},
+    {'name': 'Barangay Borol 1st', 'municipality': 'Balagtas', 'lat': 14.8112, 'lon': 120.9141},
+    {'name': 'Barangay Santol', 'municipality': 'Balagtas', 'lat': 14.8251, 'lon': 120.9121},
+
+    // Baliuag & Plaridel
+    {'name': 'Barangay Poblacion', 'municipality': 'Baliuag', 'lat': 14.9541, 'lon': 120.9012},
+    {'name': 'Barangay Subic', 'municipality': 'Baliuag', 'lat': 14.9612, 'lon': 120.8951},
+    {'name': 'Barangay Bagong Nayon', 'municipality': 'Baliuag', 'lat': 14.9481, 'lon': 120.9051},
+    {'name': 'Barangay Banga 1st', 'municipality': 'Plaridel', 'lat': 14.8871, 'lon': 120.8582},
+    {'name': 'Barangay Poblacion', 'municipality': 'Plaridel', 'lat': 14.8891, 'lon': 120.8612},
+    {'name': 'Barangay Dampol', 'municipality': 'Plaridel', 'lat': 14.9012, 'lon': 120.8451},
+    {'name': 'Barangay Tabang', 'municipality': 'Plaridel', 'lat': 14.8781, 'lon': 120.8691},
+
+    // Pandi & Norzagaray
+    {'name': 'Barangay Poblacion', 'municipality': 'Pandi', 'lat': 14.8681, 'lon': 120.9572},
+    {'name': 'Barangay Bunsuran 1st', 'municipality': 'Pandi', 'lat': 14.8812, 'lon': 120.9481},
+    {'name': 'Barangay Masuso', 'municipality': 'Pandi', 'lat': 14.8721, 'lon': 120.9712},
+    {'name': 'Barangay Poblacion', 'municipality': 'Norzagaray', 'lat': 14.9121, 'lon': 121.0421},
+    {'name': 'Barangay Bigte', 'municipality': 'Norzagaray', 'lat': 14.8951, 'lon': 121.0612},
+    {'name': 'Barangay Minuyan', 'municipality': 'Norzagaray', 'lat': 14.9041, 'lon': 121.0741},
+  ];
+
+  /// Instant local search matcher for Philippine & Bulacan Barangays
+  List<Map<String, dynamic>> _fetchLocalBarangayCandidates(String query) {
+    final clean = query
+        .toLowerCase()
+        .replaceAll(RegExp(r'\b(barangay|brgy\.?|bgy\.?)\b', caseSensitive: false), '')
+        .trim();
+    if (clean.length < 2) return [];
+
+    final refPos = _currentPosition ?? _bulacanCenter;
+    final List<Map<String, dynamic>> matches = [];
+
+    for (final b in _bulacanBarangays) {
+      final name = b['name'] as String;
+      final mun = b['municipality'] as String;
+      final lat = (b['lat'] as num).toDouble();
+      final lon = (b['lon'] as num).toDouble();
+      final nameClean = name.toLowerCase().replaceAll('barangay', '').trim();
+      final munClean = mun.toLowerCase();
+
+      final loc = LatLng(lat, lon);
+      final dist = _calculateDistanceKm(refPos, loc);
+
+      double score = 0.0;
+      if (nameClean == clean) {
+        score = 220.0;
+      } else if (nameClean.startsWith(clean)) {
+        score = 170.0;
+      } else if (nameClean.contains(clean)) {
+        score = 140.0;
+      } else if ('$nameClean $munClean'.contains(clean) ||
+          '$munClean $nameClean'.contains(clean)) {
+        score = 130.0;
+      }
+
+      if (score > 0) {
+        if (dist != double.infinity) {
+          score += (1.0 / (dist + 1.0)) * 50.0;
+        }
+        matches.add({
+          'lat': lat.toString(),
+          'lon': lon.toString(),
+          '_name': name,
+          '_short_addr': '$mun, Bulacan',
+          'display_name': '$name, $mun, Bulacan',
+          '_distance_km': dist,
+          '_score': score,
+          '_is_barangay': true,
+          '_source': 'Bulacan LGU Registry',
+        });
+      }
+    }
+
+    matches.sort(
+      (a, b) => (b['_score'] as double).compareTo(a['_score'] as double),
+    );
+    return matches.take(5).toList();
+  }
+
   String _normalizeQuery(String rawQuery) {
     String normalized = rawQuery.trim();
     if (normalized.length > 100) {
       normalized = normalized.substring(0, 100).trim();
     }
-    final lower = normalized.toLowerCase();
 
-    // Standardize abbreviation aliases (e.g. Sta. -> Santa)
+    // Expand Philippine barangay abbreviations
+    normalized = normalized.replaceAll(
+      RegExp(r'\b(brgy\.?|bgy\.?)\b', caseSensitive: false),
+      'Barangay ',
+    );
+
+    // Standardize road and religious place prefix aliases
     normalized = normalized.replaceAll(
       RegExp(r'\bsta\.?\b', caseSensitive: false),
       'Santa',
     );
+    normalized = normalized.replaceAll(
+      RegExp(r'\bsto\.?\b', caseSensitive: false),
+      'Santo',
+    );
+    normalized = normalized.replaceAll(
+      RegExp(r'\bsn\.?\b', caseSensitive: false),
+      'San',
+    );
+    normalized = normalized.replaceAll(
+      RegExp(r'\b(pob\.?)\b', caseSensitive: false),
+      'Poblacion',
+    );
 
     // Popular local search aliases
-    if (lower.contains('sm sta maria') ||
+    final lower = normalized.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (lower == 'sjdm' || lower == 'csjdm' || lower == 'sjdm bulacan') {
+      normalized = 'San Jose del Monte Bulacan';
+    } else if (lower.contains('sm sta maria') ||
         lower.contains('sm santa maria') ||
         lower.contains('sm city sta maria') ||
         lower.contains('sm city santa maria')) {
@@ -1896,7 +2262,7 @@ class MapScreenState extends State<MapScreen>
       normalized = 'Bulacan Philippines';
     }
 
-    return normalized;
+    return normalized.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   double _calculateDistanceKm(LatLng p1, LatLng p2) {
@@ -2142,11 +2508,13 @@ class MapScreenState extends State<MapScreen>
         'format': 'json',
         'addressdetails': '1',
         'countrycodes': 'ph',
+        'viewbox': '120.55,15.25,121.35,14.65', // Bias results toward Bulacan & Central Luzon
+        'bounded': '0',
         'limit': '10',
       });
 
       final res = await http
-          .get(url, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
 
       if (res.statusCode != 200) return [];
@@ -2160,15 +2528,66 @@ class MapScreenState extends State<MapScreen>
 
         final LatLng candidateLoc = LatLng(lat, lon);
         final String displayName = (item['display_name'] ?? '').toString();
-        final String name = (item['name'] ?? displayName.split(',').first)
-            .toString();
         final addr = (item['address'] as Map<String, dynamic>?) ?? {};
-        final String shortAddr = [
-          addr['road'] ?? addr['suburb'] ?? '',
-          addr['city'] ?? addr['town'] ?? addr['municipality'] ?? '',
-          addr['state'] ?? addr['province'] ?? '',
-        ].where((e) => e.isNotEmpty).join(', ');
 
+        // Extract Philippine Barangay
+        String rawBrgy = (addr['suburb'] ??
+                addr['village'] ??
+                addr['quarter'] ??
+                addr['neighbourhood'] ??
+                addr['city_district'] ??
+                '')
+            .toString()
+            .trim();
+        String brgy = '';
+        if (rawBrgy.isNotEmpty) {
+          final lower = rawBrgy.toLowerCase();
+          if (lower.startsWith('brgy.') || lower.startsWith('brgy ')) {
+            brgy = 'Barangay ${rawBrgy.substring(5).trim()}';
+          } else if (lower.startsWith('barangay')) {
+            brgy = rawBrgy;
+          } else {
+            brgy = 'Barangay $rawBrgy';
+          }
+        }
+
+        String city = (addr['city'] ??
+                addr['town'] ??
+                addr['municipality'] ??
+                addr['county'] ??
+                '')
+            .toString()
+            .trim();
+        String province =
+            (addr['state'] ?? addr['province'] ?? '').toString().trim();
+
+        final type = (item['type'] ?? item['addresstype'] ?? '')
+            .toString()
+            .toLowerCase();
+        final bool isBarangay = type == 'suburb' ||
+            type == 'village' ||
+            type == 'quarter' ||
+            (rawBrgy.isNotEmpty &&
+                (item['name'] ?? '')
+                    .toString()
+                    .toLowerCase()
+                    .contains(rawBrgy.toLowerCase()));
+
+        String name = (item['name'] ?? displayName.split(',').first)
+            .toString()
+            .trim();
+        if (isBarangay && !name.toLowerCase().startsWith('barangay')) {
+          name = 'Barangay $name';
+        }
+
+        // Clean structured subtitle: [Barangay], [City], [Province]
+        List<String> subParts = [];
+        if (!isBarangay && brgy.isNotEmpty) subParts.add(brgy);
+        if (city.isNotEmpty) subParts.add(city);
+        if (province.isNotEmpty && province != city) subParts.add(province);
+
+        final String shortAddr =
+            subParts.isNotEmpty ? subParts.join(', ') : displayName;
         final double distanceKm = _calculateDistanceKm(refPos, candidateLoc);
 
         double score = 0.0;
@@ -2176,13 +2595,19 @@ class MapScreenState extends State<MapScreen>
         final String queryLower = normalizedQuery.toLowerCase();
 
         if (nameLower == queryLower) {
-          score += 110.0;
+          score += 130.0;
         } else if (nameLower.startsWith(queryLower)) {
-          score += 55.0;
+          score += 70.0;
         } else if (nameLower.contains(queryLower)) {
-          score += 28.0;
+          score += 35.0;
         }
 
+        if (isBarangay) {
+          score += 45.0; // Boost official Barangay entities
+        }
+        if (nameLower.contains('barangay') || queryLower.contains('barangay')) {
+          score += 30.0;
+        }
         if (displayName.toLowerCase().contains('bulacan')) {
           score += 40.0;
         }
@@ -2198,6 +2623,7 @@ class MapScreenState extends State<MapScreen>
           'display_name': displayName,
           '_distance_km': distanceKm,
           '_score': score,
+          '_is_barangay': isBarangay,
           '_source': 'OSM Nominatim',
         });
       }
@@ -2212,6 +2638,11 @@ class MapScreenState extends State<MapScreen>
       final normalizedQuery = _normalizeQuery(query);
 
       final List<Map<String, dynamic>> allCandidates = [];
+
+      // Local instant Bulacan Barangay matches (<1ms)
+      final localMatches = _fetchLocalBarangayCandidates(normalizedQuery);
+      allCandidates.addAll(localMatches);
+
       final results = await Future.wait([
         _fetchPhotonOsmCandidates(normalizedQuery),
         _fetchNominatimCandidates(normalizedQuery),
@@ -2395,6 +2826,74 @@ class MapScreenState extends State<MapScreen>
     return _destination != null;
   }
 
+  Future<String> _reverseGeocodeLabel(LatLng point) async {
+    try {
+      final url = Uri.https('nominatim.openstreetmap.org', '/reverse', {
+        'lat': point.latitude.toString(),
+        'lon': point.longitude.toString(),
+        'format': 'json',
+        'addressdetails': '1',
+      });
+      final res = await http
+          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final addr = (data['address'] as Map<String, dynamic>?) ?? {};
+
+        String road = addr['house_number'] != null
+            ? '${addr['house_number']} ${addr['road'] ?? ''}'.trim()
+            : (addr['road'] ??
+                    addr['pedestrian'] ??
+                    addr['amenity'] ??
+                    addr['building'] ??
+                    '')
+                .toString()
+                .trim();
+
+        String rawBrgy = (addr['suburb'] ??
+                addr['village'] ??
+                addr['quarter'] ??
+                addr['neighbourhood'] ??
+                addr['city_district'] ??
+                '')
+            .toString()
+            .trim();
+        String brgy = '';
+        if (rawBrgy.isNotEmpty) {
+          final lower = rawBrgy.toLowerCase();
+          if (lower.startsWith('brgy.') || lower.startsWith('brgy ')) {
+            brgy = 'Barangay ${rawBrgy.substring(5).trim()}';
+          } else if (lower.startsWith('barangay')) {
+            brgy = rawBrgy;
+          } else {
+            brgy = 'Barangay $rawBrgy';
+          }
+        }
+
+        String city = (addr['city'] ??
+                addr['town'] ??
+                addr['municipality'] ??
+                addr['county'] ??
+                '')
+            .toString()
+            .trim();
+
+        String province =
+            (addr['province'] ?? addr['state'] ?? 'Bulacan').toString().trim();
+
+        List<String> parts = [];
+        if (road.isNotEmpty) parts.add(road);
+        if (brgy.isNotEmpty && brgy != road) parts.add(brgy);
+        if (city.isNotEmpty) parts.add(city);
+        if (province.isNotEmpty && province != city) parts.add(province);
+
+        if (parts.isNotEmpty) return parts.join(', ');
+      }
+    } catch (_) {}
+    return 'Selected on map';
+  }
+
   void _confirmChooseLocationOnMap() {
     final LatLng centerLoc = _mapController.camera.center;
 
@@ -2404,6 +2903,12 @@ class MapScreenState extends State<MapScreen>
           _customOrigin = centerLoc;
           _originController.text = 'Selected on map';
           _isChoosingLocationOnMap = false;
+        });
+
+        _reverseGeocodeLabel(centerLoc).then((label) {
+          if (mounted && _originController.text == 'Selected on map') {
+            setState(() => _originController.text = label);
+          }
         });
 
         if (_hasValidDestination()) {
@@ -2424,6 +2929,12 @@ class MapScreenState extends State<MapScreen>
           _destination = centerLoc;
           _searchController.text = 'Selected on map';
           _isChoosingLocationOnMap = false;
+        });
+
+        _reverseGeocodeLabel(centerLoc).then((label) {
+          if (mounted && _searchController.text == 'Selected on map') {
+            setState(() => _searchController.text = label);
+          }
         });
 
         if (_hasValidOrigin()) {
@@ -2457,6 +2968,13 @@ class MapScreenState extends State<MapScreen>
         _isNavigating = false;
         _searchedPlace = null;
       });
+
+      _reverseGeocodeLabel(centerLoc).then((label) {
+        if (mounted && _searchController.text == 'Selected on map') {
+          setState(() => _searchController.text = label);
+        }
+      });
+
       _calculateRoute(centerLoc);
     }
   }
@@ -2495,19 +3013,30 @@ class MapScreenState extends State<MapScreen>
     final text = _normalizeQuery(query).replaceAll(
       RegExp(r'[\u0000-\u001F\u007F]'),
       ' ',
-    );
+    ).trim();
     if (text.isEmpty || text == 'Your location') return null;
 
-    // 1. Primary: OSM Nominatim Geocoding API
+    // 0. Instant Check: Local Bulacan Barangay Registry (<1ms)
+    final localMatches = _fetchLocalBarangayCandidates(text);
+    if (localMatches.isNotEmpty) {
+      final best = localMatches.first;
+      final lat = double.tryParse(best['lat'].toString());
+      final lon = double.tryParse(best['lon'].toString());
+      if (lat != null && lon != null) return LatLng(lat, lon);
+    }
+
+    // 1. Primary: OSM Nominatim Geocoding API with Bulacan viewbox bias
     try {
       final nomUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
         'q': text,
         'format': 'json',
         'limit': '1',
         'countrycodes': 'ph',
+        'viewbox': '120.55,15.25,121.35,14.65',
+        'bounded': '0',
       });
       final nomRes = await http
-          .get(nomUrl, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(nomUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
       if (nomRes.statusCode == 200) {
         final List data = jsonDecode(nomRes.body) as List;
@@ -2521,6 +3050,30 @@ class MapScreenState extends State<MapScreen>
       print('OSM Nominatim Geocode Error: $e');
     }
 
+    // 1b. Fallback: Query with Province & Country Context if not specified
+    if (!text.toLowerCase().contains('bulacan') &&
+        !text.toLowerCase().contains('philippines')) {
+      try {
+        final fallbackUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
+          'q': '$text, Bulacan, Philippines',
+          'format': 'json',
+          'limit': '1',
+          'countrycodes': 'ph',
+        });
+        final fallbackRes = await http
+            .get(fallbackUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+            .timeout(const Duration(seconds: 4));
+        if (fallbackRes.statusCode == 200) {
+          final List data = jsonDecode(fallbackRes.body) as List;
+          if (data.isNotEmpty) {
+            final lat = double.tryParse(data.first['lat'].toString());
+            final lon = double.tryParse(data.first['lon'].toString());
+            if (lat != null && lon != null) return LatLng(lat, lon);
+          }
+        }
+      } catch (_) {}
+    }
+
     // 2. Secondary: Photon OSM Geocoding API
     try {
       final refPos = _currentPosition ?? _bulacanCenter;
@@ -2531,7 +3084,7 @@ class MapScreenState extends State<MapScreen>
         'limit': '1',
       });
       final photRes = await http
-          .get(photUrl, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(photUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
           .timeout(const Duration(seconds: 4));
       if (photRes.statusCode == 200) {
         final payload = jsonDecode(photRes.body) as Map<String, dynamic>;
@@ -3775,6 +4328,141 @@ class MapScreenState extends State<MapScreen>
                           ],
                         ),
                       ),
+                      // Community Driver Verification & Consensus Feedback Loop
+                      const SizedBox(height: 18),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppSettings.instance.isDarkMode
+                              ? const Color(0xFF1E293B).withValues(alpha: 0.75)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppSettings.instance.isDarkMode
+                                ? const Color(0xFF334155).withValues(alpha: 0.8)
+                                : const Color(0xFFE2E8F0),
+                            width: 1.2,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.people_alt_rounded,
+                                    size: 13,
+                                    color: Color(0xFF0284C7),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'COMMUNITY VERIFICATION',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.0,
+                                    color: AppDesign.textSecondary(AppSettings.instance.isDarkMode),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Help fellow drivers keep road maps accurate. Is this hazard still here?',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: AppDesign.textPrimary(AppSettings.instance.isDarkMode),
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: () => _submitHazardFeedback(pothole, true),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                                            width: 1.2,
+                                          ),
+                                        ),
+                                        child: const Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.thumb_up_alt_rounded, size: 15, color: Color(0xFF10B981)),
+                                            SizedBox(width: 6),
+                                            Text(
+                                              'Still There',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFF10B981),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: () => _submitHazardFeedback(pothole, false),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: const Color(0xFFEF4444).withValues(alpha: 0.6),
+                                            width: 1.2,
+                                          ),
+                                        ),
+                                        child: const Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.thumb_down_alt_rounded, size: 15, color: Color(0xFFEF4444)),
+                                            SizedBox(width: 6),
+                                            Text(
+                                              'Fixed / Gone',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFFEF4444),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
 
                       // Admin Administrative Bar
                       if (isAdminUser) ...[
@@ -4734,11 +5422,22 @@ class MapScreenState extends State<MapScreen>
   /// Memoizes cluster generation so O(N^2) geodesic calculations only run
   /// when the pothole collection is modified, rather than on every animation frame.
   List<PotholeCluster> _getMemoizedClusters() {
-    final active = widget.detectedPotholes
-        .where((p) => p.status != 'deleted' && p.status != 'rejected')
-        .toList();
+    final active = widget.detectedPotholes.where((p) {
+      if (p.status == 'deleted' || p.status == 'rejected') return false;
+      if (_selectedHazardCategory == 'All') return true;
+      final defect = p.primaryDefect.toLowerCase();
+      final code = p.primaryDpwhCode.toLowerCase();
+      if (_selectedHazardCategory == 'Potholes') {
+        return defect.contains('pothole') || code.contains('01');
+      } else if (_selectedHazardCategory == 'Flooding') {
+        return defect.contains('flood') || defect.contains('water') || code.contains('05');
+      } else if (_selectedHazardCategory == 'Road Works') {
+        return defect.contains('work') || defect.contains('construct') || defect.contains('crack') || defect.contains('ravel') || code.contains('02') || code.contains('03');
+      }
+      return true;
+    }).toList();
 
-    int signature = active.length;
+    int signature = active.length ^ _selectedHazardCategory.hashCode;
     for (int i = 0; i < active.length; i++) {
       final p = active[i];
       signature = 31 * signature +
@@ -5157,7 +5856,8 @@ class MapScreenState extends State<MapScreen>
                               children: [
                                 TileLayer(
                                   urlTemplate:
-                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                      'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                                  subdomains: const ['0', '1', '2', '3'],
                                   userAgentPackageName:
                                       'com.example.pothole_scanner',
                                   tileDisplay: const TileDisplay.fadeIn(
@@ -5166,8 +5866,8 @@ class MapScreenState extends State<MapScreen>
                                   panBuffer: 2,
                                   keepBuffer: 6,
                                   minZoom: 3,
-                                  maxZoom: 19,
-                                  maxNativeZoom: 19,
+                                  maxZoom: 20,
+                                  maxNativeZoom: 20,
                                 ),
                                 // Route Polylines (Google Maps Style: Bold Main + Faint Alternatives)
                                 if (_alternativeRoutes.isNotEmpty)
@@ -5235,92 +5935,141 @@ class MapScreenState extends State<MapScreen>
                                       ),
                                     ],
                                   ),
-                                // User proximity indicator circle (follows GPS)
-                                if (_currentPosition != null && showMarkers)
-                                  CircleLayer(
-                                    key: ValueKey(
-                                      'user_circle_${_currentPosition!.latitude}_${_currentPosition!.longitude}_$_inProximityWarning',
-                                    ),
-                                    circles: [
-                                      CircleMarker(
-                                        point: _currentPosition!,
-                                        radius: _proximityCircleRadiusMeters,
-                                        useRadiusInMeter: true,
-                                        color: _inProximityWarning
-                                            ? Colors.red.withValues(alpha: 0.5)
-                                            : Colors.blue.withValues(
-                                                alpha: 0.15,
-                                              ),
-                                        borderColor: _inProximityWarning
-                                            ? Colors.red.withValues(alpha: 0.9)
-                                            : const Color(0xAA1E88E5),
-                                        borderStrokeWidth: _inProximityWarning
-                                            ? 6
-                                            : 3,
-                                      ),
-                                    ],
+                                // User proximity indicator circle (smoothly follows animated puck)
+                                if (showMarkers)
+                                  ValueListenableBuilder<LatLng?>(
+                                    valueListenable: _animatedPuckPositionNotifier,
+                                    builder: (context, puckPos, _) {
+                                      final effectivePos =
+                                          puckPos ?? _currentPosition;
+                                      if (effectivePos == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return CircleLayer(
+                                        key: ValueKey(
+                                          'user_circle_${effectivePos.latitude}_${effectivePos.longitude}_$_inProximityWarning',
+                                        ),
+                                        circles: [
+                                          CircleMarker(
+                                            point: effectivePos,
+                                            radius:
+                                                _proximityCircleRadiusMeters,
+                                            useRadiusInMeter: true,
+                                            color: _inProximityWarning
+                                                ? Colors.red.withValues(
+                                                    alpha: 0.5,
+                                                  )
+                                                : Colors.blue.withValues(
+                                                    alpha: 0.15,
+                                                  ),
+                                            borderColor: _inProximityWarning
+                                                ? Colors.red.withValues(
+                                                    alpha: 0.9,
+                                                  )
+                                                : const Color(0xAA1E88E5),
+                                            borderStrokeWidth:
+                                                _inProximityWarning ? 6 : 3,
+                                          ),
+                                        ],
+                                      );
+                                    },
                                   ),
-                                MarkerLayer(
-                                  markers: [
-                                    // Blue user location marker
-                                    if (_currentPosition != null)
-                                      Marker(
-                                        point: _currentPosition!,
-                                        width: 160,
-                                        height: 160,
-                                        // rotate: false → marker is glued to the map coordinates.
-                                        // It rotates WITH the map. 'Up' on the underlying child is always Map North.
-                                        // This allows the _lastHeading angle we apply to always point to the correct
-                                        // geographical direction, regardless of how the user manually rotates the screen!
-                                        rotate: false,
-                                        child: ValueListenableBuilder<double?>(
-                                          valueListenable: _lastHeadingNotifier,
-                                          builder: (context, headingValue, child) {
-                                            return Transform.rotate(
+                                // Blue user location marker (60 FPS smooth interpolation + breathing radar halo)
+                                ValueListenableBuilder<LatLng?>(
+                                  valueListenable: _animatedPuckPositionNotifier,
+                                  builder: (context, puckPos, _) {
+                                    final effectivePos =
+                                        puckPos ?? _currentPosition;
+                                    if (effectivePos == null) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return MarkerLayer(
+                                      markers: [
+                                        Marker(
+                                          point: effectivePos,
+                                          width: 160,
+                                          height: 160,
+                                          rotate: false,
+                                          child: ValueListenableBuilder<double?>(
+                                            valueListenable:
+                                                _lastHeadingNotifier,
+                                            builder: (
+                                              context,
+                                              headingValue,
+                                              child,
+                                            ) {
+                                              return Transform.rotate(
+                                                alignment: Alignment.center,
+                                                angle:
+                                                    (headingValue ?? 0) *
+                                                    (3.14159 / 180),
+                                                child: child,
+                                              );
+                                            },
+                                            child: Stack(
                                               alignment: Alignment.center,
-                                              // Because the marker is glued to Map North, we SIMPLY supply the compass heading.
-                                              // It works mathematically perfect in all modes:
-                                              // - Location mode: Map is North-up. Cone points to Heading.
-                                              // - Manual Drag: Map rotates X degrees. Marker rotates X degrees. Cone points Heading inside that marker.
-                                              // - Compass mode: Map rotates -Heading. Marker rotates -Heading. Final screen angle is -Heading + Heading = 0 (UP).
-                                              angle:
-                                                  (headingValue ?? 0) *
-                                                  (3.14159 / 180),
-                                              child: child,
-                                            );
-                                          },
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              // Directional Vision Cone (Always Visible)
-                                              CustomPaint(
-                                                size: const Size(160, 160),
-                                                painter: VisionConePainter(),
-                                              ),
-                                              // Center Dot (Google Maps Style Blue Dot)
-                                              Container(
-                                                width: 22,
-                                                height: 22,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: Colors.blue.shade600,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black26,
-                                                      blurRadius: 10,
-                                                      spreadRadius: 2,
+                                              children: [
+                                                // 1. Google Maps Breathing Radar Pulse Halo
+                                                AnimatedBuilder(
+                                                  animation:
+                                                      _puckPulseController,
+                                                  builder: (context, _) {
+                                                    final t =
+                                                        _puckPulseController
+                                                            .value;
+                                                    final haloSize =
+                                                        22.0 + t * 42.0;
+                                                    final haloOpacity =
+                                                        (1.0 - t) * 0.42;
+                                                    return Container(
+                                                      width: haloSize,
+                                                      height: haloSize,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: const Color(
+                                                          0xFF1A73E8,
+                                                        ).withValues(
+                                                          alpha: haloOpacity,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                                // 2. Directional Vision Cone (Always Visible)
+                                                CustomPaint(
+                                                  size: const Size(160, 160),
+                                                  painter: VisionConePainter(),
+                                                ),
+                                                // 3. Center Dot (Google Maps Style Blue Dot)
+                                                Container(
+                                                  width: 22,
+                                                  height: 22,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: Colors.blue.shade600,
+                                                    boxShadow: const [
+                                                      BoxShadow(
+                                                        color: Colors.black26,
+                                                        blurRadius: 10,
+                                                        spreadRadius: 2,
+                                                      ),
+                                                    ],
+                                                    border: Border.all(
+                                                      color: Colors.white,
+                                                      width: 3,
                                                     ),
-                                                  ],
-                                                  border: Border.all(
-                                                    color: Colors.white,
-                                                    width: 3,
                                                   ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                                MarkerLayer(
+                                  markers: [
 
                                     if (showMarkers) ...[
                                       ..._getVisibleClusters().map((cluster) {
@@ -5900,6 +6649,10 @@ class MapScreenState extends State<MapScreen>
                                     ] else ...[
                                       // Google Maps Style Floating Search Bar Capsule
                                       _buildFloatingMapSearchBar(isDark),
+                                      if (!_isSearchingActive && showMarkers) ...[
+                                        const SizedBox(height: 8),
+                                        _buildCategoryFilterChips(isDark),
+                                      ],
                                     ],
 
                                     // 1. Route Hazard Counter Bar: Displays count of potholes on the route & next hazard ETA
@@ -7303,8 +8056,12 @@ class MapScreenState extends State<MapScreen>
         // 1. Autocomplete Suggestions (if typing)
         if (_suggestions.isNotEmpty) ...[
           ..._suggestions.map((s) {
-            final name = s['_name'] ?? s['display_name'];
-            final shortAddr = s['_short_addr'] ?? '';
+            final name = (s['_name'] ?? s['display_name']).toString();
+            final shortAddr = (s['_short_addr'] ?? '').toString();
+            final bool isBarangay = s['_is_barangay'] == true ||
+                name.toLowerCase().contains('barangay');
+            const Color brgyTeal = Color(0xFF0D9488);
+
             return InkWell(
               onTap: () {
                 setState(() => _isSearchPageActive = false);
@@ -7321,14 +8078,16 @@ class MapScreenState extends State<MapScreen>
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF1E293B)
-                            : const Color(0xFFEFF6FF),
+                        color: isBarangay
+                            ? brgyTeal.withValues(alpha: 0.15)
+                            : (isDark
+                                ? const Color(0xFF1E293B)
+                                : const Color(0xFFEFF6FF)),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.place_rounded,
-                        color: AppDesign.accent(isDark),
+                        isBarangay ? Icons.holiday_village_rounded : Icons.place_rounded,
+                        color: isBarangay ? brgyTeal : AppDesign.accent(isDark),
                         size: 20,
                       ),
                     ),
@@ -7337,15 +8096,48 @@ class MapScreenState extends State<MapScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: textColor,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: textColor,
+                                  ),
+                                ),
+                              ),
+                              if (isBarangay) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: brgyTeal.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: brgyTeal.withValues(alpha: 0.35),
+                                      width: 0.8,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'BARANGAY',
+                                    style: TextStyle(
+                                      fontSize: 9.0,
+                                      fontWeight: FontWeight.bold,
+                                      color: brgyTeal,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                           if (shortAddr.isNotEmpty) ...[
                             const SizedBox(height: 2),
@@ -7461,6 +8253,98 @@ class MapScreenState extends State<MapScreen>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCategoryFilterChips(bool isDark) {
+    final categories = const [
+      {'key': 'All', 'label': 'All Hazards', 'icon': Icons.layers_rounded},
+      {'key': 'Potholes', 'label': 'Potholes', 'icon': Icons.warning_amber_rounded},
+      {'key': 'Flooding', 'label': 'Flooding', 'icon': Icons.water_drop_rounded},
+      {'key': 'Road Works', 'label': 'Road Works', 'icon': Icons.construction_rounded},
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: categories.map((cat) {
+          final isSelected = _selectedHazardCategory == cat['key'];
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  setState(() {
+                    _selectedHazardCategory = cat['key'] as String;
+                    _cachedPotholeClusters = null;
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF0284C7)
+                        : (isDark
+                            ? const Color(0xFF1E293B).withValues(alpha: 0.85)
+                            : Colors.white.withValues(alpha: 0.92)),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFF38BDF8)
+                          : (isDark
+                              ? const Color(0xFF334155).withValues(alpha: 0.7)
+                              : const Color(0xFFE2E8F0)),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: isSelected
+                            ? const Color(0xFF0284C7).withValues(alpha: 0.35)
+                            : Colors.black.withValues(alpha: isDark ? 0.3 : 0.06),
+                        blurRadius: isSelected ? 8 : 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        cat['icon'] as IconData,
+                        size: 13,
+                        color: isSelected
+                            ? Colors.white
+                            : (isDark
+                                ? const Color(0xFF38BDF8)
+                                : const Color(0xFF0369A1)),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        cat['label'] as String,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                          color: isSelected
+                              ? Colors.white
+                              : (isDark
+                                  ? const Color(0xFFE2E8F0)
+                                  : const Color(0xFF1E293B)),
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -8054,7 +8938,6 @@ class MapScreenState extends State<MapScreen>
         ? ' • $nearestInfo ahead'
         : '';
 
-    // If on route, show ETA on the next pothole ahead. If not searching any location, strictly NO ETA!
     final String etaText =
         (isOnRoute && nextPotholeEta != null && nextPotholeEta.isNotEmpty)
             ? ' • ETA: $nextPotholeEta'
@@ -8067,48 +8950,147 @@ class MapScreenState extends State<MapScreen>
     final String title =
         isOnRoute ? 'POTHOLE HAZARD AHEAD' : 'POTHOLE HAZARD NEARBY';
 
+    final int? betterRouteIndex = _findBetterDetourRouteIndex();
+
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFDC2626),
-          borderRadius: BorderRadius.circular(16),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF991B1B), Color(0xFFDC2626)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: const Color(0xFFFCA5A5), width: 1.2),
           boxShadow: [
             BoxShadow(
               color: Colors.red.withValues(alpha: 0.45),
-              blurRadius: 12,
+              blurRadius: 14,
               offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.warning_amber_rounded,
-                color: Color(0xFFDC2626),
-                size: 16,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
+              child: Row(
+                children: [
+                  // Circular 8-second countdown ring
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: AnimatedBuilder(
+                          animation: _warningBannerCountdownController,
+                          builder: (context, _) => CircularProgressIndicator(
+                            value: (1.0 - _warningBannerCountdownController.value).clamp(0.0, 1.0),
+                            strokeWidth: 2.2,
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.white,
+                        size: 15,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '$title$distText$etaText$routeInfo • SLOW DOWN',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _dismissWarningBanner,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.25),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                '$title$distText$etaText$routeInfo • SLOW DOWN',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.3,
+            // Waze-Style 1-Tap Detour Action Pill
+            if (betterRouteIndex != null && _alternativeRoutes.length > 1) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 9),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _takeDetourAroundHazard(betterRouteIndex),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.alt_route_rounded, size: 15, color: Colors.white),
+                          SizedBox(width: 6),
+                          Text(
+                            '⚡ AVOID HAZARD: TAKE ALT ROUTE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
+              ),
+            ],
+            // Slim linear countdown timer indicator
+            AnimatedBuilder(
+              animation: _warningBannerCountdownController,
+              builder: (context, _) => LinearProgressIndicator(
+                value: (1.0 - _warningBannerCountdownController.value).clamp(0.0, 1.0),
+                minHeight: 2.5,
+                backgroundColor: Colors.white12,
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFDE047)),
               ),
             ),
           ],

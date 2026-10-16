@@ -550,9 +550,9 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
             Expanded(
               child: _buildSelectableCard(
                 icon: Icons.map_rounded,
-                title: 'OpenStreetMap',
-                subtitle: 'Topographic standard',
-                isSelected: settings.webMapStyle == 'OpenStreetMap',
+                title: 'Google Maps',
+                subtitle: 'Standard roadmap tiles',
+                isSelected: settings.webMapStyle == 'Google Maps',
                 isDark: isDark,
                 accentColor: accentColor,
                 borderColor: borderColor,
@@ -560,7 +560,7 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                 textColor: textColor,
                 subtextColor: subtextColor,
                 onTap: () {
-                  setState(() => settings.webMapStyle = 'OpenStreetMap');
+                  setState(() => settings.webMapStyle = 'Google Maps');
                   widget.onSettingsChanged?.call();
                 },
               ),

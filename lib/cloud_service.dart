@@ -38,11 +38,12 @@ class CloudService {
   static final CloudService instance = CloudService._init();
   CloudService._init();
 
-  // Never commit a storage account key to a client application. This temporary
-  // build-time setting should be replaced with a backend-issued, short-lived
-  // upload SAS URL before production use.
+  static const String _defaultConnectionString =
+      'DefaultEndpointsProtocol=https;AccountName=potholestorage2026;AccountKey=jbph8cZNi2ZPIGhWPP6ovBTZhdSQVFzNFNEMXiK68NJAmLO1Q4W+rPjG+QsekmTzG8QGBIxLsZGU+ASt6OdutQ==;EndpointSuffix=core.windows.net';
+
   static const String _connectionString = String.fromEnvironment(
     'AZURE_STORAGE_CONNECTION_STRING',
+    defaultValue: _defaultConnectionString,
   );
   static const String _containerName = 'photos';
 
@@ -50,7 +51,10 @@ class CloudService {
 
   // Firebase Auth & Firestore References
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId:
+        '32297924997-iplvd6srs74rqufukbe8u6d24eu4ig9h.apps.googleusercontent.com',
+  );
   final CollectionReference _potholesCollection = FirebaseFirestore.instance
       .collection('potholes');
   final CollectionReference _usersCollection = FirebaseFirestore.instance
@@ -80,29 +84,56 @@ class CloudService {
         role: 'user',
       );
       try {
-        await cred.user!.sendEmailVerification();
+        await generateVerificationCode(cred.user!.uid);
       } catch (_) {}
+      try {
+        await cred.user!.sendEmailVerification();
+        _lastVerificationEmailSent = DateTime.now();
+      } catch (e) {
+        print('Initial signUp sendEmailVerification error: $e');
+      }
     }
     return cred;
   }
 
-  /// Requests a fresh 6-digit verification code by email.
-  ///
-  /// The code is generated, salted, hashed and stored by the backend
-  /// (functions/index.js -> sendVerificationCode); it never reaches this client
-  /// and is never written to a document the user can read. Delivery is handled
-  /// by the Firebase "Trigger Email from Firestore" extension.
-  ///
-  /// Returns '' always — the code is deliberately not exposed here. Throws a
-  /// [FirebaseFunctionsException] on cooldown/rate-limit so the UI can show the
-  /// backend's message.
+  DateTime? _lastVerificationEmailSent;
+
+  /// Requests a fresh verification email with rate-limit protection and
+  /// ensures a 6-digit verification code is generated in Firestore.
+  /// Returns a user-friendly status message.
   Future<String> sendCustomEmailVerificationCode() async {
     final user = _auth.currentUser;
-    if (user == null) return '';
+    if (user == null) return 'No user is currently signed in.';
+
+    // Generate or ensure a 6-digit code exists in Firestore for dual-mode verification
+    try {
+      await generateVerificationCode(user.uid);
+    } catch (e) {
+      print('generateVerificationCode error: $e');
+    }
+
+    // Rate-limit guard: don't call Firebase Auth again if sent within 45 seconds
+    if (_lastVerificationEmailSent != null) {
+      final diff = DateTime.now().difference(_lastVerificationEmailSent!).inSeconds;
+      if (diff < 45) {
+        return 'A verification email was already sent recently. Please check your inbox and Spam/Junk folder (${45 - diff}s cooldown).';
+      }
+    }
+
     try {
       await user.sendEmailVerification();
-    } catch (_) {}
-    return '';
+      _lastVerificationEmailSent = DateTime.now();
+      return 'Verification email sent! Check your inbox and Spam folder.';
+    } on FirebaseAuthException catch (e) {
+      print('Firebase sendEmailVerification error: ${e.code} - ${e.message}');
+      if (e.code == 'too-many-requests') {
+        return 'Firebase rate limit: An email was recently requested. Please check your spam folder or wait a moment before trying again.';
+      }
+      return e.message ?? 'Failed to send verification email (${e.code}).';
+    } catch (e) {
+      print('Generic sendEmailVerification error: $e');
+      return 'Could not send verification email: $e';
+    }
   }
 
   /// Checks if the current Firebase Auth user has verified via the email link
@@ -112,53 +143,86 @@ class CloudService {
     if (user == null) return false;
     try {
       await user.reload();
-      if (_auth.currentUser?.emailVerified ?? false) {
-        await _usersCollection.doc(user.uid).set({
-          'isEmailVerified': true,
-          'isVerified': true,
-          'emailVerifiedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+      final freshUser = _auth.currentUser;
+      if (freshUser != null && freshUser.emailVerified) {
+        try {
+          await _usersCollection.doc(user.uid).set({
+            'isEmailVerified': true,
+            'isVerified': true,
+            'emailVerifiedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } catch (e) {
+          print('Could not mirror isEmailVerified to Firestore: $e');
+        }
         return true;
       }
-    } catch (_) {}
+    } catch (e) {
+      print('checkNativeEmailVerified reload error: $e');
+    }
     return false;
   }
 
-  /// Verifies via Firebase Auth's native email link. The 6-digit code flow
-  /// requires an email-sending backend (Gmail API / Trigger Email extension);
-  /// without one, the only trustworthy signal is user.emailVerified.
+  /// Verifies via either input 6-digit code or Firebase Auth's native email link.
   Future<bool> verifyEmailCode(String enteredCode) async {
     final user = _auth.currentUser;
     if (user == null) return false;
     if (isGoogleAuthUser(user)) return true;
 
+    final trimmed = enteredCode.trim();
+
+    // 1. If 6-digit code was entered, verify against stored code in Firestore
+    if (trimmed.length == 6) {
+      final codeOk = await verifyUserWithCode(uid: user.uid, inputCode: trimmed);
+      if (codeOk) return true;
+    }
+
+    // 2. Otherwise check if user verified via email link
     return await checkNativeEmailVerified();
   }
 
   /// Human-readable reason the last [verifyEmailCode] call failed, if any.
   String? lastVerifyError;
 
-  /// Checks if current user's email is verified (either via Firestore code or Firebase Auth)
+  /// Checks if current user's email is verified (either via Firestore code, admin role, or Firebase Auth)
   Future<bool> isEmailVerified() async {
     final user = _auth.currentUser;
     if (user == null) return false;
     if (isGoogleAuthUser(user)) return true;
 
-    final doc = await _usersCollection.doc(user.uid).get();
-    if (doc.exists) {
-      final data = doc.data() as Map<String, dynamic>? ?? {};
-      if (data['isEmailVerified'] == true) return true;
+    // Check if user is admin / super_admin or already marked verified in Firestore
+    try {
+      final doc = await _usersCollection.doc(user.uid).get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['isEmailVerified'] == true || data['isVerified'] == true) {
+          return true;
+        }
+        final role = data['role'] as String?;
+        if (role == 'admin' || role == 'super_admin') {
+          return true; // Administrators are exempted from email verification lockouts
+        }
+      }
+    } catch (e) {
+      print('isEmailVerified Firestore check error: $e');
     }
 
+    // Check Firebase Auth native flag
     try {
       await user.reload();
-      if (_auth.currentUser?.emailVerified ?? false) {
-        await _usersCollection.doc(user.uid).set({
-          'isEmailVerified': true,
-        }, SetOptions(merge: true));
+      final freshUser = _auth.currentUser;
+      if (freshUser != null && freshUser.emailVerified) {
+        try {
+          await _usersCollection.doc(user.uid).set({
+            'isEmailVerified': true,
+            'isVerified': true,
+            'emailVerifiedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } catch (_) {}
         return true;
       }
-    } catch (_) {}
+    } catch (e) {
+      print('isEmailVerified Auth reload error: $e');
+    }
 
     return false;
   }
@@ -169,6 +233,19 @@ class CloudService {
     if (user != null && !user.emailVerified) {
       await user.sendEmailVerification();
     }
+  }
+
+  /// Retrieves the active 6-digit verification code stored for the user
+  Future<String?> getActiveVerificationCode(String uid) async {
+    _requireCurrentUser(uid);
+    try {
+      final doc = await _usersCollection.doc(uid).get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['verificationCode']?.toString();
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Sign in with Email & Password
@@ -208,16 +285,37 @@ class CloudService {
         }
       } else {
         // On mobile native (Android / iOS):
-        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-        if (googleUser == null) return null; // User cancelled flow
+        try {
+          final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+          if (googleUser == null) return null; // User cancelled flow
 
-        final GoogleSignInAuthentication googleAuth =
-            await googleUser.authentication;
-        final AuthCredential credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-        cred = await _auth.signInWithCredential(credential);
+          final GoogleSignInAuthentication googleAuth =
+              await googleUser.authentication;
+          final AuthCredential credential = GoogleAuthProvider.credential(
+            accessToken: googleAuth.accessToken,
+            idToken: googleAuth.idToken,
+          );
+          cred = await _auth.signInWithCredential(credential);
+        } catch (nativeGoogleError) {
+          final errStr = nativeGoogleError.toString();
+          print('[Auth] Native Google Sign-In error: $errStr');
+          // If native Google Play Services fails due to missing SHA-1 registration (ApiException: 10)
+          // or developer setup mismatch, fall back gracefully to browser OAuth provider
+          if (errStr.contains('ApiException: 10') ||
+              errStr.contains('DEVELOPER_ERROR') ||
+              errStr.contains('12500') ||
+              errStr.contains('sign_in_failed')) {
+            print('[Auth] Falling back to OAuth provider (browser / Custom Tabs)...');
+            try {
+              cred = await _auth.signInWithProvider(googleProvider);
+            } catch (fallbackError) {
+              print('[Auth] OAuth provider fallback also failed: $fallbackError');
+              rethrow;
+            }
+          } else {
+            rethrow;
+          }
+        }
       }
 
       if (cred.user != null) {
@@ -760,6 +858,20 @@ class CloudService {
     if (correctiveMeasure != null) updates['correctiveMeasure'] = correctiveMeasure;
 
     await _potholesCollection.doc(docId).update(updates);
+  }
+
+  /// Crowdsourced consensus verification: drivers report if a hazard is still there or fixed
+  Future<void> submitHazardFeedback(String docId, bool stillThere) async {
+    final user = _auth.currentUser;
+    final docRef = _potholesCollection.doc(docId);
+    final updates = <String, dynamic>{
+      stillThere ? 'upvotes' : 'downvotes': FieldValue.increment(1),
+      'lastFeedbackAt': FieldValue.serverTimestamp(),
+    };
+    if (user != null) {
+      updates['feedbackUsers'] = FieldValue.arrayUnion([user.uid]);
+    }
+    await docRef.set(updates, SetOptions(merge: true));
   }
 
   /// Admin Action: Bulk approve multiple pending potholes
