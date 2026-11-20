@@ -23,8 +23,10 @@ class _MapScaleBarState extends State<MapScaleBar> {
 
   double _niceValue(double value) {
     if (value <= 0) return 0;
-    final double magnitude =
-        pow(10, (log(value) / ln10).floor().toDouble()).toDouble();
+    final double magnitude = pow(
+      10,
+      (log(value) / ln10).floor().toDouble(),
+    ).toDouble();
     for (final double m in const [1.0, 2.0, 5.0]) {
       if (m * magnitude >= value) return m * magnitude;
     }
@@ -34,8 +36,15 @@ class _MapScaleBarState extends State<MapScaleBar> {
   String _trimNum(double v) =>
       v % 1 == 0 ? v.round().toString() : v.toStringAsFixed(1);
 
-  ({double distancePx, String label}) _computeScale() {
-    final MapCamera camera = widget.controller.camera;
+  /// The MapController is not usable until the FlutterMap widget has rendered
+  /// at least once, so return null before that and let [build] hide the bar.
+  ({double distancePx, String label})? _computeScale() {
+    final MapCamera? camera;
+    try {
+      camera = widget.controller.camera;
+    } catch (_) {
+      return null;
+    }
     final double latRad = camera.center.latitude * pi / 180.0;
     final double metersPerPixel =
         156543.03392 * cos(latRad) / pow(2.0, camera.zoom);
@@ -54,13 +63,9 @@ class _MapScaleBarState extends State<MapScaleBar> {
     final double feetPerPx = metersPerPixel * 3.28084;
     final double feet = _niceValue(feetPerPx * _barWidthPx);
     if (feet < 5280) {
-      return (
-        distancePx: _barWidthPx,
-        label: '${feet.round()} ft',
-      );
+      return (distancePx: _barWidthPx, label: '${feet.round()} ft');
     }
-    final double miles =
-        feetPerPx * _barWidthPx / 5280 < 10
+    final double miles = feetPerPx * _barWidthPx / 5280 < 10
         ? _niceValue(feetPerPx * _barWidthPx / 5280 * 10) / 10
         : _niceValue(feetPerPx * _barWidthPx / 5280);
     return (distancePx: _barWidthPx, label: '${_trimNum(miles)} mi');
@@ -77,6 +82,7 @@ class _MapScaleBarState extends State<MapScaleBar> {
       stream: widget.controller.mapEventStream,
       builder: (context, _) {
         final scale = _computeScale();
+        if (scale == null) return const SizedBox.shrink();
         final double barWidth = scale.distancePx.clamp(24.0, 140.0);
         return GestureDetector(
           onTap: () => setState(() => _metric = !_metric),
@@ -125,7 +131,11 @@ class _ScaleLinePainter extends CustomPainter {
       ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round;
 
-    canvas.drawLine(Offset(0, size.height), Offset(size.width, size.height), paint);
+    canvas.drawLine(
+      Offset(0, size.height),
+      Offset(size.width, size.height),
+      paint,
+    );
     canvas.drawLine(Offset(0.8, 0), Offset(0.8, size.height), paint);
     canvas.drawLine(
       Offset(size.width - 0.8, 0),

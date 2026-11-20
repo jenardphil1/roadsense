@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'app_design.dart';
+import 'dpwh_standards.dart';
 
 /// What a submission or account state *means*.
 ///
@@ -48,7 +49,8 @@ class WebDesign {
       const Color(0xFF2563EB).withValues(alpha: isDark ? 0.20 : 0.10);
 
   /// Brand text/icon colour that stays legible on [surface].
-  static Color brandOnSurface(bool isDark) => const Color(0xFF2563EB);
+  static Color brandOnSurface(bool isDark) =>
+      isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
 
   // ── Status palette (semantic only — never brand) ───────────────────────────
   static const Color approvedLight = Color(0xFF047857);
@@ -81,6 +83,14 @@ class WebDesign {
   static Color hover(bool isDark) =>
       isDark ? const Color(0xFF1A2436) : const Color(0xFFF8FAFC);
 
+  /// Emphasized border for active panels and keyboard-focused containers.
+  static Color borderStrong(bool isDark) =>
+      isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
+
+  /// High-contrast keyboard focus ring color.
+  static Color focusRing(bool isDark) =>
+      isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
+
   // ── Spacing (4pt rhythm) ──────────────────────────────────────────────────
   static const double space1 = 4;
   static const double space2 = 8;
@@ -111,12 +121,17 @@ class WebDesign {
   static const double contentMaxWidth = 1400;
   static const double sidebarWidth = 264;
   static const double headerHeight = 64;
+  static const double headerHeightMobile = 56;
+  static const double mapPanelWidth = 396;
+  static const double mapPanelCompactWidth = 340;
   static const double desktopBreakpoint = 900;
   static const double wideBreakpoint = 1280;
 
   /// Comfortable pointer target. WCAG 2.2 AA requires 24px on the web; 40 keeps
-  /// dense toolbars usable without feeling touch-sized.
+  /// dense toolbars usable without feeling touch-sized, while touch controls use
+  /// [touchTarget] (44px).
   static const double minTarget = 40;
+  static const double touchTarget = 44;
 
   /// Horizontal gutters widen with the viewport instead of staying at a fixed 24.
   static EdgeInsets pageInsets(double width) => EdgeInsets.symmetric(
@@ -225,6 +240,68 @@ class WebDesign {
           icon: Icons.remove_rounded,
           label: 'None',
         );
+    }
+  }
+
+  /// Resolves semantic color + shape icon + label for road defect structural
+  /// severity ('high', 'medium', 'low'). Severity is always paired with text
+  /// and shape so color is never the sole indicator.
+  static StatusStyle severityStyle(String? severity, bool isDark) {
+    switch ((severity ?? '').trim().toLowerCase()) {
+      case 'high':
+        return StatusStyle(
+          fg: isDark ? rejectedDark : rejectedLight,
+          bg: isDark
+              ? const Color(0xFF7F1D1D).withValues(alpha: 0.36)
+              : const Color(0xFFFEF2F2),
+          outline: (isDark ? rejectedDark : rejectedLight).withValues(
+            alpha: isDark ? 0.45 : 0.35,
+          ),
+          icon: Icons.priority_high_rounded,
+          label: 'High severity',
+        );
+      case 'low':
+        return StatusStyle(
+          fg: isDark ? approvedDark : approvedLight,
+          bg: isDark
+              ? const Color(0xFF064E3B).withValues(alpha: 0.36)
+              : const Color(0xFFECFDF5),
+          outline: (isDark ? approvedDark : approvedLight).withValues(
+            alpha: isDark ? 0.45 : 0.35,
+          ),
+          icon: Icons.arrow_downward_rounded,
+          label: 'Low severity',
+        );
+      case 'medium':
+      default:
+        return StatusStyle(
+          fg: isDark ? pendingDark : pendingLight,
+          bg: isDark
+              ? const Color(0xFF78350F).withValues(alpha: 0.36)
+              : const Color(0xFFFFFBEB),
+          outline: (isDark ? pendingDark : pendingLight).withValues(
+            alpha: isDark ? 0.45 : 0.35,
+          ),
+          icon: Icons.drag_handle_rounded,
+          label: 'Medium severity',
+        );
+    }
+  }
+
+  /// Distinct icon shape paired with Okabe-Ito defect class colors so all four
+  /// trained model classes remain distinguishable without relying on color alone.
+  static IconData defectIcon(DpwhDefectClass cls) {
+    switch (cls.classId) {
+      case 0: // Pothole (CODE 01)
+        return Icons.album_rounded;
+      case 1: // Alligator crack (CODE 02)
+        return Icons.grid_on_rounded;
+      case 3: // Longitudinal crack (CODE 12)
+        return Icons.swap_vert_rounded;
+      case 4: // Transverse crack (CODE 12)
+        return Icons.swap_horiz_rounded;
+      default:
+        return Icons.warning_amber_rounded;
     }
   }
 
@@ -352,8 +429,8 @@ class WebDesign {
   }
 
   /// Tabular figures so metric values and coordinate columns stop shifting width.
-  static TextStyle tabular(TextStyle base) =>
-      base.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+  static TextStyle tabular(TextStyle? base) => (base ?? const TextStyle())
+      .copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
 
   // ── Theme ─────────────────────────────────────────────────────────────────
   static ThemeData buildTheme({
@@ -367,12 +444,20 @@ class WebDesign {
       seedColor: accent,
       brightness: isDark ? Brightness.dark : Brightness.light,
       primary: accent,
-      onPrimary: isDark ? const Color(0xFF06283D) : Colors.white,
+      onPrimary: Colors.white,
       secondary: textSecondary(isDark),
       surface: surface(isDark),
       onSurface: textPrimary(isDark),
       error: isDark ? rejectedDark : rejectedLight,
       outline: border(isDark),
+    );
+
+    final buttonTextStyle = TextStyle(
+      fontFamily: fontFamily,
+      fontSize: 13,
+      height: 1.2,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.1,
     );
 
     return ThemeData(
@@ -436,49 +521,80 @@ class WebDesign {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: accent,
-          foregroundColor: scheme.onPrimary,
+          foregroundColor: Colors.white,
+          iconColor: Colors.white,
           disabledBackgroundColor: border(isDark),
           disabledForegroundColor: textMuted(isDark),
           elevation: 0,
           minimumSize: const Size(0, minTarget),
           padding: const EdgeInsets.symmetric(horizontal: space4),
-          textStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          textStyle: buttonTextStyle,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(radiusSm),
           ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: textPrimary(isDark),
-          side: BorderSide(color: border(isDark)),
-          minimumSize: const Size(0, minTarget),
-          padding: const EdgeInsets.symmetric(horizontal: space4),
-          textStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(radiusSm),
-          ),
-        ),
+        style:
+            OutlinedButton.styleFrom(
+              foregroundColor: textPrimary(isDark),
+              side: BorderSide(color: border(isDark)),
+              minimumSize: const Size(0, minTarget),
+              padding: const EdgeInsets.symmetric(horizontal: space4),
+              textStyle: buttonTextStyle,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(radiusSm),
+              ),
+            ).copyWith(
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return focusRing(isDark).withValues(alpha: 0.14);
+                }
+                return null;
+              }),
+              side: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return BorderSide(color: focusRing(isDark), width: 2);
+                }
+                return BorderSide(color: border(isDark));
+              }),
+            ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: brandOnSurface(isDark),
-          minimumSize: const Size(0, minTarget),
-          padding: const EdgeInsets.symmetric(horizontal: space3),
-          textStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(radiusSm),
-          ),
-        ),
+        style:
+            TextButton.styleFrom(
+              foregroundColor: brandOnSurface(isDark),
+              minimumSize: const Size(0, minTarget),
+              padding: const EdgeInsets.symmetric(horizontal: space3),
+              textStyle: buttonTextStyle,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(radiusSm),
+              ),
+            ).copyWith(
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return focusRing(isDark).withValues(alpha: 0.14);
+                }
+                return null;
+              }),
+            ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          foregroundColor: textSecondary(isDark),
-          minimumSize: const Size(minTarget, minTarget),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(radiusSm),
-          ),
-        ),
+        style:
+            IconButton.styleFrom(
+              foregroundColor: textSecondary(isDark),
+              minimumSize: const Size(minTarget, minTarget),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(radiusSm),
+              ),
+            ).copyWith(
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return focusRing(isDark).withValues(alpha: 0.16);
+                }
+                return null;
+              }),
+            ),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: accent,
@@ -518,8 +634,9 @@ class WebDesign {
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
-          (s) =>
-              s.contains(WidgetState.selected) ? Colors.white : textMuted(isDark),
+          (s) => s.contains(WidgetState.selected)
+              ? Colors.white
+              : textMuted(isDark),
         ),
         trackColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected) ? accent : border(isDark),

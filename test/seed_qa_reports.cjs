@@ -1,0 +1,6 @@
+const fs=require('fs'); const qaRequire = require('node:module').createRequire(require('node:path').resolve('.dart_tool/qa-browser/package.json'));
+process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8180';
+const {initializeApp}=qaRequire('firebase-admin/app');const {getFirestore,FieldValue}=qaRequire('firebase-admin/firestore');
+const a=JSON.parse(fs.readFileSync('.dart_tool/qa-browser/accounts.json','utf8'));initializeApp({projectId:'demo-roadsense-qa'});
+(async()=>{const db=getFirestore();for(const [id,status] of [['qa-pending','pending'],['qa-approved','approved'],['qa-trash','deleted']])await db.doc('potholes/'+id).set({latitude:14.85,longitude:120.81,imageUrl:'',status,overallSeverity:'medium',potholeCount:1,primaryDpwhCode:'CODE 01',primaryDefect:'Pothole',responseTime:'3 Days',correctiveMeasure:'QA only',detections:[],barangay:'Bagna',city:'Malolos',province:'Bulacan',formattedAddress:'QA Test Road',reporterUid:a.uid,reporterEmail:a.email,reporterName:'QA Surveyor',reporterPhotoUrl:'',timestamp:FieldValue.serverTimestamp(),...(status==='deleted'?{previousStatus:'pending'}:{})});console.log('Seeded 3 local QA reports');process.exit(0)})().catch(e=>{console.error(e.message);process.exit(1)});
+

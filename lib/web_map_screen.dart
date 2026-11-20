@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:math' show cos, sin, sqrt, atan2;
+import 'dart:ui' as ui show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/gestures.dart'
     show
         DragStartBehavior,
@@ -8,10 +10,16 @@ import 'package:flutter/gestures.dart'
         GestureDisposition,
         GestureRecognizer;
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'app_settings.dart';
 import 'app_design.dart';
+import 'web_components.dart';
+import 'web_design.dart';
+import 'web_map_side_panel.dart';
+import 'web_report_query.dart';
 import 'dpwh_standards.dart';
+import 'road_hazard_marker.dart';
+import 'developer_markers.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -27,6 +35,11 @@ import 'package:universal_html/html.dart' as html;
 import 'cloud_service.dart';
 import 'settings_dialog.dart';
 import 'map_scale_bar.dart';
+import 'sta_maria_sample_potholes.dart';
+import 'route_pothole_advisor.dart';
+import 'road_report_cache.dart';
+
+part 'web_map_screen_cards_part.dart';
 
 enum FollowMode { none, location, compass }
 
@@ -38,24 +51,98 @@ class _EagerPanGestureRecognizer extends PanGestureRecognizer {
   }
 }
 
-class _PinTipClipper extends CustomClipper<Path> {
+/// Custom painter for sleek 3D teardrop map pins with ground shadow and gloss
+class _ModernPinPainter extends CustomPainter {
+  final List<Color> gradientColors;
+  final Color borderColor;
+  final bool isLifted;
+
+  _ModernPinPainter({
+    required this.gradientColors,
+    this.borderColor = Colors.white,
+    this.isLifted = false,
+  });
+
   @override
-  Path getClip(Size size) {
-    return Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final r = w / 2;
+
+    // 1. Realistic ground shadow at the base
+    final shadowWidth = isLifted ? w * 0.58 : w * 0.46;
+    final shadowHeight = isLifted ? 5.0 : 6.0;
+    final shadowAlpha = isLifted ? 0.20 : 0.38;
+    final shadowRect = Rect.fromCenter(
+      center: Offset(w / 2, h - 2),
+      width: shadowWidth,
+      height: shadowHeight,
+    );
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: shadowAlpha)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 4.0 : 2.5);
+    canvas.drawOval(shadowRect, shadowPaint);
+
+    // 2. Teardrop pin path
+    final pinH = h - 6;
+    final path = Path();
+    path.moveTo(w / 2, pinH);
+    path.cubicTo(w * 0.08, pinH * 0.58, 0, r * 1.25, 0, r);
+    path.arcTo(
+      Rect.fromCircle(center: Offset(r, r), radius: r),
+      math.pi,
+      math.pi,
+      false,
+    );
+    path.cubicTo(w, r * 1.25, w * 0.92, pinH * 0.58, w / 2, pinH);
+    path.close();
+
+    // 3. Pin drop shadow
+    final pinShadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: isLifted ? 0.38 : 0.26)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 6.0 : 3.5);
+    canvas.drawPath(path.shift(Offset(0, isLifted ? 4 : 2)), pinShadowPaint);
+
+    // 4. Gradient Fill
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: gradientColors,
+      ).createShader(Rect.fromLTWH(0, 0, w, pinH));
+    canvas.drawPath(path, fillPaint);
+
+    // 5. Crisp Outer Bevel Border
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    canvas.drawPath(path, borderPaint);
+
+    // 6. Gloss Reflection Highlight Arc on top-left
+    final glossPath = Path()
+      ..addArc(
+        Rect.fromCircle(center: Offset(r, r), radius: r - 3.2),
+        math.pi * 1.05,
+        math.pi * 0.72,
+      );
+    final glossPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(glossPath, glossPaint);
   }
 
   @override
-  bool shouldReclip(_PinTipClipper oldClipper) => false;
+  bool shouldRepaint(covariant _ModernPinPainter oldDelegate) =>
+      oldDelegate.gradientColors != gradientColors ||
+      oldDelegate.borderColor != borderColor ||
+      oldDelegate.isLifted != isLifted;
 }
 
-/// 3 Travel Modes supported by Project-OSRM & OpenStreetMap
 enum OsrmTravelMode { car, bike, foot }
 
-/// Turn-by-turn routing maneuver step returned by Project-OSRM
 class RouteStep {
   final String instruction;
   final String roadName;
@@ -94,7 +181,21 @@ class PotholeMarker {
   final String primaryDefect;
   final String responseTime;
   final String correctiveMeasure;
+  final String barangay;
+  final String city;
+  final String province;
+  final String formattedAddress;
+  final String note;
+  final String rejectionReason;
+  final DateTime? lastEditedAt;
+  final DateTime? moderatedAt;
   final List<Map<String, dynamic>>? detections;
+  final bool isResolved;
+  final bool isAccessible;
+  final String? canonicalDefectId;
+  final String? roadName;
+  final double? roadBearingDeg;
+  final bool roadMatched;
 
   PotholeMarker({
     this.id,
@@ -112,8 +213,51 @@ class PotholeMarker {
     this.responseTime = '3 Days',
     this.correctiveMeasure =
         'Bituminous premix (hot) or penetration patching; add base material if needed.',
+    this.barangay = '',
+    this.city = '',
+    this.province = '',
+    this.formattedAddress = '',
+    this.note = '',
+    this.rejectionReason = '',
+    this.lastEditedAt,
+    this.moderatedAt,
     this.detections,
+    this.isResolved = false,
+    this.isAccessible = true,
+    this.canonicalDefectId,
+    this.roadName,
+    this.roadBearingDeg,
+    this.roadMatched = false,
   });
+
+  WebReportItem toReportItem() {
+    final resolvedId = (docId != null && docId!.isNotEmpty)
+        ? docId!
+        : (id != null ? id.toString() : '');
+    return WebReportItem(
+      docId: resolvedId,
+      location: location,
+      imageUrl: imagePath,
+      timestamp: timestamp,
+      status: status,
+      severity: overallSeverity,
+      potholeCount: potholeCount,
+      primaryDefect: primaryDefect,
+      primaryDpwhCode: primaryDpwhCode,
+      responseTime: responseTime,
+      correctiveMeasure: correctiveMeasure,
+      barangay: barangay,
+      city: city,
+      province: province,
+      formattedAddress: formattedAddress,
+      note: note,
+      rejectionReason: rejectionReason,
+      reporterUid: reporterUid,
+      detections: detections ?? const [],
+      lastEditedAt: lastEditedAt,
+      moderatedAt: moderatedAt,
+    );
+  }
 }
 
 /// Represents a grouped cluster of potholes located within a 10-meter barrier radius
@@ -171,6 +315,18 @@ class MapScreen extends StatefulWidget {
   final Future<void> Function(LatLng location)? onAddDetectedPothole;
   final VoidCallback? onOpenProfile;
   final bool isMapActive;
+  final bool showEmbeddedNavSwitcher;
+  final String? currentUid;
+  final bool isAdminUser;
+  final bool isCloudLoading;
+  final String? cloudError;
+  final VoidCallback? onRetryCloud;
+  final String? initialReportId;
+  final ValueChanged<String?>? onSelectedReportChanged;
+  final void Function(LatLng center, double zoom)? onSyncMapViewport;
+  final DateTime? reportsLastUpdatedAt;
+  final bool isUsingCachedData;
+  final double routeCorridorMeters;
 
   const MapScreen({
     super.key,
@@ -179,6 +335,18 @@ class MapScreen extends StatefulWidget {
     this.onAddDetectedPothole,
     this.onOpenProfile,
     this.isMapActive = true,
+    this.showEmbeddedNavSwitcher = true,
+    this.currentUid,
+    this.isAdminUser = false,
+    this.isCloudLoading = false,
+    this.cloudError,
+    this.onRetryCloud,
+    this.initialReportId,
+    this.onSelectedReportChanged,
+    this.onSyncMapViewport,
+    this.reportsLastUpdatedAt,
+    this.isUsingCachedData = false,
+    this.routeCorridorMeters = RouteCorridorConfig.defaultCorridorMeters,
   });
 
   @override
@@ -193,56 +361,72 @@ class MapScreenState extends State<MapScreen>
   bool get wantKeepAlive => true;
 
   final MapController _mapController = MapController();
+  double _lastMarkerZoom = 15;
   LatLng? _currentPosition;
-  bool _isLoadingLocation = true;
   bool _isLocationDisabled = false;
   bool _isPermissionDenied = false;
+  bool _dismissedLocationBanner = false;
   PotholeMarker? _selectedPothole;
   String? _expandedClusterId;
+
+  // Redesigned workspace state: unified query, filter drawer, legend, and pagination
+  WebReportFilter _reportFilter = const WebReportFilter();
+  bool _isFilterDrawerOpen = false;
+  bool _isLegendOpen = false;
+  bool _isSearchingPlaces = false;
+  int _visibleResultLimit = 25;
+  GeoBoundsBox? _currentMapBounds;
+  bool _hasUnsearchedMapMove = false;
+  String? _appliedInitialReportId;
 
   late final AnimationController _puckPulseController;
   Timer? _urlSyncDebounce;
   LatLng? _initialUrlCenter;
   double? _initialUrlZoom;
 
-  /// Parses deep-linked coordinates from URL hash, mirroring Google Maps Web (e.g. #/@14.8832256,120.9663488,14.5z)
+  /// Parses deep-linked coordinates from URL hash (supports `#/map?lat=...&lng=...&z=...`
+  /// as well as legacy `#/@lat,lng,zoomz`).
   void _parseInitialUrlLocation() {
     if (!kIsWeb) return;
     try {
       final hash = html.window.location.hash;
-      if (hash.isNotEmpty) {
-        final match = RegExp(
-          r'@(-?\d+\.?\d*),(-?\d+\.?\d*),?(\d+\.?\d*)?z?',
-        ).firstMatch(hash);
-        if (match != null) {
-          final lat = double.tryParse(match.group(1) ?? '');
-          final lng = double.tryParse(match.group(2) ?? '');
-          final zoom = double.tryParse(match.group(3) ?? '');
-          if (lat != null && lng != null) {
-            _initialUrlCenter = LatLng(lat, lng);
-            if (zoom != null) _initialUrlZoom = zoom;
-          }
+      if (hash.isEmpty) return;
+
+      final parsed = WebUrlState.parseHash(hash);
+      if (parsed.lat != null && parsed.lng != null) {
+        _initialUrlCenter = LatLng(parsed.lat!, parsed.lng!);
+        if (parsed.zoom != null) _initialUrlZoom = parsed.zoom;
+        return;
+      }
+
+      final match = RegExp(
+        r'@(-?\d+\.?\d*),(-?\d+\.?\d*),?(\d+\.?\d*)?z?',
+      ).firstMatch(hash);
+      if (match != null) {
+        final lat = double.tryParse(match.group(1) ?? '');
+        final lng = double.tryParse(match.group(2) ?? '');
+        final zoom = double.tryParse(match.group(3) ?? '');
+        if (lat != null && lng != null) {
+          _initialUrlCenter = LatLng(lat, lng);
+          if (zoom != null) _initialUrlZoom = zoom;
         }
       }
     } catch (_) {}
   }
 
-  /// Debounce synchronizes browser URL hash with current map viewport coordinates
+  /// Debounce-synchronizes browser URL hash with `#/map` viewport state through
+  /// the web shell router without clobbering Flutter's history stack.
   void _syncUrlCoordinates(LatLng center, double zoom) {
-    if (!kIsWeb) return;
+    if (!kIsWeb || !widget.isMapActive || widget.onSyncMapViewport == null) {
+      return;
+    }
     _urlSyncDebounce?.cancel();
     _urlSyncDebounce = Timer(const Duration(milliseconds: 350), () {
-      try {
-        final latStr = center.latitude.toStringAsFixed(7);
-        final lngStr = center.longitude.toStringAsFixed(7);
-        final zoomStr = zoom.toStringAsFixed(1);
-        final newHash = '#/@$latStr,$lngStr,${zoomStr}z';
-        if (html.window.location.hash != newHash) {
-          html.window.history.replaceState(null, 'Map', newHash);
-        }
-      } catch (_) {}
+      if (!mounted || !widget.isMapActive) return;
+      widget.onSyncMapViewport?.call(center, zoom);
     });
   }
+
   void _animatedMapMove(
     LatLng destLocation,
     double destZoom, {
@@ -253,22 +437,15 @@ class MapScreenState extends State<MapScreen>
       final startLng = _mapController.camera.center.longitude;
       final startZoom = _mapController.camera.zoom;
 
-      double targetLng = destLocation.longitude;
-      if (offsetForSidebar && kIsWeb && !_isSidePanelCollapsed) {
-        // Compensate for left drawer so the destination is centered in the open map area
-        final double lngOffset =
-            (198.0 * 360.0) / (256.0 * math.pow(2, destZoom));
-        targetLng -= lngOffset;
-      }
+      // In the desktop split layout the FlutterMap canvas already sits to the
+      // right of the docked workspace panel, so camera center equals canvas center.
+      final double targetLng = destLocation.longitude;
 
       final latTween = Tween<double>(
         begin: startLat,
         end: destLocation.latitude,
       );
-      final lngTween = Tween<double>(
-        begin: startLng,
-        end: targetLng,
-      );
+      final lngTween = Tween<double>(begin: startLng, end: targetLng);
       final zoomTween = Tween<double>(begin: startZoom, end: destZoom);
 
       final controller = AnimationController(
@@ -298,7 +475,54 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
-  /// Programmatically locates a scanned hazard on the map and focuses the camera
+  /// Dynamically ensures that a tapped route endpoint (Point A or B) remains
+  /// comfortably framed in the active viewport without EVER resetting or overriding
+  /// the user's zoom level. If the point is close to the edge or covered by the
+  /// floating drawer, it gently pans the map while strictly preserving zoom.
+  void _ensureEndpointInView(LatLng point) {
+    if (!mounted) return;
+    try {
+      final camera = _mapController.camera;
+      final currentZoom = camera.zoom;
+      final screenOffset = camera.latLngToScreenOffset(point);
+      final size = MediaQuery.of(context).size;
+
+      // Usable bounds within the screen
+      final double leftMargin = (kIsWeb && !_isSidePanelCollapsed)
+          ? (size.width < 900 ? 350.0 : 420.0)
+          : 64.0;
+      final double rightMargin = size.width - 64.0;
+      final double topMargin = 90.0;
+      final double bottomMargin = size.height - 70.0;
+
+      double deltaX = 0;
+      double deltaY = 0;
+
+      if (screenOffset.dx < leftMargin) {
+        deltaX = screenOffset.dx - leftMargin;
+      } else if (screenOffset.dx > rightMargin) {
+        deltaX = screenOffset.dx - rightMargin;
+      }
+
+      if (screenOffset.dy < topMargin) {
+        deltaY = screenOffset.dy - topMargin;
+      } else if (screenOffset.dy > bottomMargin) {
+        deltaY = screenOffset.dy - bottomMargin;
+      }
+
+      // If comfortably inside visible area, do NOT move the camera at all!
+      if (deltaX.abs() < 12 && deltaY.abs() < 12) return;
+
+      final targetScreenCenter = Offset(
+        size.width / 2 + deltaX,
+        size.height / 2 + deltaY,
+      );
+      final newCenter = camera.screenOffsetToLatLng(targetScreenCenter);
+      _animatedMapMove(newCenter, currentZoom);
+    } catch (_) {}
+  }
+
+  /// Programmatically locates a scanned hazard on the map and focuses the camera.
   void locatePothole(
     LatLng location,
     String? docId, [
@@ -306,22 +530,27 @@ class MapScreenState extends State<MapScreen>
   ]) {
     PotholeMarker? target;
     if (docId != null && docId.isNotEmpty) {
-      try {
-        target = widget.detectedPotholes.firstWhere((p) => p.docId == docId);
-      } catch (_) {}
+      for (final p in _effectivePotholes) {
+        if (p.docId == docId) {
+          target = p;
+          break;
+        }
+      }
     }
     if (target == null) {
-      try {
-        target = widget.detectedPotholes.firstWhere(
-          (p) =>
-              (p.location.latitude - location.latitude).abs() < 0.0001 &&
-              (p.location.longitude - location.longitude).abs() < 0.0001,
-        );
-      } catch (_) {}
+      for (final p in _effectivePotholes) {
+        if ((p.location.latitude - location.latitude).abs() < 0.0001 &&
+            (p.location.longitude - location.longitude).abs() < 0.0001) {
+          target = p;
+          break;
+        }
+      }
     }
     if (target == null && data != null) {
       final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
-      final defectClass = DpwhStandards.classifyByCode(dpwhCode);
+      final defectClass =
+          DpwhStandards.classForReport(data) ??
+          DpwhStandards.classifyByCode(dpwhCode);
       target = PotholeMarker(
         docId: docId ?? '',
         location: location,
@@ -329,13 +558,25 @@ class MapScreenState extends State<MapScreen>
         timestamp:
             (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         status: data['status'] as String? ?? 'pending',
-        overallSeverity: data['overallSeverity'] as String? ?? defectClass.severity,
+        overallSeverity: data['overallSeverity'] as String? ?? 'medium',
         reporterEmail: data['reporterEmail'] as String? ?? '',
+        reporterUid: data['reporterUid'] as String?,
         potholeCount: (data['potholeCount'] as num?)?.toInt() ?? 1,
         primaryDpwhCode: dpwhCode,
-        primaryDefect: data['primaryDefect'] as String? ?? defectClass.name,
-        responseTime: data['responseTime'] as String? ?? defectClass.responseTime,
-        correctiveMeasure: data['correctiveMeasure'] as String? ?? defectClass.correctiveMeasure,
+        primaryDefect: DpwhStandards.reportDefectName(data),
+        responseTime:
+            data['responseTime'] as String? ?? defectClass.responseTime,
+        correctiveMeasure:
+            data['correctiveMeasure'] as String? ??
+            defectClass.correctiveMeasure,
+        barangay: data['barangay'] as String? ?? '',
+        city: data['city'] as String? ?? '',
+        province: data['province'] as String? ?? '',
+        formattedAddress: data['formattedAddress'] as String? ?? '',
+        note: data['note'] as String? ?? '',
+        rejectionReason: data['rejectionReason'] as String? ?? '',
+        lastEditedAt: (data['lastEditedAt'] as Timestamp?)?.toDate(),
+        moderatedAt: (data['moderatedAt'] as Timestamp?)?.toDate(),
         detections: (data['detections'] as List<dynamic>?)
             ?.map((e) => Map<String, dynamic>.from(e as Map))
             .toList(),
@@ -350,19 +591,345 @@ class MapScreenState extends State<MapScreen>
       );
     }
 
+    _setSelectedPothole(target, notify: true, animate: false);
+    _stopRouteSimulation();
     setState(() {
-      _selectedPothole = target;
-      _destination = null;
-      _routePoints = [];
-      _alternativeRoutes = [];
+      _resetRoutePlannerState();
       _isRoutePlanningMode = false;
-      _searchController.text =
-          'Hazard (${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)})';
+      _searchedPlace = null;
+      _suggestions = [];
+      _isSearchHistoryOpen = false;
     });
 
-    Future.delayed(const Duration(milliseconds: 250), () {
-      _animatedMapMove(location, 17.5);
+    Future.delayed(const Duration(milliseconds: 220), () {
+      if (mounted) _animatedMapMove(location, 17.5);
     });
+  }
+
+  void _setSelectedPothole(
+    PotholeMarker? pothole, {
+    bool notify = true,
+    bool animate = true,
+  }) {
+    final docId = pothole?.docId;
+    setState(() {
+      _selectedPothole = pothole;
+      _expandedClusterId = null;
+      _isLegendOpen = false;
+      _suggestions = [];
+      _isSearchHistoryOpen = false;
+      if (pothole != null) {
+        _appliedInitialReportId = (docId != null && docId.isNotEmpty)
+            ? docId
+            : _appliedInitialReportId;
+      }
+    });
+    if (notify) {
+      widget.onSelectedReportChanged?.call(
+        (docId != null && docId.isNotEmpty) ? docId : null,
+      );
+    }
+    if (pothole != null && animate) {
+      _animatedMapMove(pothole.location, 17.5);
+    }
+  }
+
+  void _syncInitialReportSelection() {
+    final desiredId = widget.initialReportId?.trim();
+    if (desiredId == null || desiredId.isEmpty) {
+      if (_appliedInitialReportId != null) {
+        _appliedInitialReportId = null;
+        if (_selectedPothole != null && mounted) {
+          setState(() => _selectedPothole = null);
+        }
+      }
+      return;
+    }
+    if (_appliedInitialReportId == desiredId &&
+        _selectedPothole?.docId == desiredId) {
+      return;
+    }
+    for (final p in _effectivePotholes) {
+      if (p.docId == desiredId) {
+        _appliedInitialReportId = desiredId;
+        if (mounted) {
+          setState(() {
+            _selectedPothole = p;
+            _isRoutePlanningMode = false;
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _animatedMapMove(p.location, 17.5);
+          });
+        }
+        return;
+      }
+    }
+  }
+
+  PotholeMarker? _findMarkerForItem(WebReportItem item) {
+    if (item.docId.isNotEmpty) {
+      for (final p in _effectivePotholes) {
+        if (p.docId == item.docId) return p;
+      }
+    }
+    for (final p in _effectivePotholes) {
+      if ((p.location.latitude - item.location.latitude).abs() < 1e-6 &&
+          (p.location.longitude - item.location.longitude).abs() < 1e-6) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  WebReportQueryResult _computeReportQuery() {
+    final showRejected = _reportFilter.statuses.contains('rejected');
+    final dataset = _effectivePotholes
+        .where(
+          (p) =>
+              p.status != 'deleted' && (p.status != 'rejected' || showRejected),
+        )
+        .map((p) => p.toReportItem())
+        .toList(growable: false);
+    // Point A -> B and selected-place flows write the destination/place label
+    // into _searchController, so keep map and list markers visible rather than
+    // filtering reports by destination text or a stale area filter.
+    final bool isRouteFlow =
+        _isRoutePlanningMode || _destination != null || _routePoints.isNotEmpty;
+    final bool isPlaceOrRouteQuery = isRouteFlow || _searchedPlace != null;
+    final WebReportFilter effectiveFilter =
+        isRouteFlow && _reportFilter.onlyInMapBounds
+        ? _reportFilter.copyWith(onlyInMapBounds: false)
+        : _reportFilter;
+    return WebReportQueryEngine.execute(
+      dataset: dataset,
+      filter: effectiveFilter,
+      query: isPlaceOrRouteQuery ? '' : _searchController.text,
+      mapBounds: _currentMapBounds,
+      referencePoint: _currentPosition,
+    );
+  }
+
+  List<PotholeMarker> _markersForResult(WebReportQueryResult result) {
+    final visibleIds = <String>{};
+    final visibleCoords = <String>{};
+    for (final item in result.items) {
+      if (item.docId.isNotEmpty) visibleIds.add(item.docId);
+      visibleCoords.add(_potholeKey(item.location));
+    }
+    return _effectivePotholes
+        .where((p) {
+          if (p.status == 'deleted') return false;
+          if (p.status == 'rejected' &&
+              !_reportFilter.statuses.contains('rejected')) {
+            return false;
+          }
+          if (p.docId != null && p.docId!.isNotEmpty) {
+            return visibleIds.contains(p.docId);
+          }
+          return visibleCoords.contains(_potholeKey(p.location));
+        })
+        .toList(growable: false);
+  }
+
+  List<WebUnifiedSearchSuggestion> _buildUnifiedSuggestions(
+    List<WebReportItem> dataset,
+  ) {
+    final q = _searchController.text.trim();
+    if (q.isEmpty) return const [];
+    final reportMatches = WebReportQueryEngine.searchSuggestions(
+      dataset: dataset,
+      query: q,
+      limit: 4,
+    );
+    return [
+      for (final match in reportMatches)
+        WebUnifiedSearchSuggestion.report(
+          match.item,
+          reportMatchReason: match.matchReason,
+        ),
+      for (final place in _suggestions)
+        if (place is Map)
+          WebUnifiedSearchSuggestion.place(Map<String, dynamic>.from(place)),
+    ];
+  }
+
+  GeoBoundsBox? _readCameraBoundsBox() {
+    try {
+      final b = _mapController.camera.visibleBounds;
+      return GeoBoundsBox(
+        north: b.north,
+        south: b.south,
+        east: b.east,
+        west: b.west,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _updateReportFilter(WebReportFilter next) {
+    final enableBounds = next.onlyInMapBounds && !_reportFilter.onlyInMapBounds;
+    setState(() {
+      _reportFilter = next;
+      _visibleResultLimit = 25;
+      if (enableBounds) {
+        _currentMapBounds = _readCameraBoundsBox();
+        _hasUnsearchedMapMove = false;
+      } else if (!next.onlyInMapBounds) {
+        _currentMapBounds = null;
+        _hasUnsearchedMapMove = false;
+      }
+    });
+  }
+
+  void _searchThisAreaNow() {
+    final box = _readCameraBoundsBox();
+    if (box == null) return;
+    setState(() {
+      _currentMapBounds = box;
+      _hasUnsearchedMapMove = false;
+      if (!_reportFilter.onlyInMapBounds) {
+        _reportFilter = _reportFilter.copyWith(onlyInMapBounds: true);
+      }
+      _visibleResultLimit = 25;
+    });
+  }
+
+  Future<void> _openBarangayPicker() async {
+    final picked = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => SantaMariaBarangayPickerDialog(
+        initialSelection: _reportFilter.barangayKeys,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _updateReportFilter(_reportFilter.copyWith(barangayKeys: picked));
+  }
+
+  Future<void> _selectUnifiedSuggestion(
+    WebUnifiedSearchSuggestion suggestion,
+  ) async {
+    if (suggestion.isReport && suggestion.report != null) {
+      final marker = _findMarkerForItem(suggestion.report!);
+      _searchFocusNode.unfocus();
+      if (marker != null) {
+        _setSelectedPothole(marker, notify: true, animate: true);
+        if (mounted && MediaQuery.sizeOf(context).width < 900) {
+          _openCompactReportSheet(marker);
+        }
+      }
+      return;
+    }
+    if (suggestion.rawPlace != null) {
+      await _selectPlaceSuggestion(suggestion.rawPlace!);
+    }
+  }
+
+  Future<void> _selectPlaceSuggestion(Map<String, dynamic> suggestion) async {
+    double? lat = double.tryParse((suggestion['lat'] ?? '').toString());
+    double? lon = double.tryParse((suggestion['lon'] ?? '').toString());
+    final bool needsGeocode = suggestion['_needs_geocode'] == true;
+    final String queryStr =
+        (suggestion['display_name'] ?? suggestion['_name'] ?? '').toString();
+
+    if ((lat == null || lon == null || needsGeocode) && queryStr.isNotEmpty) {
+      if (mounted) setState(() => _isSearchingPlaces = true);
+      final resolved = await _geocodeQuery(queryStr);
+      if (mounted) setState(() => _isSearchingPlaces = false);
+      if (resolved == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not locate coordinates for "$queryStr".'),
+            ),
+          );
+        }
+        return;
+      }
+      lat = resolved.latitude;
+      lon = resolved.longitude;
+    }
+
+    if (lat == null || lon == null) return;
+    final enriched = Map<String, dynamic>.from(suggestion);
+    enriched['lat'] = lat.toString();
+    enriched['lon'] = lon.toString();
+    _selectSuggestion(enriched);
+  }
+
+  Future<void> _confirmTrashReport(WebReportItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move report to Trash?'),
+        content: const Text(
+          'This removes the pending report from the map and moves it to your Trash in My Reports, where you can restore or permanently delete it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Move to Trash'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      if (isSampleStaMariaMarkerId(item.docId)) {
+        final marker = _findMarkerForItem(item);
+        if (marker != null) {
+          await _deleteDetectedPothole(marker);
+        }
+      } else if (item.docId.isNotEmpty) {
+        await CloudService.instance.userSoftDeletePothole(item.docId);
+      } else {
+        final marker = _findMarkerForItem(item);
+        if (marker != null && widget.onDeleteDetectedPothole != null) {
+          await _deleteDetectedPothole(marker);
+        }
+      }
+      if (!mounted) return;
+      _setSelectedPothole(null, notify: true, animate: false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Report moved to Trash.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not move report to Trash: ${e.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleAdminModeration(
+    WebReportItem item,
+    String newStatus,
+  ) async {
+    if (!widget.isAdminUser || item.docId.isEmpty) return;
+    try {
+      await CloudService.instance.updatePotholeStatus(item.docId, newStatus);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Report status updated to $newStatus.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Moderation failed: ${e.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
   }
 
   // Navigation state
@@ -380,50 +947,50 @@ class MapScreenState extends State<MapScreen>
   String _homeName = 'Home';
   String _homeAddress =
       'Mapulang Lupa Elementary School, Mapulang Lupa, Valenzuela';
-  double _homeLat = 14.6948;
-  double _homeLon = 120.9996;
+  double _homeLat = 14.7019;
+  double _homeLon = 121.0003;
 
   static final List<Map<String, dynamic>> _defaultSearchHistory = [
     {
       'name': 'Immaculate Conception I-College',
       'address': 'Bonifacio Street, Poblacion, Santa Maria, Bulacan',
-      'lat': 14.8193,
-      'lon': 120.9610,
+      'lat': 14.8177,
+      'lon': 120.9622,
       'status': 'Open • Closes 5PM',
     },
     {
       'name': 'Santa Maria Municipal Hall - Bulacan',
       'address': 'Poblacion, Santa Maria, Bulacan',
-      'lat': 14.8188,
-      'lon': 120.9592,
+      'lat': 14.8193,
+      'lon': 120.9604,
       'status': 'Closed • Opens 8AM Mon',
     },
     {
       'name': 'Municipal Hall Drive',
       'address': 'Poblacion, Santa Maria, Bulacan',
-      'lat': 14.8198,
-      'lon': 120.9585,
+      'lat': 14.8191,
+      'lon': 120.9605,
       'status': 'Open 24 hours',
     },
     {
       'name': 'N-la Cellphone Accessories & General M...',
       'address': 'Governor Fortunato Halili Avenue, Bagbagu...',
-      'lat': 14.8215,
-      'lon': 120.9632,
+      'lat': 14.8115,
+      'lon': 120.9520,
       'status': 'Open • Closes 8PM',
     },
     {
       'name': 'Gracia Motorcycle Shop and Supplies',
       'address': 'Quirino Highway, Gumaoc East, San Jose d...',
-      'lat': 14.8102,
-      'lon': 121.0450,
+      'lat': 14.7991,
+      'lon': 121.0689,
       'status': 'Closed • Opens 8AM Sat',
     },
     {
       'name': 'Real de Cacarong',
       'address': 'Pandi, Bulacan',
-      'lat': 14.8694,
-      'lon': 120.9578,
+      'lat': 14.9042,
+      'lon': 120.9677,
       'status': 'Historic Landmark',
     },
   ];
@@ -436,6 +1003,11 @@ class MapScreenState extends State<MapScreen>
   List<List<LatLng>> _alternativeRoutes = [];
   List<int> _routePotholeCounts = [];
   List<double> _routeDurations = [];
+
+  /// OSRM response code from the last routing request ('Ok', 'NoRoute',
+  /// 'WaypointNotFound', ...). Lets the empty-routes error distinguish a
+  /// genuinely unreachable destination from a connection failure.
+  String _lastRoutingEngineCode = '';
   int _selectedRouteIndex = 0;
   int _lastMatchedSegmentIndex = 0;
   OsrmTravelMode _travelMode = OsrmTravelMode.car;
@@ -455,8 +1027,10 @@ class MapScreenState extends State<MapScreen>
 
   final bool _showMarkers = true;
   final Map<String, LatLng> _snappedPotholeCache = {};
+  final Map<String, bool> _snappedWasVerified = {};
 
   List<dynamic> _suggestions = [];
+  int _searchRevision = 0;
   Timer? _debounceTimer;
   Map<String, dynamic>? _searchedPlace;
   int _placeCardTab = 0;
@@ -466,20 +1040,94 @@ class MapScreenState extends State<MapScreen>
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription<CompassEvent>? _compassSubscription;
   LatLng? _destination;
+  double? _lastGpsAccuracyMeters;
+  double? _lastGpsSpeedMps;
+  DateTime? _lastGpsTimestamp;
+
+  /// True once the user has typed into the Point B (destination) field since
+  /// the last successful route plan. [ _searchAndRoute ] re-geocodes the typed
+  /// text instead of reusing a stale [_destination] when this is set, so new
+  /// destinations replace the old camera target instead of routing to it.
+  bool _destinationTextDirty = false;
+
+  /// Same as [_destinationTextDirty] but for the Point A (origin) field, so a
+  /// retyped origin overrides a stale [_customOrigin] instead of routing
+  /// from the previously chosen starting point.
+  bool _originTextDirty = false;
+
   final ValueNotifier<double?> _lastHeadingNotifier = ValueNotifier(null);
   List<LatLng> _potholesOnRoute = [];
+  RouteComparisonResult? _routeComparison;
+  PrecomputedRouteIndex? _activeRouteIndex;
+  NavigationHazardTracker? _navigationTracker;
+  NavigationHazardState? _navHazardState;
+  bool _showPotholesAlongRouteOnly = false;
+  bool _isSearchingAlternatives = false;
+  bool _hasEvaluatedFewerPotholes = false;
+  String? _routeErrorMessage;
+  bool _routeUsingCachedGeometry = false;
+  bool _isCompactRouteDrawerExpanded = true;
 
-  // Pothole Proximity Alert
+  // Pothole Proximity Alert & Route Advisor
   late final FlutterTts _tts = FlutterTts();
   String _nearestPotholeInfo = '';
   String? _nextPotholeEta;
   bool _inProximityWarning = false;
   final Set<String> _alertedAt50m = {};
-  double _debugClosestDist = 9999.0;
   bool _isInitialStartup = true;
   bool _showWarningBanner = false;
   bool _showHeatmap = false;
-  LatLngBounds get _visibleBounds => _mapController.camera.visibleBounds;
+  final Set<String> _dismissedSampleIds = {};
+  RouteSwitchSuggestion? _routeSwitchSuggestion;
+  UpcomingHazardCountdown? _upcomingHazard;
+  Timer? _simulationTimer;
+  bool _isSimulatingRoute = false;
+  double _simulatedChainMeters = 0.0;
+
+  RouteBoundingBox? _lastMarkerViewportBounds;
+  bool _pendingPostFrameViewportRebuild = false;
+
+  RouteBoundingBox _boundingBoxFromBounds(LatLngBounds b) => RouteBoundingBox(
+    minLat: b.south,
+    maxLat: b.north,
+    minLon: b.west,
+    maxLon: b.east,
+  );
+
+  RouteBoundingBox? _readMarkerViewportBounds() {
+    try {
+      return _boundingBoxFromBounds(_mapController.camera.visibleBounds);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _scheduleViewportMarkerRebuild() {
+    if (!mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_pendingPostFrameViewportRebuild) return;
+      _pendingPostFrameViewportRebuild = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _pendingPostFrameViewportRebuild = false;
+        if (mounted) setState(() {});
+      });
+      return;
+    }
+    setState(() {});
+  }
+
+  /// Filters [markers] to the current camera viewport (with buffer margin),
+  /// recording [_lastMarkerViewportBounds] so subsequent pans/zooms or route
+  /// camera fits refresh culled pins on demand. When the MapController has not
+  /// rendered yet, every marker is kept visible.
+  List<PotholeMarker> _filterMarkersInViewport(List<PotholeMarker> markers) {
+    final bounds = _readMarkerViewportBounds();
+    if (bounds == null) return markers;
+    _lastMarkerViewportBounds = bounds;
+    return markers.where((p) => bounds.containsWithMargin(p.location)).toList();
+  }
+
   bool _isDraggingEndpoint = false;
   int _draggingEndpointKind = 0;
   Offset? _endpointDragScreenBase;
@@ -492,35 +1140,160 @@ class MapScreenState extends State<MapScreen>
   String _tappedPointLabel = '';
   String _tappedPointSecondary = '';
   int _tappedRequestSeq = 0;
+  int _routingRequestSeq = 0;
   bool _isSearchVisible = true;
+
+  // Point-to-Point Location Pill State (Draggable screen pill + interactive draggable map pin)
+  Offset? _p2pPillOffset;
+  bool _isP2pPillVisible = false;
+  LatLng? _p2pPoint;
+  String _p2pName = '';
+  String _p2pAddress = '';
+  double _p2pDistanceKm = 0.0;
+  int _p2pMinutes = 0;
+  int _p2pHazardCount = 0;
+
   bool _isPlacingMarker = false;
   bool _isSavingPlacedMarker = false;
   LatLng? _pendingMarkerLocation;
 
-  final List<LatLng> _hardcodedPotholes = [];
-
-  static const double _etaBufferFactor = 1.35;
-  static const double _routeCountToleranceMeters = 12.0;
-  static const double _routeWarningToleranceMeters = 14.0;
   static const double _snapRadiusMeters = 35.0;
   static const double _proximityCircleRadiusMeters = 22.0;
-  static const double _routeSwitchToleranceMeters = 26.0;
-  static const double _routeSwitchDeltaMeters = 8.0;
   static const double _offRouteRerouteThresholdMeters = 55.0;
   static const Duration _autoRerouteCooldown = Duration(seconds: 12);
 
-  List<LatLng> get _allPotholeLocations => widget.detectedPotholes
-      .where((p) => p.status != 'deleted' && p.status != 'rejected')
+  double get _routeCountToleranceMeters =>
+      RouteCorridorConfig.effectiveCorridorMeters(
+        baseCorridorMeters: widget.routeCorridorMeters,
+        gpsAccuracyMeters: _lastGpsAccuracyMeters,
+      );
+
+  double get _routeWarningToleranceMeters => _routeCountToleranceMeters;
+
+  RouteCorridorConfig get _corridorConfig =>
+      RouteCorridorConfig(corridorMeters: _routeCountToleranceMeters);
+
+  List<PotholeMarker> get _localDeveloperMarkers =>
+      !AppSettings.instance.devMockModeEnabled
+      ? []
+      : [
+          for (final marker in DeveloperMarkers.instance.items)
+            PotholeMarker(
+              docId: marker.id,
+              location: marker.location,
+              imagePath: '',
+              timestamp: DateTime.now(),
+              status: 'approved',
+              primaryDefect: marker.defect,
+              primaryDpwhCode: DpwhStandards.classify(marker.defect).code,
+              reporterUid: 'developer_local',
+              formattedAddress: 'Developer marker (local only)',
+            ),
+        ];
+
+  void _onDeveloperMarkersChanged() {
+    if (!mounted) return;
+    setState(() {
+      _snappedPotholeCache.clear();
+      _expandedClusterId = null;
+
+      if (DeveloperMarkers.owns(_selectedPothole?.docId)) {
+        final matching = _localDeveloperMarkers.where(
+          (p) => p.docId == _selectedPothole!.docId,
+        );
+        _selectedPothole = matching.isEmpty ? null : matching.first;
+      }
+    });
+    unawaited(_refreshRouteAwarePotholeState());
+  }
+
+  List<PotholeMarker> get _effectivePotholes => [
+    ...widget.detectedPotholes.where((p) => !isSampleStaMariaMarkerId(p.docId)),
+    ..._localDeveloperMarkers,
+  ];
+
+  bool _isReportExcluded(PotholeMarker p) {
+    final normalizedStatus = p.status.trim().toLowerCase();
+    return p.isResolved ||
+        !p.isAccessible ||
+        normalizedStatus == 'deleted' ||
+        normalizedStatus == 'rejected' ||
+        normalizedStatus == 'resolved' ||
+        normalizedStatus == 'fixed' ||
+        normalizedStatus == 'closed';
+  }
+
+  List<LatLng> get _allPotholeLocations => _effectivePotholes
+      .where((p) => !_isReportExcluded(p))
       .map((p) => p.location)
       .toList();
+
+  List<RouteHazardInput> _buildHazardInputs() {
+    final List<RouteHazardInput> inputs = [];
+    for (final p in _effectivePotholes) {
+      if (_isReportExcluded(p)) continue;
+      final key = _potholeKey(p.location);
+      final snapped = _snappedPotholeCache[key] ?? p.location;
+      final bool wasVerifiedSnap = _snappedWasVerified[key] == true;
+      final String normalizedStatus = p.status.trim().toLowerCase();
+      final String canonicalName = DpwhStandards.reportDefectName({
+        'primaryDefect': p.primaryDefect,
+        'primaryDpwhCode': p.primaryDpwhCode,
+        'detections': p.detections,
+      });
+      final detectedDefects = DpwhStandards.extractDetectionClassNames(
+        p.detections,
+      );
+      final String? docId = p.docId?.trim();
+      final String? reportId = (docId != null && docId.isNotEmpty)
+          ? docId
+          : p.id?.toString();
+      inputs.add(
+        RouteHazardInput(
+          location: snapped,
+          rawLocation: p.location,
+          defectName: canonicalName,
+          dpwhCode: p.primaryDpwhCode,
+          barangay: p.barangay,
+          potholeCount: p.potholeCount > 0 ? p.potholeCount : 1,
+          detectedDefects: detectedDefects,
+          reportId: reportId,
+          canonicalDefectId: p.canonicalDefectId,
+          status: normalizedStatus,
+          isResolved: p.isResolved,
+          isAccessible: p.isAccessible,
+          roadName: p.roadName,
+          roadBearingDeg: p.roadBearingDeg,
+          roadMatched: wasVerifiedSnap || p.roadMatched,
+          updatedAt: p.moderatedAt ?? p.lastEditedAt ?? p.timestamp,
+        ),
+      );
+    }
+    return inputs;
+  }
 
   static const double _lookAheadOffset = 0.0018;
 
   static const String _orsApiKey = String.fromEnvironment('ORS_API_KEY');
 
+  Map<String, String>? _safeHeaders([Map<String, String>? additional]) {
+    final headers = <String, String>{};
+    if (additional != null) headers.addAll(additional);
+    if (!kIsWeb) {
+      headers['User-Agent'] = 'RoadSense-GIS/1.0';
+    }
+    return headers.isEmpty ? null : headers;
+  }
+
   @override
   void initState() {
     super.initState();
+    DeveloperMarkers.instance.addListener(_onDeveloperMarkersChanged);
+    AppSettings.instance.devMockModeNotifier.addListener(
+      _onDeveloperMarkersChanged,
+    );
+    unawaited(DeveloperMarkers.instance.load().catchError((Object _) {}));
+
     _parseInitialUrlLocation();
     _puckPulseController = AnimationController(
       duration: const Duration(milliseconds: 1800),
@@ -528,7 +1301,6 @@ class MapScreenState extends State<MapScreen>
     )..repeat();
     if (_cachedGlobalPosition != null) {
       _currentPosition = _cachedGlobalPosition;
-      _isLoadingLocation = false;
     }
     _determinePosition(requestPermission: false);
     _loadSearchHistory();
@@ -548,6 +1320,9 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.devEditLocationNotifier.addListener(
       _onDevEditLocationSettingChanged,
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncInitialReportSelection();
+    });
   }
 
   void _onFocusChanged() {
@@ -556,14 +1331,42 @@ class MapScreenState extends State<MapScreen>
 
   bool _searchKeyHandler(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
-    if (!_searchFocusNode.hasFocus) return false;
     final key = event.logicalKey;
-    if (_suggestions.isEmpty) return false;
+
+    if (key == LogicalKeyboardKey.escape) {
+      if (_highlightedSuggestionIndex >= 0 ||
+          _suggestions.isNotEmpty ||
+          _isSearchHistoryOpen ||
+          _isLegendOpen ||
+          _selectedPothole != null) {
+        setState(() {
+          _highlightedSuggestionIndex = -1;
+          _suggestions = [];
+          _isSearchHistoryOpen = false;
+          _isLegendOpen = false;
+        });
+        if (_selectedPothole != null) {
+          _setSelectedPothole(null, notify: true, animate: false);
+        }
+        _searchFocusNode.unfocus();
+        return true;
+      }
+      return false;
+    }
+
+    if (!_searchFocusNode.hasFocus) return false;
+    final dataset = _effectivePotholes
+        .where((p) => p.status != 'deleted')
+        .map((p) => p.toReportItem())
+        .toList(growable: false);
+    final unified = _buildUnifiedSuggestions(dataset);
+    if (unified.isEmpty) return false;
+
     if (key == LogicalKeyboardKey.arrowDown) {
       setState(() {
         _highlightedSuggestionIndex = (_highlightedSuggestionIndex + 1).clamp(
           0,
-          _suggestions.length - 1,
+          unified.length - 1,
         );
       });
       return true;
@@ -572,19 +1375,15 @@ class MapScreenState extends State<MapScreen>
       setState(() {
         _highlightedSuggestionIndex = (_highlightedSuggestionIndex - 1).clamp(
           0,
-          _suggestions.length - 1,
+          unified.length - 1,
         );
       });
       return true;
     }
     if (key == LogicalKeyboardKey.enter &&
         _highlightedSuggestionIndex >= 0 &&
-        _highlightedSuggestionIndex < _suggestions.length) {
-      _selectSuggestion(_suggestions[_highlightedSuggestionIndex]);
-      return true;
-    }
-    if (key == LogicalKeyboardKey.escape) {
-      setState(() => _highlightedSuggestionIndex = -1);
+        _highlightedSuggestionIndex < unified.length) {
+      unawaited(_selectUnifiedSuggestion(unified[_highlightedSuggestionIndex]));
       return true;
     }
     return false;
@@ -599,6 +1398,37 @@ class MapScreenState extends State<MapScreen>
           _searchHistory = decoded
               .map((e) => Map<String, dynamic>.from(e as Map))
               .toList();
+
+          // Auto-heal: update any legacy default items that have outdated coordinates
+          bool needsSave = false;
+          for (final def in _defaultSearchHistory) {
+            final defName = (def['name'] ?? '').toString().toLowerCase();
+            for (var h in _searchHistory) {
+              final hName = (h['name'] ?? '').toString().toLowerCase();
+              if (hName == defName ||
+                  (defName.startsWith('immaculate') &&
+                      hName.startsWith('immaculate')) ||
+                  (defName.startsWith('santa maria municipal') &&
+                      hName.startsWith('santa maria municipal')) ||
+                  (defName.startsWith('municipal hall drive') &&
+                      hName.startsWith('municipal hall drive')) ||
+                  (defName.startsWith('n-la') && hName.startsWith('n-la')) ||
+                  (defName.startsWith('gracia') &&
+                      hName.startsWith('gracia')) ||
+                  (defName.startsWith('real de cacarong') &&
+                      hName.startsWith('real de cacarong'))) {
+                if (h['lat'] != def['lat'] || h['lon'] != def['lon']) {
+                  h['lat'] = def['lat'];
+                  h['lon'] = def['lon'];
+                  h['address'] = def['address'];
+                  needsSave = true;
+                }
+              }
+            }
+          }
+          if (needsSave) {
+            _saveSearchHistory();
+          }
         } else {
           // First time initialization only
           _searchHistory = List<Map<String, dynamic>>.from(
@@ -1034,6 +1864,7 @@ class MapScreenState extends State<MapScreen>
           _customOrigin = targetLocation;
           _suggestions = [];
           _isSearchHistoryOpen = false;
+          _originTextDirty = false;
         });
         _originFocusNode.unfocus();
         final dest =
@@ -1050,11 +1881,21 @@ class MapScreenState extends State<MapScreen>
           _destination = targetLocation;
           _suggestions = [];
           _isSearchHistoryOpen = false;
+          _destinationTextDirty = false;
         });
         _destinationFocusNode.unfocus();
+        _showPointToPointPill(
+          point: targetLocation,
+          name: name,
+          address: address,
+        );
+        if (_originController.text.trim().isEmpty) {
+          _originController.text = 'Your location';
+          _customOrigin = null;
+        }
         final start =
             (_originController.text == 'Your location' || _customOrigin == null)
-            ? _currentPosition
+            ? (_currentPosition ?? _bulacanCenter)
             : _customOrigin;
         _calculateRoute(targetLocation, customOrigin: start);
       }
@@ -1071,9 +1912,16 @@ class MapScreenState extends State<MapScreen>
         _isSearchHistoryOpen = false;
         _selectedPothole = null;
         _searchedPlace = null;
+        _destinationTextDirty = false;
+        _originTextDirty = false;
       });
 
       _searchFocusNode.unfocus();
+      _showPointToPointPill(
+        point: targetLocation,
+        name: name,
+        address: address,
+      );
 
       _addToSearchHistory(
         name: rawName == 'Home' && address.isNotEmpty ? address : rawName,
@@ -1083,7 +1931,10 @@ class MapScreenState extends State<MapScreen>
         status: item['status']?.toString(),
       );
 
-      _calculateRoute(targetLocation, customOrigin: _currentPosition);
+      _calculateRoute(
+        targetLocation,
+        customOrigin: _currentPosition ?? _bulacanCenter,
+      );
     }
   }
 
@@ -1123,18 +1974,29 @@ class MapScreenState extends State<MapScreen>
     final newSig = _potholeListSignature(widget.detectedPotholes);
     if (oldSig != newSig) {
       _snappedPotholeCache.clear();
+      _snappedWasVerified.clear();
       unawaited(_refreshRouteAwarePotholeState());
+    }
+    if (oldWidget.initialReportId != widget.initialReportId ||
+        oldSig != newSig) {
+      _syncInitialReportSelection();
     }
   }
 
   @override
   void dispose() {
+    DeveloperMarkers.instance.removeListener(_onDeveloperMarkersChanged);
+    AppSettings.instance.devMockModeNotifier.removeListener(
+      _onDeveloperMarkersChanged,
+    );
+
     AppSettings.instance.manualPotholePlacementNotifier.removeListener(
       _onManualPotholePlacementSettingChanged,
     );
     AppSettings.instance.devEditLocationNotifier.removeListener(
       _onDevEditLocationSettingChanged,
     );
+    _simulationTimer?.cancel();
     _searchFocusNode.removeListener(_onFocusChanged);
     _originFocusNode.removeListener(_onFocusChanged);
     _destinationFocusNode.removeListener(_onFocusChanged);
@@ -1301,14 +2163,17 @@ class MapScreenState extends State<MapScreen>
       route[segIdx + 1],
     );
 
-    final List<LatLng> remaining = [userPos];
-
     final double distToProj = Geolocator.distanceBetween(
       userPos.latitude,
       userPos.longitude,
       projPoint.latitude,
       projPoint.longitude,
     );
+    if (distToProj > _offRouteRerouteThresholdMeters) {
+      return [userPos, route.last];
+    }
+
+    final List<LatLng> remaining = [userPos];
     if (distToProj > 1.0) {
       remaining.add(projPoint);
     }
@@ -1358,36 +2223,9 @@ class MapScreenState extends State<MapScreen>
       _alternativeRoutes[safeActiveIndex],
     );
 
-    int bestIndex = safeActiveIndex;
-    double bestDist = activeDist;
-    for (int i = 0; i < _alternativeRoutes.length; i++) {
-      final d = _distancePointToRouteMeters(userPos, _alternativeRoutes[i]);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIndex = i;
-      }
-    }
-
-    final bool shouldSwitchRoute =
-        bestIndex != safeActiveIndex &&
-        bestDist <= _routeSwitchToleranceMeters &&
-        (activeDist - bestDist) >= _routeSwitchDeltaMeters;
-
-    if (shouldSwitchRoute) {
-      if (!mounted) return;
-      setState(() {
-        _selectedRouteIndex = bestIndex;
-        _lastMatchedSegmentIndex = 0;
-        _routePoints = _remainingRouteFromUser(
-          _alternativeRoutes[bestIndex],
-          userPos,
-        );
-      });
-      await _refreshRouteAwarePotholeState();
-      return;
-    }
-
-    final bool shouldReroute = bestDist > _offRouteRerouteThresholdMeters;
+    // Do not auto-switch routes silently; keep the selected route intact unless
+    // the driver leaves it completely and needs off-route recalculation.
+    final bool shouldReroute = activeDist > _offRouteRerouteThresholdMeters;
     final now = DateTime.now();
     final bool cooldownActive =
         _lastAutoRerouteAt != null &&
@@ -1398,47 +2236,10 @@ class MapScreenState extends State<MapScreen>
     _isAutoRerouting = true;
     _lastAutoRerouteAt = now;
     try {
-      await _calculateRoute(_destination!);
+      await _calculateRoute(_destination!, fitCamera: false, silent: true);
     } finally {
       _isAutoRerouting = false;
     }
-  }
-
-  double _distanceAlongRouteToPothole(LatLng pothole, List<LatLng> route) {
-    if (route.length < 2) {
-      return Geolocator.distanceBetween(
-        route.isNotEmpty ? route.first.latitude : pothole.latitude,
-        route.isNotEmpty ? route.first.longitude : pothole.longitude,
-        pothole.latitude,
-        pothole.longitude,
-      );
-    }
-
-    int potholeIdx = 1;
-    double minPointDist = double.infinity;
-    for (int i = 1; i < route.length; i++) {
-      final d = Geolocator.distanceBetween(
-        pothole.latitude,
-        pothole.longitude,
-        route[i].latitude,
-        route[i].longitude,
-      );
-      if (d < minPointDist) {
-        minPointDist = d;
-        potholeIdx = i;
-      }
-    }
-
-    double distance = 0;
-    for (int i = 0; i < potholeIdx; i++) {
-      distance += Geolocator.distanceBetween(
-        route[i].latitude,
-        route[i].longitude,
-        route[i + 1].latitude,
-        route[i + 1].longitude,
-      );
-    }
-    return distance;
   }
 
   double _calculatePolylineDistanceMeters(List<LatLng> points) {
@@ -1464,7 +2265,16 @@ class MapScreenState extends State<MapScreen>
 
   void _startFollowing() {
     _positionSubscription?.cancel();
+    _positionSubscription = null;
     _compassSubscription?.cancel();
+    _compassSubscription = null;
+
+    if (!mounted ||
+        !widget.isMapActive ||
+        _isPermissionDenied ||
+        _isLocationDisabled) {
+      return;
+    }
 
     _positionSubscription =
         Geolocator.getPositionStream(
@@ -1472,36 +2282,59 @@ class MapScreenState extends State<MapScreen>
             accuracy: LocationAccuracy.bestForNavigation,
             distanceFilter: 3,
           ),
-        ).listen((Position position) {
-          if (!widget.isMapActive || !mounted) return;
-          final gpsPos = LatLng(position.latitude, position.longitude);
-          _lastRealGpsPosition = gpsPos;
-
-          if (_useMockLocation) {
-            return;
-          }
-
-          final newPos = gpsPos;
-          if (mounted) {
-            setState(() => _currentPosition = newPos);
-          }
-          _checkPotholeProximity(newPos);
-          unawaited(_autoAdjustRouteToCurrentPath(newPos));
-
-          if (_followMode != FollowMode.none) {
-            if (_destination != null) {
-              double heading = _lastHeadingNotifier.value ?? position.heading;
-              final LatLng cameraCenter = _lookAheadPoint(
-                newPos,
-                heading,
-                _lookAheadOffset,
-              );
-              _mapController.move(cameraCenter, _mapController.camera.zoom);
-            } else {
-              _mapController.move(newPos, _mapController.camera.zoom);
+        ).listen(
+          (Position position) {
+            if (!widget.isMapActive || !mounted) return;
+            final gpsPos = LatLng(position.latitude, position.longitude);
+            _lastRealGpsPosition = gpsPos;
+            _lastGpsAccuracyMeters = position.accuracy;
+            _lastGpsSpeedMps = position.speed;
+            _lastGpsTimestamp = position.timestamp;
+            if (position.heading >= 0) {
+              _lastHeadingNotifier.value = position.heading;
             }
-          }
-        });
+
+            if (_useMockLocation) {
+              return;
+            }
+
+            final newPos = gpsPos;
+            if (mounted) {
+              setState(() => _currentPosition = newPos);
+            }
+            _checkPotholeProximity(
+              newPos,
+              gpsAccuracyMeters: position.accuracy,
+              headingDeg: position.heading >= 0 ? position.heading : null,
+              speedMps: position.speed,
+              timestamp: position.timestamp,
+            );
+            unawaited(_autoAdjustRouteToCurrentPath(newPos));
+
+            if (_followMode != FollowMode.none) {
+              if (_destination != null) {
+                double heading = _lastHeadingNotifier.value ?? position.heading;
+                final LatLng cameraCenter = _lookAheadPoint(
+                  newPos,
+                  heading,
+                  _lookAheadOffset,
+                );
+                _mapController.move(cameraCenter, _mapController.camera.zoom);
+              } else {
+                _mapController.move(newPos, _mapController.camera.zoom);
+              }
+            }
+          },
+          onError: (Object error, StackTrace _) {
+            debugPrint('Location stream unavailable: $error');
+            _positionSubscription?.cancel();
+            _positionSubscription = null;
+            if (mounted && error is PermissionDeniedException) {
+              setState(() => _isPermissionDenied = true);
+            }
+          },
+          cancelOnError: true,
+        );
 
     if (!kIsWeb) {
       int lastCompassTime = 0;
@@ -1549,32 +2382,112 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
-  void _checkPotholeProximity(LatLng userPos) {
+  RouteHazardSummary? get _currentActiveRouteSummary {
+    final RouteComparisonResult? comparison = _routeComparison;
+    return _activeRouteIndex?.summary ??
+        (comparison != null && _selectedRouteIndex < comparison.options.length
+            ? comparison.options[_selectedRouteIndex].summary
+            : null);
+  }
+
+  void _syncP2pSummaryForRoute(int routeIndex, {LatLng? destinationOverride}) {
+    if (!_isP2pPillVisible ||
+        routeIndex < 0 ||
+        routeIndex >= _alternativeRoutes.length) {
+      return;
+    }
+    final List<LatLng> route = _alternativeRoutes[routeIndex];
+    final double distMeters = routeIndex < _routeDistances.length
+        ? _routeDistances[routeIndex]
+        : _calculatePolylineDistanceMeters(route);
+    final double durSeconds = routeIndex < _routeDurations.length
+        ? _routeDurations[routeIndex]
+        : 0.0;
+    final int hazardCount =
+        (_activeRouteIndex != null &&
+            _activeRouteIndex!.routeIndex == routeIndex)
+        ? _activeRouteIndex!.summary.distinctPotholeCount
+        : (routeIndex < _routePotholeCounts.length
+              ? _routePotholeCounts[routeIndex]
+              : _p2pHazardCount);
+    final double accurateSeconds = _calculateAccurateEtaSeconds(
+      durSeconds,
+      distanceMeters: distMeters,
+      potholeCount: hazardCount,
+    );
+    if (destinationOverride != null) {
+      _p2pPoint = destinationOverride;
+    } else if (_destination != null) {
+      _p2pPoint = _destination;
+    }
+    _p2pDistanceKm = distMeters / 1000.0;
+    _p2pMinutes = (accurateSeconds / 60).round().clamp(1, 999);
+    _p2pHazardCount = hazardCount;
+  }
+
+  void _refreshProximityForActiveContext(int routeIndex) {
+    if (_currentPosition != null) {
+      _checkPotholeProximity(_currentPosition!);
+      return;
+    }
+    if (_destination == null ||
+        routeIndex < 0 ||
+        routeIndex >= _alternativeRoutes.length) {
+      return;
+    }
+    final List<LatLng> route = _alternativeRoutes[routeIndex];
+    final LatLng? fallbackOrigin =
+        _customOrigin ?? (route.isNotEmpty ? route.first : null);
+    if (fallbackOrigin != null) {
+      _checkPotholeProximity(fallbackOrigin, allowProximityAlarm: false);
+    }
+  }
+
+  void _checkPotholeProximity(
+    LatLng userPos, {
+    double? gpsAccuracyMeters,
+    double? headingDeg,
+    double? speedMps,
+    DateTime? timestamp,
+    bool allowProximityAlarm = true,
+  }) {
     if (!widget.isMapActive) return;
     List<LatLng> routeForChecks = _routePoints;
     List<LatLng> warningCandidates;
+    List<LatLng>? activeRouteForAdvisor;
 
     final bool isUsingCustomOrigin =
         _customOrigin != null && _originController.text != 'Your location';
+    final bool useRouteStartTracking =
+        !allowProximityAlarm || (isUsingCustomOrigin && !_isSimulatingRoute);
+    final bool canTriggerProximityAlarm =
+        allowProximityAlarm && (!isUsingCustomOrigin || _isSimulatingRoute);
 
     if (_destination != null && _alternativeRoutes.isNotEmpty) {
       final int activeIndex = _selectedRouteIndex < _alternativeRoutes.length
           ? _selectedRouteIndex
           : 0;
       final activeRoute = _alternativeRoutes[activeIndex];
-      routeForChecks = isUsingCustomOrigin
+      activeRouteForAdvisor = activeRoute;
+      routeForChecks = useRouteStartTracking
           ? activeRoute
           : _remainingRouteFromUser(activeRoute, userPos);
-      final snapped = _roadAlignedPotholeLocations();
-      warningCandidates = snapped
-          .where(
-            (p) => _isPotholeOnRoute(
-              p,
-              routeForChecks,
-              _routeWarningToleranceMeters,
-            ),
-          )
-          .toList();
+      if (_activeRouteIndex != null &&
+          _activeRouteIndex!.routeIndex == activeIndex) {
+        warningCandidates = _activeRouteIndex!.summary.potholeEncounters
+            .map((e) => e.hazard.location)
+            .toList(growable: false);
+      } else {
+        warningCandidates = _roadAlignedPotholeLocations()
+            .where(
+              (p) => _isPotholeOnRoute(
+                p,
+                routeForChecks,
+                _routeWarningToleranceMeters,
+              ),
+            )
+            .toList();
+      }
     } else {
       warningCandidates = _allPotholeLocations;
     }
@@ -1600,37 +2513,111 @@ class MapScreenState extends State<MapScreen>
       absoluteMin = 9999.0;
     }
 
-    final bool inProximity = absoluteMin <= _proximityCircleRadiusMeters;
+    final bool inProximity =
+        canTriggerProximityAlarm && absoluteMin <= _proximityCircleRadiusMeters;
 
-    final List<LatLng> pendingPotholes = warningCandidates.where((p) {
-      final d = Geolocator.distanceBetween(
-        userPos.latitude,
-        userPos.longitude,
-        p.latitude,
-        p.longitude,
+    final List<LatLng> pendingPotholes =
+        _activeRouteIndex != null &&
+            _destination != null &&
+            _alternativeRoutes.isNotEmpty
+        ? _activeRouteIndex!.summary.potholeEncounters
+              .map((e) => e.hazard.location)
+              .toList(growable: false)
+        : warningCandidates;
+
+    NavigationHazardState? trackedState;
+    UpcomingHazardCountdown? upcoming;
+    final int activeIdxForTracker =
+        _selectedRouteIndex < _alternativeRoutes.length
+        ? _selectedRouteIndex
+        : 0;
+    final bool hasMatchingActiveIndex =
+        activeRouteForAdvisor != null &&
+        _activeRouteIndex != null &&
+        _activeRouteIndex!.routeIndex == activeIdxForTracker;
+
+    if (useRouteStartTracking && hasMatchingActiveIndex) {
+      // Derive route-start hazard countdown directly without mutating the
+      // live GPS NavigationHazardTracker when no GPS fix exists or previewing
+      // a custom origin on web desktop.
+      final encounters = _activeRouteIndex!.summary.potholeEncounters;
+      final totalCount = _activeRouteIndex!.summary.distinctPotholeCount;
+      final next = encounters.isEmpty ? null : encounters.first;
+      trackedState = NavigationHazardState(
+        status: next != null
+            ? NavigationHazardStatus.hazardAhead
+            : NavigationHazardStatus.clearAhead,
+        userChainMeters: 0.0,
+        distanceFromRouteMeters: 0.0,
+        nextEncounter: next,
+        distanceToNextMeters: next?.chainDistanceMeters,
+        remainingPotholeCount: totalCount,
+        totalRoutePotholeCount: totalCount,
+        remainingEncounterCount: encounters.length,
+        totalRouteEncounterCount: encounters.length,
       );
-      return d > _proximityCircleRadiusMeters;
-    }).toList();
+      if (next != null) {
+        upcoming = UpcomingHazardCountdown(
+          distanceMeters: next.chainDistanceMeters,
+          defectName: next.hazard.defectName,
+          dpwhCode: next.hazard.dpwhCode,
+          barangay: next.hazard.barangay,
+          potholeCount: next.hazard.potholeCount,
+          isOnActiveRoute: true,
+          location: next.hazard.location,
+          encounterId: next.encounterId,
+          remainingOnRoute: totalCount,
+          totalOnRoute: totalCount,
+        );
+      }
+    } else if (activeRouteForAdvisor != null &&
+        _navigationTracker != null &&
+        !useRouteStartTracking) {
+      trackedState = _navigationTracker!.update(
+        position: userPos,
+        timestamp: timestamp ?? _lastGpsTimestamp,
+        gpsAccuracyMeters: gpsAccuracyMeters ?? _lastGpsAccuracyMeters,
+        headingDeg: headingDeg ?? _lastHeadingNotifier.value,
+        speedMps: speedMps ?? _lastGpsSpeedMps,
+        offRouteThresholdMeters: _offRouteRerouteThresholdMeters,
+      );
+      if (trackedState.nextEncounter != null &&
+          trackedState.distanceToNextMeters != null) {
+        final enc = trackedState.nextEncounter!;
+        upcoming = UpcomingHazardCountdown(
+          distanceMeters: trackedState.distanceToNextMeters!,
+          defectName: enc.hazard.defectName,
+          dpwhCode: enc.hazard.dpwhCode,
+          barangay: enc.hazard.barangay,
+          potholeCount: enc.hazard.potholeCount,
+          isOnActiveRoute: true,
+          location: enc.hazard.location,
+          encounterId: enc.encounterId,
+          remainingOnRoute: trackedState.remainingPotholeCount,
+          totalOnRoute: trackedState.totalRoutePotholeCount,
+        );
+      }
+    } else {
+      upcoming = RoutePotholeAdvisor.findUpcomingHazard(
+        userPos: userPos,
+        hazards: _buildHazardInputs(),
+        activeRoute: activeRouteForAdvisor,
+        forceFromRouteStart: useRouteStartTracking,
+        routeToleranceMeters: _routeCountToleranceMeters,
+        roamingRadiusMeters: 600.0,
+      );
+    }
 
     String nearestInfo = 'Clear ahead';
     String? nextPotholeEta;
-    double nearestDistMeters = double.infinity;
 
-    if (_destination != null && routeForChecks.length >= 2) {
-      // Find distance to the next hazard along the route
-      for (final pothole in warningCandidates) {
-        final drivingDist = _distanceAlongRouteToPothole(
-          pothole,
-          routeForChecks,
-        );
-        if (drivingDist < nearestDistMeters) {
-          nearestDistMeters = drivingDist;
-        }
-      }
-      if (nearestDistMeters != double.infinity) {
-        nearestInfo = '${nearestDistMeters.round()}m';
+    if (upcoming != null) {
+      final double nearestDistMeters = upcoming.distanceMeters;
+      nearestInfo = nearestDistMeters >= 1000.0
+          ? '${(nearestDistMeters / 1000.0).toStringAsFixed(1)} km'
+          : '${nearestDistMeters.round()} m';
 
-        // Calculate ETA along route to next pothole
+      if (activeRouteForAdvisor != null) {
         final int activeIndex = _selectedRouteIndex < _routeDurations.length
             ? _selectedRouteIndex
             : 0;
@@ -1641,13 +2628,12 @@ class MapScreenState extends State<MapScreen>
         final double totalDist =
             (_routeDistances.isNotEmpty && activeIndex < _routeDistances.length)
             ? _routeDistances[activeIndex]
-            : _calculatePolylineDistanceMeters(routeForChecks);
+            : _calculatePolylineDistanceMeters(activeRouteForAdvisor);
 
         double etaSeconds = 0;
         if (totalDist > 0 && totalDur > 0) {
           etaSeconds = (nearestDistMeters / totalDist) * totalDur;
         } else {
-          // Fallback driving speed ~35 km/h = 9.72 m/s
           etaSeconds = nearestDistMeters / 9.72;
         }
 
@@ -1663,35 +2649,19 @@ class MapScreenState extends State<MapScreen>
           nextPotholeEta = '${hrs}h ${mins}m';
         }
       }
-    } else {
-      // Free roaming / No route searched
-      for (final pothole in warningCandidates) {
-        final dist = Geolocator.distanceBetween(
-          userPos.latitude,
-          userPos.longitude,
-          pothole.latitude,
-          pothole.longitude,
-        );
-        if (dist < nearestDistMeters) nearestDistMeters = dist;
-      }
-      if (nearestDistMeters != double.infinity && nearestDistMeters <= 500) {
-        nearestInfo = '${nearestDistMeters.round()}m';
-      }
-      // Strictly NO ETA when not searching for any location
-      nextPotholeEta = null;
     }
 
     setState(() {
-      _debugClosestDist = absoluteMin;
       _inProximityWarning = inProximity;
       _nearestPotholeInfo = nearestInfo;
       _nextPotholeEta = nextPotholeEta;
+      _upcomingHazard = upcoming;
+      _navHazardState = trackedState;
       if (_destination != null) {
-        _routePoints = routeForChecks;
-        _potholesOnRoute = pendingPotholes;
-        if (_selectedRouteIndex < _routePotholeCounts.length) {
-          _routePotholeCounts[_selectedRouteIndex] = pendingPotholes.length;
+        if (!_isDraggingEndpoint) {
+          _routePoints = routeForChecks;
         }
+        _potholesOnRoute = pendingPotholes;
       }
     });
 
@@ -1706,7 +2676,7 @@ class MapScreenState extends State<MapScreen>
           }
         }
       }
-    } else if (absoluteMin > 60) {
+    } else if (!canTriggerProximityAlarm || absoluteMin > 60) {
       _alertedAt50m.clear();
       if (_showWarningBanner) setState(() => _showWarningBanner = false);
     }
@@ -1717,32 +2687,67 @@ class MapScreenState extends State<MapScreen>
   void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
     _syncUrlCoordinates(camera.center, camera.zoom);
 
+    bool needsRebuild = false;
+    if ((camera.zoom - _lastMarkerZoom).abs() >= .05) {
+      _lastMarkerZoom = camera.zoom;
+      needsRebuild = true;
+    }
+
+    if (hasGesture && _reportFilter.onlyInMapBounds && !_hasUnsearchedMapMove) {
+      _hasUnsearchedMapMove = true;
+      needsRebuild = true;
+    }
+
     if (hasGesture && _followMode != FollowMode.none) {
       _followMode = FollowMode.none;
-      if (mounted) setState(() {});
+      needsRebuild = true;
     }
 
     if (_isPlacingMarker && hasGesture) {
       _pendingMarkerLocation = camera.center;
-      if (mounted) setState(() {});
+      needsRebuild = true;
     }
 
     if (_isEditingDevLocation && hasGesture) {
       _pendingDevLocation = camera.center;
-      if (mounted) setState(() {});
+      needsRebuild = true;
+    }
+
+    // Refresh viewport-culled pothole markers when the camera pans or zooms
+    // beyond the buffered region (e.g., fitting a Point A to B route).
+    try {
+      final currentViewport = _boundingBoxFromBounds(camera.visibleBounds);
+      final prevViewport = _lastMarkerViewportBounds;
+      if (prevViewport == null ||
+          prevViewport.needsViewportRefresh(currentViewport)) {
+        _lastMarkerViewportBounds = currentViewport;
+        needsRebuild = true;
+      }
+    } catch (_) {}
+
+    if (needsRebuild) {
+      _scheduleViewportMarkerRebuild();
     }
   }
 
-  Future<void> _startMarkerPlacement() async {
-    final startPoint = _currentPosition ?? _mapController.camera.center;
-    setState(() {
-      _isPlacingMarker = true;
-      _isSavingPlacedMarker = false;
-      _pendingMarkerLocation = startPoint;
-      _isEditingDevLocation = false;
-      _pendingDevLocation = null;
-      _followMode = FollowMode.none;
-    });
+  Future<void> _startMarkerPlacement([PotholeMarker? marker]) async {
+    AppSettings.instance.toggleDevMockMode(true);
+    try {
+      await showDeveloperMarkerEditor(
+        context,
+        location: marker?.location ?? _mapController.camera.center,
+        markerId: marker?.docId,
+      );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open local developer markers.'),
+          ),
+        );
+    } finally {
+      if (mounted) _cancelMarkerPlacement();
+    }
   }
 
   void _cancelMarkerPlacement() {
@@ -1782,6 +2787,8 @@ class MapScreenState extends State<MapScreen>
   Future<void> _applyDevLocationEdit() async {
     final location = _pendingDevLocation;
     if (location == null) return;
+    final bool isUsingCustomOrigin =
+        _customOrigin != null && _originController.text != 'Your location';
 
     setState(() {
       _useMockLocation = true;
@@ -1789,6 +2796,10 @@ class MapScreenState extends State<MapScreen>
       _pendingDevLocation = null;
       _currentPosition = location;
       _followMode = FollowMode.location;
+      _lastAutoRerouteAt = null;
+      if (_destination != null && !isUsingCustomOrigin) {
+        _rubberBandActiveRoute(newStart: location);
+      }
     });
 
     if (AppSettings.instance.devEditLocationNotifier.value) {
@@ -1796,8 +2807,17 @@ class MapScreenState extends State<MapScreen>
     }
 
     _checkPotholeProximity(location);
-    await _autoAdjustRouteToCurrentPath(location);
     _mapController.move(location, _mapController.camera.zoom);
+    if (_destination != null && !isUsingCustomOrigin) {
+      await _calculateRoute(
+        _destination!,
+        customOrigin: location,
+        fitCamera: false,
+        silent: true,
+      );
+    } else {
+      await _autoAdjustRouteToCurrentPath(location);
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1811,6 +2831,9 @@ class MapScreenState extends State<MapScreen>
   void _resetToRealLocation() {
     if (!_useMockLocation && _lastRealGpsPosition == null) return;
     final livePosition = _lastRealGpsPosition;
+    final bool isUsingCustomOrigin =
+        _customOrigin != null && _originController.text != 'Your location';
+    final LatLng? nextPos = livePosition ?? _currentPosition;
 
     setState(() {
       _useMockLocation = false;
@@ -1820,12 +2843,27 @@ class MapScreenState extends State<MapScreen>
         _currentPosition = livePosition;
       }
       _followMode = FollowMode.location;
+      _lastAutoRerouteAt = null;
+      if (_destination != null && !isUsingCustomOrigin && nextPos != null) {
+        _rubberBandActiveRoute(newStart: nextPos);
+      }
     });
 
     if (_currentPosition != null) {
       _checkPotholeProximity(_currentPosition!);
-      unawaited(_autoAdjustRouteToCurrentPath(_currentPosition!));
       _mapController.move(_currentPosition!, _mapController.camera.zoom);
+      if (_destination != null && !isUsingCustomOrigin) {
+        unawaited(
+          _calculateRoute(
+            _destination!,
+            customOrigin: _currentPosition!,
+            fitCamera: false,
+            silent: true,
+          ),
+        );
+      } else {
+        unawaited(_autoAdjustRouteToCurrentPath(_currentPosition!));
+      }
     }
 
     if (!mounted) return;
@@ -1837,60 +2875,27 @@ class MapScreenState extends State<MapScreen>
   Future<void> _confirmMarkerPlacement() async {
     final location = _pendingMarkerLocation;
     if (location == null) return;
-    if (widget.onAddDetectedPothole == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Add marker callback is not configured.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isSavingPlacedMarker = true);
-    try {
-      await widget.onAddDetectedPothole!(location);
-      await _refreshRouteAwarePotholeState();
-
-      if (!mounted) return;
-      setState(() {
-        _isPlacingMarker = false;
-        _isSavingPlacedMarker = false;
-        _pendingMarkerLocation = null;
-      });
-      if (AppSettings.instance.manualPotholePlacementNotifier.value) {
-        AppSettings.instance.manualPotholePlacementNotifier.value = false;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Marker added from selected map location.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isSavingPlacedMarker = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not add marker to that location.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      print('Map placement add marker error: $e');
-    }
+    await showDeveloperMarkerEditor(context, location: location);
+    if (mounted) _cancelMarkerPlacement();
   }
 
   void _onSearchChanged(String query) {
-    if (_highlightedSuggestionIndex != -1) {
-      _highlightedSuggestionIndex = -1;
-    }
-    if (_debounceTimer?.isActive ?? false) _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-      if (query.length > 2) {
-        _fetchSuggestions(query);
-      } else {
-        setState(() => _suggestions = []);
+    final revision = ++_searchRevision;
+    _highlightedSuggestionIndex = -1;
+    _debounceTimer?.cancel();
+    final normalized = _normalizeQuery(query.trim());
+    final canFetchPlaces = normalized.length >= 3;
+    setState(() {
+      _suggestions = !canFetchPlaces
+          ? []
+          : _fetchLocalBarangayCandidates(normalized).take(8).toList();
+      _isSearchingPlaces = canFetchPlaces;
+      _visibleResultLimit = 25;
+    });
+    if (!canFetchPlaces) return;
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && revision == _searchRevision) {
+        _fetchSuggestions(query, revision);
       }
     });
   }
@@ -1900,22 +2905,60 @@ class MapScreenState extends State<MapScreen>
 
   String _potholeListSignature(List<PotholeMarker> potholes) {
     return potholes
-        .map(
-          (p) =>
-              '${p.id ?? -1}|${_potholeKey(p.location)}|${p.timestamp.millisecondsSinceEpoch}',
-        )
+        .map((p) {
+          final detSig = p.detections == null || p.detections!.isEmpty
+              ? ''
+              : p.detections!
+                    .map(
+                      (d) =>
+                          '${d['className'] ?? d['defectClass'] ?? d['defectType'] ?? d['rawTag'] ?? d['tag'] ?? d['classId'] ?? ''}',
+                    )
+                    .join(',');
+          return '${p.docId ?? ''}|${p.id ?? -1}|${_potholeKey(p.location)}|'
+              '${p.status.trim().toLowerCase()}|${p.isResolved}|${p.isAccessible}|'
+              '${p.canonicalDefectId ?? ''}|${p.primaryDefect}|${p.primaryDpwhCode}|'
+              '${p.potholeCount}|$detSig|${p.roadName ?? ''}|'
+              '${p.roadBearingDeg?.toStringAsFixed(1) ?? ''}|${p.roadMatched}|'
+              '${p.timestamp.millisecondsSinceEpoch}';
+        })
         .join('||');
   }
 
-  Future<void> _ensurePotholeSnapCache() async {
-    final missing = _allPotholeLocations
+  Future<void> _ensurePotholeSnapCache({int? requestSeq}) async {
+    final double snapRadius = math.min(
+      _snapRadiusMeters,
+      _routeCountToleranceMeters,
+    );
+    final List<LatLng> candidates = _alternativeRoutes.isNotEmpty
+        ? _allPotholeLocations.where((p) {
+            return _alternativeRoutes.any(
+              (r) => RouteBoundingBox.fromPoints(
+                r,
+                bufferMeters: snapRadius + 15.0,
+              ).contains(p),
+            );
+          }).toList()
+        : _allPotholeLocations;
+
+    final missing = candidates
         .where((p) => !_snappedPotholeCache.containsKey(_potholeKey(p)))
         .toList();
     if (missing.isEmpty) return;
 
-    // Batch missing locations in chunks of 30 to strictly satisfy ORS max-location parameter limits (max 50)
+    // Without an OpenRouteService key, skip external snap calls immediately and
+    // record coordinates as unverified (count will be marked approximate).
+    if (_orsApiKey.trim().isEmpty) {
+      for (final p in missing) {
+        final key = _potholeKey(p);
+        _snappedPotholeCache[key] = p;
+        _snappedWasVerified[key] = false;
+      }
+      return;
+    }
+
     const int batchSize = 30;
     for (int i = 0; i < missing.length; i += batchSize) {
+      if (requestSeq != null && requestSeq != _routingRequestSeq) return;
       final batch = missing.sublist(
         i,
         (i + batchSize > missing.length) ? missing.length : i + batchSize,
@@ -1927,22 +2970,27 @@ class MapScreenState extends State<MapScreen>
         );
         final body = {
           'locations': batch.map((p) => [p.longitude, p.latitude]).toList(),
-          'radius': _snapRadiusMeters,
+          'radius': snapRadius,
         };
 
-        final response = await http.post(
-          url,
-          headers: {
-            'Authorization': _orsApiKey,
-            'Content-Type': 'application/json',
-            'User-Agent': 'PotholeScannerApp/1.0',
-          },
-          body: jsonEncode(body),
-        );
+        final response = await http
+            .post(
+              url,
+              headers: _safeHeaders({
+                'Authorization': _orsApiKey,
+                'Content-Type': 'application/json',
+              }),
+              body: jsonEncode(body),
+            )
+            .timeout(const Duration(seconds: 5));
+
+        if (requestSeq != null && requestSeq != _routingRequestSeq) return;
 
         if (response.statusCode != 200) {
           for (final p in batch) {
-            _snappedPotholeCache[_potholeKey(p)] = p;
+            final key = _potholeKey(p);
+            _snappedPotholeCache[key] = p;
+            _snappedWasVerified[key] = false;
           }
           continue;
         }
@@ -1960,21 +3008,26 @@ class MapScreenState extends State<MapScreen>
             final dist =
                 (item['snapped_distance'] as num?)?.toDouble() ??
                 double.infinity;
-            if (loc != null && loc.length >= 2 && dist <= _snapRadiusMeters) {
+            if (loc != null && loc.length >= 2 && dist <= snapRadius) {
               _snappedPotholeCache[key] = LatLng(
                 (loc[1] as num).toDouble(),
                 (loc[0] as num).toDouble(),
               );
+              _snappedWasVerified[key] = true;
             } else {
               _snappedPotholeCache[key] = original;
+              _snappedWasVerified[key] = false;
             }
           } else {
             _snappedPotholeCache[key] = original;
+            _snappedWasVerified[key] = false;
           }
         }
       } catch (_) {
         for (final p in batch) {
-          _snappedPotholeCache[_potholeKey(p)] = p;
+          final key = _potholeKey(p);
+          _snappedPotholeCache[key] = p;
+          _snappedWasVerified[key] = false;
         }
       }
     }
@@ -1986,7 +3039,40 @@ class MapScreenState extends State<MapScreen>
         .toList();
   }
 
-  Future<void> _refreshRouteAwarePotholeState() async {
+  List<RouteStepRoadSpan> _toStepRoadSpans(int routeIdx) {
+    if (routeIdx < 0 || routeIdx >= _alternativeRouteSteps.length) {
+      return const [];
+    }
+    return _alternativeRouteSteps[routeIdx]
+        .map(
+          (s) => RouteStepRoadSpan(roadName: s.roadName, location: s.location),
+        )
+        .toList(growable: false);
+  }
+
+  String _routeViaSummary(int routeIndex) {
+    if (routeIndex >= 0 && routeIndex < _alternativeRouteSteps.length) {
+      final seen = <String>{};
+      final roads = <String>[];
+      for (final step in _alternativeRouteSteps[routeIndex]) {
+        final raw = step.roadName.trim();
+        if (raw.isEmpty) continue;
+        final key = raw.toLowerCase();
+        if (key == 'road' || key == 'unnamed road' || seen.contains(key)) {
+          continue;
+        }
+        seen.add(key);
+        roads.add(raw);
+        if (roads.length >= 2) break;
+      }
+      if (roads.isNotEmpty) return 'Via ${roads.join(' & ')}';
+    }
+    return routeIndex == 0
+        ? 'Primary road'
+        : 'Alternate route ${routeIndex + 1}';
+  }
+
+  Future<void> _refreshRouteAwarePotholeState({int? requestSeq}) async {
     if (_alternativeRoutes.isEmpty) {
       if (_currentPosition != null) {
         _checkPotholeProximity(_currentPosition!);
@@ -1994,33 +3080,88 @@ class MapScreenState extends State<MapScreen>
       return;
     }
 
-    await _ensurePotholeSnapCache();
-    final snappedPotholes = _roadAlignedPotholeLocations();
+    await _ensurePotholeSnapCache(requestSeq: requestSeq);
+    if (!mounted || (requestSeq != null && requestSeq != _routingRequestSeq)) {
+      return;
+    }
 
-    final List<int> updatedCounts = _alternativeRoutes.map((routePoints) {
-      int count = 0;
-      for (final pothole in snappedPotholes) {
-        if (_isPotholeOnRoute(
-          pothole,
-          routePoints,
-          _routeCountToleranceMeters,
-        )) {
-          count++;
-        }
-      }
-      return count;
-    }).toList();
+    final hazards = _buildHazardInputs();
+    final List<String?> viaList = List<String?>.generate(
+      _alternativeRoutes.length,
+      (i) => _routeViaSummary(i),
+      growable: false,
+    );
+    final List<List<RouteStepRoadSpan>> spansByRoute =
+        List<List<RouteStepRoadSpan>>.generate(
+          _alternativeRoutes.length,
+          (i) => _toStepRoadSpans(i),
+          growable: false,
+        );
+
+    final comparison = RoutePotholeAdvisor.evaluateAlternatives(
+      routes: _alternativeRoutes,
+      distancesMeters: _routeDistances,
+      durationsSeconds: _routeDurations,
+      hazards: hazards,
+      viaSummaries: viaList,
+      stepsByRoute: spansByRoute,
+      corridorConfig: _corridorConfig,
+    );
+
+    final List<int> updatedCounts = List<int>.generate(
+      _alternativeRoutes.length,
+      (i) {
+        final opt = comparison.options
+            .cast<RouteComparisonOption?>()
+            .firstWhere((o) => o?.routeIndex == i, orElse: () => null);
+        if (opt != null) return opt.summary.distinctPotholeCount;
+        return PrecomputedRouteIndex.build(
+          route: _alternativeRoutes[i],
+          hazards: hazards,
+          routeIndex: i,
+          routeDistanceMeters: i < _routeDistances.length
+              ? _routeDistances[i]
+              : null,
+          durationSeconds: i < _routeDurations.length
+              ? _routeDurations[i]
+              : 0.0,
+          config: _corridorConfig,
+          steps: i < spansByRoute.length ? spansByRoute[i] : const [],
+        ).summary.distinctPotholeCount;
+      },
+      growable: false,
+    );
 
     final int activeIndex = _selectedRouteIndex < _alternativeRoutes.length
         ? _selectedRouteIndex
         : 0;
-    final activeRoute = _alternativeRoutes[activeIndex];
-    final List<LatLng> onRoute = snappedPotholes
-        .where(
-          (p) =>
-              _isPotholeOnRoute(p, activeRoute, _routeWarningToleranceMeters),
-        )
-        .toList();
+    final PrecomputedRouteIndex activeIndexBuilt = PrecomputedRouteIndex.build(
+      route: _alternativeRoutes[activeIndex],
+      hazards: hazards,
+      routeIndex: activeIndex,
+      routeDistanceMeters: activeIndex < _routeDistances.length
+          ? _routeDistances[activeIndex]
+          : null,
+      durationSeconds: activeIndex < _routeDurations.length
+          ? _routeDurations[activeIndex]
+          : 0.0,
+      config: _corridorConfig,
+      steps: activeIndex < spansByRoute.length
+          ? spansByRoute[activeIndex]
+          : const [],
+    );
+
+    final List<LatLng> onRoute = activeIndexBuilt.summary.potholeEncounters
+        .map((e) => e.hazard.location)
+        .toList(growable: false);
+
+    final RouteSwitchSuggestion? suggestion =
+        RoutePotholeAdvisor.buildSwitchSuggestion(
+          currentRouteIndex: activeIndex,
+          hazardCounts: updatedCounts,
+          distancesMeters: _routeDistances,
+          durationsSeconds: _routeDurations,
+        );
 
     if (!mounted) return;
     setState(() {
@@ -2029,13 +3170,123 @@ class MapScreenState extends State<MapScreen>
           activeIndex < _alternativeRouteSteps.length) {
         _routeSteps = _alternativeRouteSteps[activeIndex];
       }
+      _routeComparison = comparison;
+      _activeRouteIndex = activeIndexBuilt;
+      if (_navigationTracker == null) {
+        _navigationTracker = NavigationHazardTracker(activeIndexBuilt);
+      } else {
+        _navigationTracker!.replaceRouteIndex(activeIndexBuilt);
+      }
       _routePotholeCounts = updatedCounts;
       _potholesOnRoute = onRoute;
+      _routeSwitchSuggestion = suggestion;
+      _syncP2pSummaryForRoute(activeIndex);
     });
 
-    if (_currentPosition != null) {
-      _checkPotholeProximity(_currentPosition!);
+    _refreshProximityForActiveContext(activeIndex);
+  }
+
+  void _recomputeRouteSuggestion() {
+    _routeSwitchSuggestion = RoutePotholeAdvisor.buildSwitchSuggestion(
+      currentRouteIndex: _selectedRouteIndex,
+      hazardCounts: _routePotholeCounts,
+      distancesMeters: _routeDistances,
+      durationsSeconds: _routeDurations,
+    );
+  }
+
+  void _stopRouteSimulation() {
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
+    if (_isSimulatingRoute && mounted) {
+      setState(() {
+        _isSimulatingRoute = false;
+        _useMockLocation = false;
+      });
+    } else {
+      _isSimulatingRoute = false;
+      _useMockLocation = false;
     }
+  }
+
+  void _toggleRouteSimulation() {
+    if (_isSimulatingRoute) {
+      _stopRouteSimulation();
+      return;
+    }
+    final List<LatLng> path =
+        _alternativeRoutes.isNotEmpty &&
+            _selectedRouteIndex < _alternativeRoutes.length
+        ? _alternativeRoutes[_selectedRouteIndex]
+        : _routePoints;
+    if (path.length < 2) return;
+
+    _simulationTimer?.cancel();
+    setState(() {
+      _isSimulatingRoute = true;
+      _useMockLocation = true;
+      _simulatedChainMeters = 0.0;
+      _currentPosition = path.first;
+    });
+    _checkPotholeProximity(path.first);
+    _animatedMapMove(path.first, 16.5);
+
+    _simulationTimer = Timer.periodic(const Duration(milliseconds: 350), (t) {
+      if (!mounted || !_isSimulatingRoute) {
+        t.cancel();
+        return;
+      }
+      final List<LatLng> activePath =
+          _alternativeRoutes.isNotEmpty &&
+              _selectedRouteIndex < _alternativeRoutes.length
+          ? _alternativeRoutes[_selectedRouteIndex]
+          : _routePoints;
+      if (activePath.length < 2) {
+        _stopRouteSimulation();
+        return;
+      }
+
+      _simulatedChainMeters += 18.0;
+      final LatLng? nextPos = _interpolatePointAlongRoute(
+        activePath,
+        _simulatedChainMeters,
+      );
+      if (nextPos == null) {
+        _stopRouteSimulation();
+        return;
+      }
+      if (mounted) {
+        setState(() => _currentPosition = nextPos);
+      }
+      _checkPotholeProximity(nextPos);
+      if (_followMode != FollowMode.none) {
+        _mapController.move(nextPos, _mapController.camera.zoom);
+      }
+    });
+  }
+
+  LatLng? _interpolatePointAlongRoute(List<LatLng> path, double targetMeters) {
+    if (path.length < 2) return null;
+    double walked = 0.0;
+    for (int i = 0; i < path.length - 1; i++) {
+      final double segLen = Geolocator.distanceBetween(
+        path[i].latitude,
+        path[i].longitude,
+        path[i + 1].latitude,
+        path[i + 1].longitude,
+      );
+      if (walked + segLen >= targetMeters) {
+        final double t = segLen > 0
+            ? ((targetMeters - walked) / segLen).clamp(0.0, 1.0)
+            : 0.0;
+        return LatLng(
+          path[i].latitude + t * (path[i + 1].latitude - path[i].latitude),
+          path[i].longitude + t * (path[i + 1].longitude - path[i].longitude),
+        );
+      }
+      walked += segLen;
+    }
+    return null;
   }
 
   double _distancePointToSegmentMeters(LatLng p, LatLng a, LatLng b) {
@@ -2089,6 +3340,327 @@ class MapScreenState extends State<MapScreen>
 
   List<double> _routeDistances = [];
 
+  void _rubberBandActiveRoute({LatLng? newStart, LatLng? newEnd}) {
+    final LatLng start =
+        newStart ?? _customOrigin ?? _currentPosition ?? _bulacanCenter;
+    final LatLng? end = newEnd ?? _destination;
+    if (end == null) return;
+
+    List<LatLng> updated;
+    if (_routePoints.length >= 2) {
+      final double startJump = newStart != null
+          ? Geolocator.distanceBetween(
+              _routePoints.first.latitude,
+              _routePoints.first.longitude,
+              newStart.latitude,
+              newStart.longitude,
+            )
+          : 0.0;
+      final double endJump = newEnd != null
+          ? Geolocator.distanceBetween(
+              _routePoints.last.latitude,
+              _routePoints.last.longitude,
+              newEnd.latitude,
+              newEnd.longitude,
+            )
+          : 0.0;
+      if (!_isDraggingEndpoint && (startJump > 300.0 || endJump > 300.0)) {
+        updated = [start, end];
+      } else {
+        updated = List<LatLng>.from(_routePoints);
+        if (newStart != null) {
+          updated[0] = newStart;
+        }
+        if (newEnd != null) {
+          updated[updated.length - 1] = newEnd;
+        }
+      }
+    } else {
+      updated = [start, end];
+    }
+
+    _routePoints = updated;
+    if (_alternativeRoutes.isNotEmpty) {
+      final int idx = _selectedRouteIndex < _alternativeRoutes.length
+          ? _selectedRouteIndex
+          : 0;
+      _alternativeRoutes[idx] = updated;
+    }
+  }
+
+  Future<void> _tryDiscoverAvoidanceRoutes({
+    required LatLng start,
+    required LatLng destination,
+    required List<List<LatLng>> routes,
+    required List<double> durations,
+    required List<double> distances,
+    required List<List<RouteStep>> stepsByRoute,
+    required int requestSeq,
+  }) async {
+    if (routes.isEmpty || routes.length >= 3) return;
+    await _ensurePotholeSnapCache(requestSeq: requestSeq);
+    if (!mounted || requestSeq != _routingRequestSeq) return;
+    final List<LatLng> hazards = _buildHazardInputs()
+        .where((h) => h.isEligibleForPublicRouteCount && h.containsPotholeClass)
+        .map((h) => h.location)
+        .toList(growable: false);
+    if (hazards.isEmpty) return;
+
+    final int primaryHazards = hazards
+        .where(
+          (h) => _isPotholeOnRoute(h, routes.first, _routeCountToleranceMeters),
+        )
+        .length;
+    if (primaryHazards == 0) return;
+
+    final List<LatLng> bypassWaypoints =
+        RoutePotholeAdvisor.buildAvoidanceWaypoints(
+          primaryRoute: routes.first,
+          hazards: hazards,
+          routeToleranceMeters: _routeCountToleranceMeters,
+        );
+    if (bypassWaypoints.isEmpty) return;
+
+    final String baseHost = _travelMode == OsrmTravelMode.bike
+        ? 'https://routing.openstreetmap.de/routed-bike/route/v1/driving'
+        : _travelMode == OsrmTravelMode.foot
+        ? 'https://routing.openstreetmap.de/routed-foot/route/v1/driving'
+        : 'https://router.project-osrm.org/route/v1/driving';
+
+    for (final wp in bypassWaypoints) {
+      if (routes.length >= 3 || !mounted || requestSeq != _routingRequestSeq) {
+        return;
+      }
+      try {
+        Uri url = Uri.parse(
+          '$baseHost/'
+          '${start.longitude},${start.latitude};'
+          '${wp.longitude},${wp.latitude};'
+          '${destination.longitude},${destination.latitude}'
+          '?overview=full&geometries=geojson&steps=true&annotations=true',
+        );
+        var res = await http.get(url).timeout(const Duration(seconds: 6));
+        if (res.statusCode != 200 && _travelMode != OsrmTravelMode.car) {
+          url = Uri.parse(
+            'https://router.project-osrm.org/route/v1/driving/'
+            '${start.longitude},${start.latitude};'
+            '${wp.longitude},${wp.latitude};'
+            '${destination.longitude},${destination.latitude}'
+            '?overview=full&geometries=geojson&steps=true&annotations=true',
+          );
+          res = await http.get(url).timeout(const Duration(seconds: 6));
+        }
+        if (res.statusCode != 200) continue;
+
+        final data = jsonDecode(res.body);
+        final List osrmRoutes = data['routes'] ?? [];
+        for (final r in osrmRoutes.take(1)) {
+          final List coords =
+              (r['geometry'] as Map<String, dynamic>)['coordinates'] as List;
+          List<LatLng> points = coords.map((c) {
+            final List pair = c as List;
+            return LatLng(
+              (pair[1] as num).toDouble(),
+              (pair[0] as num).toDouble(),
+            );
+          }).toList();
+          if (points.length < 2) continue;
+
+          points = _sanitizeRoutePoints(points, destination);
+          if (!RoutePotholeAdvisor.isDistinctAlternateRoute(points, routes)) {
+            continue;
+          }
+
+          double duration = (r['duration'] as num).toDouble();
+          final double distance = (r['distance'] as num).toDouble();
+          if (_travelMode == OsrmTravelMode.bike &&
+              duration < (distance / 4.5)) {
+            duration = distance / 4.16;
+          } else if (_travelMode == OsrmTravelMode.foot &&
+              duration < (distance / 1.5)) {
+            duration = distance / 1.33;
+          }
+
+          final List<RouteStep> parsedSteps = _parseOsrmSteps(
+            r as Map<String, dynamic>,
+          );
+
+          routes.add(points);
+          durations.add(duration);
+          distances.add(distance);
+          stepsByRoute.add(parsedSteps);
+        }
+      } catch (_) {
+        // Ignore single bypass probe failures; primary OSRM routes remain valid.
+      }
+    }
+  }
+
+  Future<void> _findFewerPotholes() async {
+    if (_alternativeRoutes.isEmpty || _destination == null) return;
+    final int seq = _routingRequestSeq;
+    setState(() {
+      _isSearchingAlternatives = true;
+      _hasEvaluatedFewerPotholes = true;
+    });
+
+    try {
+      if (_alternativeRoutes.length < 3) {
+        final routesCopy = _alternativeRoutes
+            .map((r) => List<LatLng>.from(r))
+            .toList();
+        final dursCopy = List<double>.from(_routeDurations);
+        final distsCopy = List<double>.from(_routeDistances);
+        final stepsCopy = _alternativeRouteSteps
+            .map((s) => List<RouteStep>.from(s))
+            .toList();
+        final LatLng start =
+            _customOrigin ?? _currentPosition ?? routesCopy.first.first;
+        await _tryDiscoverAvoidanceRoutes(
+          start: start,
+          destination: _destination!,
+          routes: routesCopy,
+          durations: dursCopy,
+          distances: distsCopy,
+          stepsByRoute: stepsCopy,
+          requestSeq: seq,
+        );
+        if (!mounted || seq != _routingRequestSeq) return;
+        if (routesCopy.length > _alternativeRoutes.length) {
+          _alternativeRoutes = routesCopy;
+          _routeDurations = dursCopy;
+          _routeDistances = distsCopy;
+          _alternativeRouteSteps = stepsCopy;
+        }
+      }
+      await _refreshRouteAwarePotholeState(requestSeq: seq);
+    } finally {
+      if (mounted && seq == _routingRequestSeq) {
+        setState(() => _isSearchingAlternatives = false);
+      }
+    }
+  }
+
+  Future<void> _useCurrentLocationForOrigin() async {
+    await _determinePosition(requestPermission: true);
+    if (!mounted) return;
+    if (_isPermissionDenied ||
+        _isLocationDisabled ||
+        _currentPosition == null) {
+      setState(() {
+        _routeErrorMessage = _isPermissionDenied
+            ? 'Location permission is required to use your current location, or enter a starting address.'
+            : 'Location services are disabled. Turn on GPS or type a starting address.';
+      });
+      return;
+    }
+    setState(() {
+      _routeErrorMessage = null;
+      _originController.text = 'Your location';
+      _customOrigin = null;
+      _originTextDirty = false;
+      _isEditingOrigin = false;
+      _suggestions = [];
+    });
+    if (_destination != null) {
+      await _calculateRoute(_destination!, customOrigin: _currentPosition);
+    }
+  }
+
+  void _resetRoutePlannerState({bool clearDestination = true}) {
+    if (clearDestination) {
+      _destination = null;
+    }
+    _routePoints = [];
+    _alternativeRoutes = [];
+    _routeDistances = [];
+    _routeDurations = [];
+    _routePotholeCounts = [];
+    _routeSteps = [];
+    _alternativeRouteSteps = [];
+    _routeSwitchSuggestion = null;
+    _upcomingHazard = null;
+    _potholesOnRoute = [];
+    _routeComparison = null;
+    _activeRouteIndex = null;
+    _navigationTracker?.reset();
+    _navHazardState = null;
+    _showPotholesAlongRouteOnly = false;
+    _isSearchingAlternatives = false;
+    _hasEvaluatedFewerPotholes = false;
+    _routeErrorMessage = null;
+    _routeUsingCachedGeometry = false;
+    _nearestPotholeInfo = '';
+    _nextPotholeEta = null;
+    _inProximityWarning = false;
+    _showWarningBanner = false;
+    AppSettings.instance.setRouteActive(false);
+  }
+
+  List<PotholeMarker> _markersForMapDisplay(List<PotholeMarker> baseMarkers) {
+    if (!_showPotholesAlongRouteOnly || _activeRouteIndex == null) {
+      return baseMarkers;
+    }
+    final encounters = _activeRouteIndex!.summary.potholeEncounters;
+    if (encounters.isEmpty) return const [];
+    final Set<String> docIds = {};
+    final Set<String> canonicalIds = {};
+    for (final e in encounters) {
+      final rid = e.hazard.reportId;
+      if (rid != null && rid.isNotEmpty) docIds.add(rid);
+      canonicalIds.add(e.canonicalKey);
+    }
+    return baseMarkers
+        .where((m) {
+          final doc = m.docId ?? m.id;
+          if (doc != null && docIds.contains(doc)) return true;
+          final canon = m.canonicalDefectId?.trim().toLowerCase();
+          if (canon != null &&
+              canon.isNotEmpty &&
+              canonicalIds.contains('canon:$canon')) {
+            return true;
+          }
+          return encounters.any(
+            (e) =>
+                Geolocator.distanceBetween(
+                  e.hazard.location.latitude,
+                  e.hazard.location.longitude,
+                  m.location.latitude,
+                  m.location.longitude,
+                ) <
+                2.0,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  void _focusRouteEncounter(RouteHazardEncounter encounter) {
+    PotholeMarker? matched;
+    for (final m in _effectivePotholes) {
+      final doc = m.docId ?? m.id;
+      if (encounter.hazard.reportId != null &&
+          doc == encounter.hazard.reportId) {
+        matched = m;
+        break;
+      }
+      if (Geolocator.distanceBetween(
+            m.location.latitude,
+            m.location.longitude,
+            encounter.hazard.location.latitude,
+            encounter.hazard.location.longitude,
+          ) <
+          2.0) {
+        matched = m;
+        break;
+      }
+    }
+    if (matched != null) {
+      _setSelectedPothole(matched, notify: true, animate: true);
+    } else {
+      _animatedMapMove(encounter.hazard.location, 17.5, offsetForSidebar: true);
+    }
+  }
+
   Future<void> _processRoutes(
     List<List<LatLng>> routes,
     List<double> durations,
@@ -2096,53 +3668,163 @@ class MapScreenState extends State<MapScreen>
     LatLng destination, {
     List<List<RouteStep>>? stepsByRoute,
     bool fitCamera = true,
+    int? requestSeq,
+    bool fromCache = false,
   }) async {
+    if (requestSeq != null && requestSeq != _routingRequestSeq) return;
     if (routes.isEmpty || durations.isEmpty) {
       setState(() => _isRouting = false);
       return;
     }
 
-    await _ensurePotholeSnapCache();
-    final snappedPotholes = _roadAlignedPotholeLocations();
-    final List<int> potholeCounts = [];
-    for (final route in routes) {
-      int count = 0;
-      for (final pothole in snappedPotholes) {
-        if (_isPotholeOnRoute(pothole, route, _routeCountToleranceMeters)) {
-          count++;
+    final List<List<RouteStep>> allSteps = stepsByRoute ?? [];
+    final List<String?> viaList = List<String?>.generate(routes.length, (i) {
+      if (i < allSteps.length && allSteps[i].isNotEmpty) {
+        final seen = <String>{};
+        final roads = <String>[];
+        for (final step in allSteps[i]) {
+          final raw = step.roadName.trim();
+          if (raw.isEmpty) continue;
+          final k = raw.toLowerCase();
+          if (k == 'road' || k == 'unnamed road' || seen.contains(k)) continue;
+          seen.add(k);
+          roads.add(raw);
+          if (roads.length >= 2) break;
         }
+        if (roads.isNotEmpty) return 'Via ${roads.join(' & ')}';
       }
-      potholeCounts.add(count);
+      return i == 0 ? 'Primary road' : 'Alternate route ${i + 1}';
+    }, growable: false);
+
+    // Pre-commit route state synchronously, then refine road snapping asynchronously.
+    _alternativeRoutes = routes;
+    _alternativeRouteSteps = allSteps;
+    _routeDistances = distances;
+    _routeDurations = durations;
+
+    await _ensurePotholeSnapCache(requestSeq: requestSeq);
+    if (!mounted || (requestSeq != null && requestSeq != _routingRequestSeq)) {
+      return;
     }
+
+    final hazards = _buildHazardInputs();
+    final spansByRoute = List<List<RouteStepRoadSpan>>.generate(
+      routes.length,
+      (i) => i < allSteps.length
+          ? allSteps[i]
+                .map(
+                  (s) => RouteStepRoadSpan(
+                    roadName: s.roadName,
+                    location: s.location,
+                  ),
+                )
+                .toList(growable: false)
+          : const [],
+      growable: false,
+    );
+
+    final comparison = RoutePotholeAdvisor.evaluateAlternatives(
+      routes: routes,
+      distancesMeters: distances,
+      durationsSeconds: durations,
+      hazards: hazards,
+      viaSummaries: viaList,
+      stepsByRoute: spansByRoute,
+      corridorConfig: _corridorConfig,
+    );
+
+    final List<int> potholeCounts = List<int>.generate(routes.length, (i) {
+      final opt = comparison.options.cast<RouteComparisonOption?>().firstWhere(
+        (o) => o?.routeIndex == i,
+        orElse: () => null,
+      );
+      if (opt != null) return opt.summary.distinctPotholeCount;
+      return PrecomputedRouteIndex.build(
+        route: routes[i],
+        hazards: hazards,
+        routeIndex: i,
+        routeDistanceMeters: i < distances.length ? distances[i] : null,
+        durationSeconds: i < durations.length ? durations[i] : 0.0,
+        config: _corridorConfig,
+        steps: i < spansByRoute.length ? spansByRoute[i] : const [],
+      ).summary.distinctPotholeCount;
+    }, growable: false);
 
     const int initialRouteIndex = 0;
     final List<LatLng> initialRoute = routes[initialRouteIndex];
-    final List<List<RouteStep>> allSteps = stepsByRoute ?? [];
     final List<RouteStep> initialSteps =
         allSteps.isNotEmpty && allSteps.length > initialRouteIndex
         ? allSteps[initialRouteIndex]
         : [];
+    final PrecomputedRouteIndex activeBuilt = PrecomputedRouteIndex.build(
+      route: initialRoute,
+      hazards: hazards,
+      routeIndex: initialRouteIndex,
+      routeDistanceMeters: distances[initialRouteIndex],
+      durationSeconds: durations[initialRouteIndex],
+      config: _corridorConfig,
+      steps: initialRouteIndex < spansByRoute.length
+          ? spansByRoute[initialRouteIndex]
+          : const [],
+    );
 
+    if (!fromCache && initialRoute.isNotEmpty) {
+      unawaited(
+        RoadReportCache.saveRecentRoute(
+          routeKey: RoadReportCache.routeCacheKey(
+            origin: initialRoute.first,
+            destination: destination,
+            travelMode: _travelMode.name,
+          ),
+          routes: routes,
+          durationsSeconds: durations,
+          distancesMeters: distances,
+        ),
+      );
+    }
+
+    if (!mounted) return;
     setState(() {
       _alternativeRoutes = routes;
       _alternativeRouteSteps = allSteps;
       _routeSteps = initialSteps;
       _showTurnByTurnSheet = false;
+      _routeComparison = comparison;
+      _activeRouteIndex = activeBuilt;
+      if (_navigationTracker == null) {
+        _navigationTracker = NavigationHazardTracker(activeBuilt);
+      } else {
+        _navigationTracker!.replaceRouteIndex(activeBuilt);
+      }
+      _navHazardState = null;
       _routePotholeCounts = potholeCounts;
+      _potholesOnRoute = activeBuilt.summary.potholeEncounters
+          .map((e) => e.hazard.location)
+          .toList(growable: false);
       _routeDurations = durations;
       _routeDistances = distances;
       _selectedRouteIndex = initialRouteIndex;
       _lastMatchedSegmentIndex = 0;
       _routePoints = initialRoute;
       _destination = destination;
+      _destinationTextDirty = false;
       _isRouting = false;
+      _routeErrorMessage = null;
+      _routeUsingCachedGeometry = fromCache;
       _isSearchVisible = true;
+      _isCompactRouteDrawerExpanded = true;
       _followMode = FollowMode.none;
       _nearestPotholeInfo = 'Clear ahead';
+      _upcomingHazard = null;
+      _recomputeRouteSuggestion();
+      _syncP2pSummaryForRoute(
+        initialRouteIndex,
+        destinationOverride: destination,
+      );
     });
 
     if (fitCamera) _fitCameraToRoute(initialRoute);
-    await _refreshRouteAwarePotholeState();
+    _refreshProximityForActiveContext(initialRouteIndex);
   }
 
   void _fitCameraToRoute(List<LatLng> points) {
@@ -2179,6 +3861,21 @@ class MapScreenState extends State<MapScreen>
 
   void _selectActiveRoute(int index) {
     if (index < 0 || index >= _alternativeRoutes.length) return;
+    final hazards = _buildHazardInputs();
+    final activeBuilt = PrecomputedRouteIndex.build(
+      route: _alternativeRoutes[index],
+      hazards: hazards,
+      routeIndex: index,
+      routeDistanceMeters: index < _routeDistances.length
+          ? _routeDistances[index]
+          : null,
+      durationSeconds: index < _routeDurations.length
+          ? _routeDurations[index]
+          : 0.0,
+      config: _corridorConfig,
+      steps: _toStepRoadSpans(index),
+    );
+
     setState(() {
       _selectedRouteIndex = index;
       _lastMatchedSegmentIndex = 0;
@@ -2188,8 +3885,28 @@ class MapScreenState extends State<MapScreen>
         _routeSteps = _alternativeRouteSteps[index];
       }
       _selectedStepIndex = null;
+      _activeRouteIndex = activeBuilt;
+      if (_navigationTracker == null) {
+        _navigationTracker = NavigationHazardTracker(activeBuilt);
+      } else {
+        _navigationTracker!.replaceRouteIndex(activeBuilt);
+      }
+      _navHazardState = null;
+      if (index < _routePotholeCounts.length) {
+        final nextCounts = List<int>.from(_routePotholeCounts);
+        nextCounts[index] = activeBuilt.summary.distinctPotholeCount;
+        _routePotholeCounts = nextCounts;
+      }
+      _potholesOnRoute = activeBuilt.summary.potholeEncounters
+          .map((e) => e.hazard.location)
+          .toList(growable: false);
+      if (_isSimulatingRoute) {
+        _simulatedChainMeters = 0.0;
+      }
+      _recomputeRouteSuggestion();
+      _syncP2pSummaryForRoute(index);
     });
-    _updatePotholesOnActiveRoute(showToast: true);
+    _refreshProximityForActiveContext(index);
   }
 
   /// Cycles between all available alternative and optimized routes
@@ -2199,145 +3916,712 @@ class MapScreenState extends State<MapScreen>
     _selectActiveRoute(nextIndex);
   }
 
-  Future<void> _updatePotholesOnActiveRoute({bool showToast = false}) async {
-    if (_alternativeRoutes.isEmpty) return;
-    await _ensurePotholeSnapCache();
-
-    final activeRoute = _alternativeRoutes[_selectedRouteIndex];
-    final List<LatLng> onRoute = _roadAlignedPotholeLocations()
-        .where(
-          (p) =>
-              _isPotholeOnRoute(p, activeRoute, _routeWarningToleranceMeters),
-        )
-        .toList();
-
-    if (!mounted) return;
-    setState(() => _potholesOnRoute = onRoute);
-  }
-
   // Pre-indexed Bulacan LGUs & Key Barangays for zero-latency local geocoding
   static const List<Map<String, dynamic>> _bulacanBarangays = [
     // Santa Maria
-    {'name': 'Barangay Poblacion', 'municipality': 'Santa Maria', 'lat': 14.8197, 'lon': 120.9575},
-    {'name': 'Barangay Bagbaguin', 'municipality': 'Santa Maria', 'lat': 14.8083, 'lon': 120.9542},
-    {'name': 'Barangay Caypombo', 'municipality': 'Santa Maria', 'lat': 14.8427, 'lon': 120.9739},
-    {'name': 'Barangay Catmon', 'municipality': 'Santa Maria', 'lat': 14.8315, 'lon': 120.9858},
-    {'name': 'Barangay Guyong', 'municipality': 'Santa Maria', 'lat': 14.8236, 'lon': 120.9712},
-    {'name': 'Barangay Balasing', 'municipality': 'Santa Maria', 'lat': 14.8584, 'lon': 121.0062},
-    {'name': 'Barangay Pulong Buhangin', 'municipality': 'Santa Maria', 'lat': 14.8633, 'lon': 121.0022},
-    {'name': 'Barangay San Gabriel', 'municipality': 'Santa Maria', 'lat': 14.8251, 'lon': 120.9631},
-    {'name': 'Barangay Santa Clara', 'municipality': 'Santa Maria', 'lat': 14.8164, 'lon': 120.9501},
-    {'name': 'Barangay Buenavista', 'municipality': 'Santa Maria', 'lat': 14.8521, 'lon': 120.9934},
-    {'name': 'Barangay Camangyanan', 'municipality': 'Santa Maria', 'lat': 14.8115, 'lon': 120.9412},
-    {'name': 'Barangay Caysio', 'municipality': 'Santa Maria', 'lat': 14.8458, 'lon': 120.9812},
-    {'name': 'Barangay Lalakhan', 'municipality': 'Santa Maria', 'lat': 14.8123, 'lon': 120.9621},
-    {'name': 'Barangay Mag-asawang Sapa', 'municipality': 'Santa Maria', 'lat': 14.8711, 'lon': 121.0189},
-    {'name': 'Barangay Mahabang Parang', 'municipality': 'Santa Maria', 'lat': 14.8654, 'lon': 121.0211},
-    {'name': 'Barangay Manggahan', 'municipality': 'Santa Maria', 'lat': 14.8389, 'lon': 120.9689},
-    {'name': 'Barangay Parada', 'municipality': 'Santa Maria', 'lat': 14.8012, 'lon': 120.9642},
-    {'name': 'Barangay San Jose Patag', 'municipality': 'Santa Maria', 'lat': 14.8091, 'lon': 120.9782},
-    {'name': 'Barangay San Vicente', 'municipality': 'Santa Maria', 'lat': 14.8291, 'lon': 120.9521},
-    {'name': 'Barangay Silangan', 'municipality': 'Santa Maria', 'lat': 14.8412, 'lon': 121.0142},
-    {'name': 'Barangay Tumana', 'municipality': 'Santa Maria', 'lat': 14.8178, 'lon': 120.9712},
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Santa Maria',
+      'lat': 14.8197,
+      'lon': 120.9575,
+    },
+    {
+      'name': 'Barangay Bagbaguin',
+      'municipality': 'Santa Maria',
+      'lat': 14.8083,
+      'lon': 120.9542,
+    },
+    {
+      'name': 'Barangay Caypombo',
+      'municipality': 'Santa Maria',
+      'lat': 14.8427,
+      'lon': 120.9739,
+    },
+    {
+      'name': 'Barangay Catmon',
+      'municipality': 'Santa Maria',
+      'lat': 14.8315,
+      'lon': 120.9858,
+    },
+    {
+      'name': 'Barangay Guyong',
+      'municipality': 'Santa Maria',
+      'lat': 14.8236,
+      'lon': 120.9712,
+    },
+    {
+      'name': 'Barangay Balasing',
+      'municipality': 'Santa Maria',
+      'lat': 14.8584,
+      'lon': 121.0062,
+    },
+    {
+      'name': 'Barangay Pulong Buhangin',
+      'municipality': 'Santa Maria',
+      'lat': 14.8633,
+      'lon': 121.0022,
+    },
+    {
+      'name': 'Barangay San Gabriel',
+      'municipality': 'Santa Maria',
+      'lat': 14.8251,
+      'lon': 120.9631,
+    },
+    {
+      'name': 'Barangay Santa Clara',
+      'municipality': 'Santa Maria',
+      'lat': 14.8164,
+      'lon': 120.9501,
+    },
+    {
+      'name': 'Barangay Buenavista',
+      'municipality': 'Santa Maria',
+      'lat': 14.8521,
+      'lon': 120.9934,
+    },
+    {
+      'name': 'Barangay Camangyanan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8115,
+      'lon': 120.9412,
+    },
+    {
+      'name': 'Barangay Caysio',
+      'municipality': 'Santa Maria',
+      'lat': 14.8458,
+      'lon': 120.9812,
+    },
+    {
+      'name': 'Barangay Lalakhan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8123,
+      'lon': 120.9621,
+    },
+    {
+      'name': 'Barangay Mag-asawang Sapa',
+      'municipality': 'Santa Maria',
+      'lat': 14.8711,
+      'lon': 121.0189,
+    },
+    {
+      'name': 'Barangay Mahabang Parang',
+      'municipality': 'Santa Maria',
+      'lat': 14.8654,
+      'lon': 121.0211,
+    },
+    {
+      'name': 'Barangay Manggahan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8389,
+      'lon': 120.9689,
+    },
+    {
+      'name': 'Barangay Parada',
+      'municipality': 'Santa Maria',
+      'lat': 14.8012,
+      'lon': 120.9642,
+    },
+    {
+      'name': 'Barangay San Jose Patag',
+      'municipality': 'Santa Maria',
+      'lat': 14.8091,
+      'lon': 120.9782,
+    },
+    {
+      'name': 'Barangay San Vicente',
+      'municipality': 'Santa Maria',
+      'lat': 14.8291,
+      'lon': 120.9521,
+    },
+    {
+      'name': 'Barangay Silangan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8412,
+      'lon': 121.0142,
+    },
+    {
+      'name': 'Barangay Tumana',
+      'municipality': 'Santa Maria',
+      'lat': 14.8178,
+      'lon': 120.9712,
+    },
 
     // Malolos City
-    {'name': 'Barangay Guinhawa', 'municipality': 'Malolos', 'lat': 14.8569, 'lon': 120.8167},
-    {'name': 'Barangay Liang', 'municipality': 'Malolos', 'lat': 14.8489, 'lon': 120.8123},
-    {'name': 'Barangay San Agustin', 'municipality': 'Malolos', 'lat': 14.8411, 'lon': 120.8178},
-    {'name': 'Barangay Sumapang Matanda', 'municipality': 'Malolos', 'lat': 14.8612, 'lon': 120.8251},
-    {'name': 'Barangay Cofradia', 'municipality': 'Malolos', 'lat': 14.8689, 'lon': 120.8312},
-    {'name': 'Barangay Bulihan', 'municipality': 'Malolos', 'lat': 14.8512, 'lon': 120.8354},
-    {'name': 'Barangay Caingin', 'municipality': 'Malolos', 'lat': 14.8432, 'lon': 120.8211},
-    {'name': 'Barangay Catmon', 'municipality': 'Malolos', 'lat': 14.8471, 'lon': 120.8192},
-    {'name': 'Barangay Dakila', 'municipality': 'Malolos', 'lat': 14.8589, 'lon': 120.8412},
-    {'name': 'Barangay Ligas', 'municipality': 'Malolos', 'lat': 14.8641, 'lon': 120.8491},
-    {'name': 'Barangay Lugam', 'municipality': 'Malolos', 'lat': 14.8712, 'lon': 120.8211},
-    {'name': 'Barangay Mabolo', 'municipality': 'Malolos', 'lat': 14.8391, 'lon': 120.8291},
-    {'name': 'Barangay Mojon', 'municipality': 'Malolos', 'lat': 14.8621, 'lon': 120.8152},
-    {'name': 'Barangay Panasahan', 'municipality': 'Malolos', 'lat': 14.8281, 'lon': 120.8241},
-    {'name': 'Barangay Santisima Trinidad', 'municipality': 'Malolos', 'lat': 14.8541, 'lon': 120.8212},
-    {'name': 'Barangay Santo Rosario', 'municipality': 'Malolos', 'lat': 14.8439, 'lon': 120.8115},
-    {'name': 'Barangay Tikay', 'municipality': 'Malolos', 'lat': 14.8491, 'lon': 120.8482},
+    {
+      'name': 'Barangay Guinhawa',
+      'municipality': 'Malolos',
+      'lat': 14.8569,
+      'lon': 120.8167,
+    },
+    {
+      'name': 'Barangay Liang',
+      'municipality': 'Malolos',
+      'lat': 14.8489,
+      'lon': 120.8123,
+    },
+    {
+      'name': 'Barangay San Agustin',
+      'municipality': 'Malolos',
+      'lat': 14.8411,
+      'lon': 120.8178,
+    },
+    {
+      'name': 'Barangay Sumapang Matanda',
+      'municipality': 'Malolos',
+      'lat': 14.8612,
+      'lon': 120.8251,
+    },
+    {
+      'name': 'Barangay Cofradia',
+      'municipality': 'Malolos',
+      'lat': 14.8689,
+      'lon': 120.8312,
+    },
+    {
+      'name': 'Barangay Bulihan',
+      'municipality': 'Malolos',
+      'lat': 14.8512,
+      'lon': 120.8354,
+    },
+    {
+      'name': 'Barangay Caingin',
+      'municipality': 'Malolos',
+      'lat': 14.8432,
+      'lon': 120.8211,
+    },
+    {
+      'name': 'Barangay Catmon',
+      'municipality': 'Malolos',
+      'lat': 14.8471,
+      'lon': 120.8192,
+    },
+    {
+      'name': 'Barangay Dakila',
+      'municipality': 'Malolos',
+      'lat': 14.8589,
+      'lon': 120.8412,
+    },
+    {
+      'name': 'Barangay Ligas',
+      'municipality': 'Malolos',
+      'lat': 14.8641,
+      'lon': 120.8491,
+    },
+    {
+      'name': 'Barangay Lugam',
+      'municipality': 'Malolos',
+      'lat': 14.8712,
+      'lon': 120.8211,
+    },
+    {
+      'name': 'Barangay Mabolo',
+      'municipality': 'Malolos',
+      'lat': 14.8391,
+      'lon': 120.8291,
+    },
+    {
+      'name': 'Barangay Mojon',
+      'municipality': 'Malolos',
+      'lat': 14.8621,
+      'lon': 120.8152,
+    },
+    {
+      'name': 'Barangay Panasahan',
+      'municipality': 'Malolos',
+      'lat': 14.8281,
+      'lon': 120.8241,
+    },
+    {
+      'name': 'Barangay Santisima Trinidad',
+      'municipality': 'Malolos',
+      'lat': 14.8541,
+      'lon': 120.8212,
+    },
+    {
+      'name': 'Barangay Santo Rosario',
+      'municipality': 'Malolos',
+      'lat': 14.8439,
+      'lon': 120.8115,
+    },
+    {
+      'name': 'Barangay Tikay',
+      'municipality': 'Malolos',
+      'lat': 14.8491,
+      'lon': 120.8482,
+    },
 
     // City of San Jose del Monte (CSJDM)
-    {'name': 'Barangay Tungkong Mangga', 'municipality': 'San Jose del Monte', 'lat': 14.8021, 'lon': 121.0742},
-    {'name': 'Barangay Muzon', 'municipality': 'San Jose del Monte', 'lat': 14.8062, 'lon': 121.0315},
-    {'name': 'Barangay Gaya-Gaya', 'municipality': 'San Jose del Monte', 'lat': 14.8112, 'lon': 121.0541},
-    {'name': 'Barangay Graceville', 'municipality': 'San Jose del Monte', 'lat': 14.8191, 'lon': 121.0421},
-    {'name': 'Barangay Francisco Homes', 'municipality': 'San Jose del Monte', 'lat': 14.8212, 'lon': 121.0612},
-    {'name': 'Barangay Kaypian', 'municipality': 'San Jose del Monte', 'lat': 14.8312, 'lon': 121.0712},
-    {'name': 'Barangay Minuyan', 'municipality': 'San Jose del Monte', 'lat': 14.8251, 'lon': 121.0821},
-    {'name': 'Barangay Sapang Palay', 'municipality': 'San Jose del Monte', 'lat': 14.8412, 'lon': 121.0651},
-    {'name': 'Barangay Santo Cristo', 'municipality': 'San Jose del Monte', 'lat': 14.8091, 'lon': 121.0851},
+    {
+      'name': 'Barangay Tungkong Mangga',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8021,
+      'lon': 121.0742,
+    },
+    {
+      'name': 'Barangay Muzon',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8062,
+      'lon': 121.0315,
+    },
+    {
+      'name': 'Barangay Gaya-Gaya',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8112,
+      'lon': 121.0541,
+    },
+    {
+      'name': 'Barangay Graceville',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8191,
+      'lon': 121.0421,
+    },
+    {
+      'name': 'Barangay Francisco Homes',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8212,
+      'lon': 121.0612,
+    },
+    {
+      'name': 'Barangay Kaypian',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8312,
+      'lon': 121.0712,
+    },
+    {
+      'name': 'Barangay Minuyan',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8251,
+      'lon': 121.0821,
+    },
+    {
+      'name': 'Barangay Sapang Palay',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8412,
+      'lon': 121.0651,
+    },
+    {
+      'name': 'Barangay Santo Cristo',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.8091,
+      'lon': 121.0851,
+    },
 
     // Meycauayan City
-    {'name': 'Barangay Calvario', 'municipality': 'Meycauayan', 'lat': 14.7391, 'lon': 120.9582},
-    {'name': 'Barangay Camalig', 'municipality': 'Meycauayan', 'lat': 14.7451, 'lon': 120.9821},
-    {'name': 'Barangay Iba', 'municipality': 'Meycauayan', 'lat': 14.7321, 'lon': 120.9841},
-    {'name': 'Barangay Langka', 'municipality': 'Meycauayan', 'lat': 14.7491, 'lon': 120.9912},
-    {'name': 'Barangay Lawa', 'municipality': 'Meycauayan', 'lat': 14.7312, 'lon': 120.9612},
-    {'name': 'Barangay Malhacan', 'municipality': 'Meycauayan', 'lat': 14.7381, 'lon': 120.9712},
-    {'name': 'Barangay Perez', 'municipality': 'Meycauayan', 'lat': 14.7412, 'lon': 120.9951},
-    {'name': 'Barangay Saluysoy', 'municipality': 'Meycauayan', 'lat': 14.7351, 'lon': 120.9521},
+    {
+      'name': 'Barangay Calvario',
+      'municipality': 'Meycauayan',
+      'lat': 14.7391,
+      'lon': 120.9582,
+    },
+    {
+      'name': 'Barangay Camalig',
+      'municipality': 'Meycauayan',
+      'lat': 14.7451,
+      'lon': 120.9821,
+    },
+    {
+      'name': 'Barangay Iba',
+      'municipality': 'Meycauayan',
+      'lat': 14.7321,
+      'lon': 120.9841,
+    },
+    {
+      'name': 'Barangay Langka',
+      'municipality': 'Meycauayan',
+      'lat': 14.7491,
+      'lon': 120.9912,
+    },
+    {
+      'name': 'Barangay Lawa',
+      'municipality': 'Meycauayan',
+      'lat': 14.7312,
+      'lon': 120.9612,
+    },
+    {
+      'name': 'Barangay Malhacan',
+      'municipality': 'Meycauayan',
+      'lat': 14.7381,
+      'lon': 120.9712,
+    },
+    {
+      'name': 'Barangay Perez',
+      'municipality': 'Meycauayan',
+      'lat': 14.7412,
+      'lon': 120.9951,
+    },
+    {
+      'name': 'Barangay Saluysoy',
+      'municipality': 'Meycauayan',
+      'lat': 14.7351,
+      'lon': 120.9521,
+    },
 
     // Marilao
-    {'name': 'Barangay Ibayo', 'municipality': 'Marilao', 'lat': 14.7551, 'lon': 120.9482},
-    {'name': 'Barangay Lambakin', 'municipality': 'Marilao', 'lat': 14.7681, 'lon': 120.9712},
-    {'name': 'Barangay Lias', 'municipality': 'Marilao', 'lat': 14.7612, 'lon': 120.9612},
-    {'name': 'Barangay Loma de Gato', 'municipality': 'Marilao', 'lat': 14.7812, 'lon': 120.9982},
-    {'name': 'Barangay Patubig', 'municipality': 'Marilao', 'lat': 14.7721, 'lon': 120.9551},
-    {'name': 'Barangay Poblacion I', 'municipality': 'Marilao', 'lat': 14.7581, 'lon': 120.9512},
-    {'name': 'Barangay Prenza I', 'municipality': 'Marilao', 'lat': 14.7791, 'lon': 120.9812},
-    {'name': 'Barangay Saog', 'municipality': 'Marilao', 'lat': 14.7641, 'lon': 120.9421},
-    {'name': 'Barangay Tabing Ilog', 'municipality': 'Marilao', 'lat': 14.7512, 'lon': 120.9541},
+    {
+      'name': 'Barangay Ibayo',
+      'municipality': 'Marilao',
+      'lat': 14.7551,
+      'lon': 120.9482,
+    },
+    {
+      'name': 'Barangay Lambakin',
+      'municipality': 'Marilao',
+      'lat': 14.7681,
+      'lon': 120.9712,
+    },
+    {
+      'name': 'Barangay Lias',
+      'municipality': 'Marilao',
+      'lat': 14.7612,
+      'lon': 120.9612,
+    },
+    {
+      'name': 'Barangay Loma de Gato',
+      'municipality': 'Marilao',
+      'lat': 14.7812,
+      'lon': 120.9982,
+    },
+    {
+      'name': 'Barangay Patubig',
+      'municipality': 'Marilao',
+      'lat': 14.7721,
+      'lon': 120.9551,
+    },
+    {
+      'name': 'Barangay Poblacion I',
+      'municipality': 'Marilao',
+      'lat': 14.7581,
+      'lon': 120.9512,
+    },
+    {
+      'name': 'Barangay Prenza I',
+      'municipality': 'Marilao',
+      'lat': 14.7791,
+      'lon': 120.9812,
+    },
+    {
+      'name': 'Barangay Saog',
+      'municipality': 'Marilao',
+      'lat': 14.7641,
+      'lon': 120.9421,
+    },
+    {
+      'name': 'Barangay Tabing Ilog',
+      'municipality': 'Marilao',
+      'lat': 14.7512,
+      'lon': 120.9541,
+    },
 
     // Bocaue
-    {'name': 'Barangay Bagumbayan', 'municipality': 'Bocaue', 'lat': 14.7981, 'lon': 120.9291},
-    {'name': 'Barangay Bambang', 'municipality': 'Bocaue', 'lat': 14.7921, 'lon': 120.9312},
-    {'name': 'Barangay Batia', 'municipality': 'Bocaue', 'lat': 14.8151, 'lon': 120.9182},
-    {'name': 'Barangay Bundukan', 'municipality': 'Bocaue', 'lat': 14.8021, 'lon': 120.9451},
-    {'name': 'Barangay Lolomboy', 'municipality': 'Bocaue', 'lat': 14.7881, 'lon': 120.9412},
-    {'name': 'Barangay Poblacion', 'municipality': 'Bocaue', 'lat': 14.7991, 'lon': 120.9341},
-    {'name': 'Barangay Taal', 'municipality': 'Bocaue', 'lat': 14.8112, 'lon': 120.9381},
-    {'name': 'Barangay Turo', 'municipality': 'Bocaue', 'lat': 14.8051, 'lon': 120.9281},
+    {
+      'name': 'Barangay Bagumbayan',
+      'municipality': 'Bocaue',
+      'lat': 14.7981,
+      'lon': 120.9291,
+    },
+    {
+      'name': 'Barangay Bambang',
+      'municipality': 'Bocaue',
+      'lat': 14.7921,
+      'lon': 120.9312,
+    },
+    {
+      'name': 'Barangay Batia',
+      'municipality': 'Bocaue',
+      'lat': 14.8151,
+      'lon': 120.9182,
+    },
+    {
+      'name': 'Barangay Bundukan',
+      'municipality': 'Bocaue',
+      'lat': 14.8021,
+      'lon': 120.9451,
+    },
+    {
+      'name': 'Barangay Lolomboy',
+      'municipality': 'Bocaue',
+      'lat': 14.7881,
+      'lon': 120.9412,
+    },
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Bocaue',
+      'lat': 14.7991,
+      'lon': 120.9341,
+    },
+    {
+      'name': 'Barangay Taal',
+      'municipality': 'Bocaue',
+      'lat': 14.8112,
+      'lon': 120.9381,
+    },
+    {
+      'name': 'Barangay Turo',
+      'municipality': 'Bocaue',
+      'lat': 14.8051,
+      'lon': 120.9281,
+    },
 
     // Guiguinto & Balagtas
-    {'name': 'Barangay Tuktukan', 'municipality': 'Guiguinto', 'lat': 14.8321, 'lon': 120.8812},
-    {'name': 'Barangay Tabang', 'municipality': 'Guiguinto', 'lat': 14.8412, 'lon': 120.8712},
-    {'name': 'Barangay Santa Rita', 'municipality': 'Guiguinto', 'lat': 14.8351, 'lon': 120.8912},
-    {'name': 'Barangay Wawa', 'municipality': 'Balagtas', 'lat': 14.8191, 'lon': 120.9082},
-    {'name': 'Barangay Borol 1st', 'municipality': 'Balagtas', 'lat': 14.8112, 'lon': 120.9141},
-    {'name': 'Barangay Santol', 'municipality': 'Balagtas', 'lat': 14.8251, 'lon': 120.9121},
+    {
+      'name': 'Barangay Tuktukan',
+      'municipality': 'Guiguinto',
+      'lat': 14.8321,
+      'lon': 120.8812,
+    },
+    {
+      'name': 'Barangay Tabang',
+      'municipality': 'Guiguinto',
+      'lat': 14.8412,
+      'lon': 120.8712,
+    },
+    {
+      'name': 'Barangay Santa Rita',
+      'municipality': 'Guiguinto',
+      'lat': 14.8351,
+      'lon': 120.8912,
+    },
+    {
+      'name': 'Barangay Wawa',
+      'municipality': 'Balagtas',
+      'lat': 14.8191,
+      'lon': 120.9082,
+    },
+    {
+      'name': 'Barangay Borol 1st',
+      'municipality': 'Balagtas',
+      'lat': 14.8112,
+      'lon': 120.9141,
+    },
+    {
+      'name': 'Barangay Santol',
+      'municipality': 'Balagtas',
+      'lat': 14.8251,
+      'lon': 120.9121,
+    },
 
     // Baliuag & Plaridel
-    {'name': 'Barangay Poblacion', 'municipality': 'Baliuag', 'lat': 14.9541, 'lon': 120.9012},
-    {'name': 'Barangay Subic', 'municipality': 'Baliuag', 'lat': 14.9612, 'lon': 120.8951},
-    {'name': 'Barangay Bagong Nayon', 'municipality': 'Baliuag', 'lat': 14.9481, 'lon': 120.9051},
-    {'name': 'Barangay Banga 1st', 'municipality': 'Plaridel', 'lat': 14.8871, 'lon': 120.8582},
-    {'name': 'Barangay Poblacion', 'municipality': 'Plaridel', 'lat': 14.8891, 'lon': 120.8612},
-    {'name': 'Barangay Dampol', 'municipality': 'Plaridel', 'lat': 14.9012, 'lon': 120.8451},
-    {'name': 'Barangay Tabang', 'municipality': 'Plaridel', 'lat': 14.8781, 'lon': 120.8691},
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Baliuag',
+      'lat': 14.9541,
+      'lon': 120.9012,
+    },
+    {
+      'name': 'Barangay Subic',
+      'municipality': 'Baliuag',
+      'lat': 14.9612,
+      'lon': 120.8951,
+    },
+    {
+      'name': 'Barangay Bagong Nayon',
+      'municipality': 'Baliuag',
+      'lat': 14.9481,
+      'lon': 120.9051,
+    },
+    {
+      'name': 'Barangay Banga 1st',
+      'municipality': 'Plaridel',
+      'lat': 14.8871,
+      'lon': 120.8582,
+    },
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Plaridel',
+      'lat': 14.8891,
+      'lon': 120.8612,
+    },
+    {
+      'name': 'Barangay Dampol',
+      'municipality': 'Plaridel',
+      'lat': 14.9012,
+      'lon': 120.8451,
+    },
+    {
+      'name': 'Barangay Tabang',
+      'municipality': 'Plaridel',
+      'lat': 14.8781,
+      'lon': 120.8691,
+    },
 
     // Pandi & Norzagaray
-    {'name': 'Barangay Poblacion', 'municipality': 'Pandi', 'lat': 14.8681, 'lon': 120.9572},
-    {'name': 'Barangay Bunsuran 1st', 'municipality': 'Pandi', 'lat': 14.8812, 'lon': 120.9481},
-    {'name': 'Barangay Masuso', 'municipality': 'Pandi', 'lat': 14.8721, 'lon': 120.9712},
-    {'name': 'Barangay Poblacion', 'municipality': 'Norzagaray', 'lat': 14.9121, 'lon': 121.0421},
-    {'name': 'Barangay Bigte', 'municipality': 'Norzagaray', 'lat': 14.8951, 'lon': 121.0612},
-    {'name': 'Barangay Minuyan', 'municipality': 'Norzagaray', 'lat': 14.9041, 'lon': 121.0741},
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Pandi',
+      'lat': 14.8681,
+      'lon': 120.9572,
+    },
+    {
+      'name': 'Barangay Bunsuran 1st',
+      'municipality': 'Pandi',
+      'lat': 14.8812,
+      'lon': 120.9481,
+    },
+    {
+      'name': 'Barangay Masuso',
+      'municipality': 'Pandi',
+      'lat': 14.8721,
+      'lon': 120.9712,
+    },
+    {
+      'name': 'Barangay Poblacion',
+      'municipality': 'Norzagaray',
+      'lat': 14.9121,
+      'lon': 121.0421,
+    },
+    {
+      'name': 'Barangay Bigte',
+      'municipality': 'Norzagaray',
+      'lat': 14.8951,
+      'lon': 121.0612,
+    },
+    {
+      'name': 'Barangay Minuyan',
+      'municipality': 'Norzagaray',
+      'lat': 14.9041,
+      'lon': 121.0741,
+    },
   ];
 
-  /// Instant local search matcher for Philippine & Bulacan Barangays
+  static const List<Map<String, dynamic>> _bulacanLandmarks = [
+    {
+      'name': 'Immaculate Conception I-College',
+      'aliases': [
+        'immaculate conception',
+        'ici college',
+        'ici',
+        'icat',
+        'immaculate conception academy',
+        'bonifacio',
+      ],
+      'address': 'Bonifacio Street, Poblacion, Santa Maria, Bulacan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8177,
+      'lon': 120.9622,
+    },
+    {
+      'name': 'Santa Maria Municipal Hall - Bulacan',
+      'aliases': [
+        'santa maria municipal hall',
+        'munisipyo',
+        'sta maria town hall',
+        'sta. maria municipal hall',
+        'santa maria municipal',
+      ],
+      'address': 'C. de Guzman Street, Poblacion, Santa Maria, Bulacan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8193,
+      'lon': 120.9604,
+    },
+    {
+      'name': 'Municipal Hall Drive',
+      'aliases': ['municipal hall drive', 'municipal grounds', 'hall drive'],
+      'address': 'Poblacion, Santa Maria, Bulacan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8191,
+      'lon': 120.9605,
+    },
+    {
+      'name': 'N-la Cellphone Accessories & General Merchandise',
+      'aliases': [
+        'n-la cellphone',
+        'nla cellphone',
+        'n-la',
+        'nla',
+        'bagbaguin',
+      ],
+      'address':
+          'Governor Fortunato Halili Avenue, Bagbaguin, Santa Maria, Bulacan',
+      'municipality': 'Santa Maria',
+      'lat': 14.8115,
+      'lon': 120.9520,
+    },
+    {
+      'name': 'Gracia Motorcycle Shop and Supplies',
+      'aliases': [
+        'gracia motorcycle',
+        'gracia shop',
+        'gracia motor',
+        'gracia',
+        'gumaoc',
+      ],
+      'address': 'Quirino Highway, Gumaoc East, San Jose del Monte, Bulacan',
+      'municipality': 'San Jose del Monte',
+      'lat': 14.7991,
+      'lon': 121.0689,
+    },
+    {
+      'name': 'Real de Cacarong',
+      'aliases': [
+        'real de cacarong',
+        'kakarong de sili',
+        'inang filipina shrine',
+        'cacarong',
+        'cacarong matanda',
+      ],
+      'address': 'Barangay Cacarong Matanda, Pandi, Bulacan',
+      'municipality': 'Pandi',
+      'lat': 14.9042,
+      'lon': 120.9677,
+    },
+  ];
+
+  /// Instant local search matcher for Philippine & Bulacan Barangays and Key Landmarks
   List<Map<String, dynamic>> _fetchLocalBarangayCandidates(String query) {
     final clean = query
         .toLowerCase()
-        .replaceAll(RegExp(r'\b(barangay|brgy\.?|bgy\.?)\b', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'\b(barangay|brgy\.?|bgy\.?)\b', caseSensitive: false),
+          '',
+        )
         .trim();
     if (clean.length < 2) return [];
 
     final refPos = _currentPosition ?? _bulacanCenter;
     final List<Map<String, dynamic>> matches = [];
 
+    // 1. Search Known Landmarks first for highest accuracy
+    for (final l in _bulacanLandmarks) {
+      final name = l['name'] as String;
+      final addr = l['address'] as String;
+      final lat = (l['lat'] as num).toDouble();
+      final lon = (l['lon'] as num).toDouble();
+      final aliases = l['aliases'] as List<String>;
+      final nameClean = name.toLowerCase();
+
+      final loc = LatLng(lat, lon);
+      final dist = _calculateDistanceKm(refPos, loc);
+
+      double score = 0.0;
+      if (nameClean == clean || aliases.any((a) => a == clean)) {
+        score = 260.0;
+      } else if (nameClean.startsWith(clean) ||
+          aliases.any((a) => a.startsWith(clean))) {
+        score = 230.0;
+      } else if (nameClean.contains(clean) ||
+          aliases.any((a) => a.contains(clean))) {
+        score = 200.0;
+      }
+
+      if (score > 0) {
+        if (dist != double.infinity) {
+          score += (1.0 / (dist + 1.0)) * 50.0;
+        }
+        matches.add({
+          'lat': lat.toString(),
+          'lon': lon.toString(),
+          '_name': name,
+          '_short_addr': addr,
+          'display_name': '$name, $addr',
+          '_distance_km': dist,
+          '_score': score,
+          '_is_landmark': true,
+          '_source': 'Bulacan Landmark Registry',
+        });
+      }
+    }
+
+    // 2. Search Barangays
     for (final b in _bulacanBarangays) {
       final name = b['name'] as String;
       final mun = b['municipality'] as String;
@@ -2379,6 +4663,45 @@ class MapScreenState extends State<MapScreen>
       }
     }
 
+    // Ensure every one of the 24 official Santa Maria barangays is discoverable
+    // locally even when its coordinates resolve dynamically via geocoding.
+    final cleanNorm = clean.replaceAll('barangay ', '').trim();
+    if (cleanNorm.isNotEmpty) {
+      for (final entry in santaMariaBarangayCatalog) {
+        final alreadyMatched = matches.any(
+          (m) =>
+              WebReportQueryEngine.normalizeSearchText(
+                (m['_name'] ?? '').toString(),
+              ) ==
+              entry.key,
+        );
+        if (alreadyMatched) continue;
+        final double score;
+        if (entry.key == cleanNorm) {
+          score = 195.0;
+        } else if (entry.key.startsWith(cleanNorm)) {
+          score = 155.0;
+        } else if (entry.key.contains(cleanNorm) ||
+            'santa maria ${entry.key}'.contains(cleanNorm)) {
+          score = 125.0;
+        } else {
+          continue;
+        }
+        matches.add({
+          if (entry.hasCoordinates) 'lat': entry.lat!.toString(),
+          if (entry.hasCoordinates) 'lon': entry.lon!.toString(),
+          '_name': 'Barangay ${entry.name}',
+          '_short_addr': 'Santa Maria, Bulacan',
+          'display_name': entry.fullLabel,
+          '_distance_km': double.infinity,
+          '_score': score,
+          '_is_barangay': true,
+          '_needs_geocode': !entry.hasCoordinates,
+          '_source': 'Official Santa Maria Directory',
+        });
+      }
+    }
+
     matches.sort(
       (a, b) => (b['_score'] as double).compareTo(a['_score'] as double),
     );
@@ -2416,7 +4739,10 @@ class MapScreenState extends State<MapScreen>
     );
 
     // Popular local search aliases
-    final lower = normalized.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    final lower = normalized
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     if (lower == 'sjdm' || lower == 'csjdm' || lower == 'sjdm bulacan') {
       normalized = 'San Jose del Monte Bulacan';
     } else if (lower.contains('sm sta maria') ||
@@ -2452,7 +4778,6 @@ class MapScreenState extends State<MapScreen>
   static const String _geoapifyApiKey = String.fromEnvironment(
     'GEOAPIFY_API_KEY',
   );
-  static const String _locationIqApiKey = 'pk.558af026585218dd26639ce26f14feeb';
 
   // Bulacan Province Center & Coordinates
   static const LatLng _bulacanCenter = LatLng(
@@ -2581,7 +4906,7 @@ class MapScreenState extends State<MapScreen>
       });
 
       final res = await http
-          .get(url, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(url, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
 
       if (res.statusCode != 200) return [];
@@ -2679,13 +5004,14 @@ class MapScreenState extends State<MapScreen>
         'format': 'json',
         'addressdetails': '1',
         'countrycodes': 'ph',
-        'viewbox': '120.55,15.25,121.35,14.65', // Bias results toward Bulacan & Central Luzon
+        'viewbox':
+            '120.55,15.25,121.35,14.65', // Bias results toward Bulacan & Central Luzon
         'bounded': '0',
         'limit': '10',
       });
 
       final res = await http
-          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+          .get(url, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
 
       if (res.statusCode != 200) return [];
@@ -2702,14 +5028,15 @@ class MapScreenState extends State<MapScreen>
         final addr = (item['address'] as Map<String, dynamic>?) ?? {};
 
         // Extract Philippine Barangay
-        String rawBrgy = (addr['suburb'] ??
-                addr['village'] ??
-                addr['quarter'] ??
-                addr['neighbourhood'] ??
-                addr['city_district'] ??
-                '')
-            .toString()
-            .trim();
+        String rawBrgy =
+            (addr['suburb'] ??
+                    addr['village'] ??
+                    addr['quarter'] ??
+                    addr['neighbourhood'] ??
+                    addr['city_district'] ??
+                    '')
+                .toString()
+                .trim();
         String brgy = '';
         if (rawBrgy.isNotEmpty) {
           final lower = rawBrgy.toLowerCase();
@@ -2722,27 +5049,29 @@ class MapScreenState extends State<MapScreen>
           }
         }
 
-        String city = (addr['city'] ??
-                addr['town'] ??
-                addr['municipality'] ??
-                addr['county'] ??
-                '')
+        String city =
+            (addr['city'] ??
+                    addr['town'] ??
+                    addr['municipality'] ??
+                    addr['county'] ??
+                    '')
+                .toString()
+                .trim();
+        String province = (addr['state'] ?? addr['province'] ?? '')
             .toString()
             .trim();
-        String province =
-            (addr['state'] ?? addr['province'] ?? '').toString().trim();
 
         final type = (item['type'] ?? item['addresstype'] ?? '')
             .toString()
             .toLowerCase();
-        final bool isBarangay = type == 'suburb' ||
+        final bool isBarangay =
+            type == 'suburb' ||
             type == 'village' ||
             type == 'quarter' ||
             (rawBrgy.isNotEmpty &&
-                (item['name'] ?? '')
-                    .toString()
-                    .toLowerCase()
-                    .contains(rawBrgy.toLowerCase()));
+                (item['name'] ?? '').toString().toLowerCase().contains(
+                  rawBrgy.toLowerCase(),
+                ));
 
         String name = (item['name'] ?? displayName.split(',').first)
             .toString()
@@ -2757,8 +5086,9 @@ class MapScreenState extends State<MapScreen>
         if (city.isNotEmpty) subParts.add(city);
         if (province.isNotEmpty && province != city) subParts.add(province);
 
-        final String shortAddr =
-            subParts.isNotEmpty ? subParts.join(', ') : displayName;
+        final String shortAddr = subParts.isNotEmpty
+            ? subParts.join(', ')
+            : displayName;
         final double distanceKm = _calculateDistanceKm(refPos, candidateLoc);
 
         double score = 0.0;
@@ -2804,13 +5134,19 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
-  Future<void> _fetchSuggestions(String query) async {
+  Future<void> _fetchSuggestions(String query, int revision) async {
     try {
       final top5 = await _combinedSuggestions(_normalizeQuery(query));
-      if (mounted) {
-        setState(() => _suggestions = top5);
+      if (mounted && revision == _searchRevision) {
+        setState(() {
+          _suggestions = top5;
+          _isSearchingPlaces = false;
+        });
       }
     } catch (e) {
+      if (mounted && revision == _searchRevision) {
+        setState(() => _isSearchingPlaces = false);
+      }
       print("Multi-Source Autocomplete Error: $e");
     }
   }
@@ -2834,14 +5170,18 @@ class MapScreenState extends State<MapScreen>
       allCandidates.addAll(list);
     }
 
-    // Deduplicate results by place name or coordinates
+    // Deduplicate results by place name or coordinates. The hardcoded LGU
+    // registry coordinates are approximate (~500m off), so when a network
+    // geocoder reports the same place, adopt its precise coordinates instead.
     final List<Map<String, dynamic>> merged = [];
     for (final candidate in allCandidates) {
       final candName = (candidate['_name'] ?? '').toString().toLowerCase();
       final candLat = double.tryParse(candidate['lat'].toString()) ?? 0;
       final candLon = double.tryParse(candidate['lon'].toString()) ?? 0;
 
-      final isDuplicate = merged.any((existing) {
+      int dupIndex = -1;
+      for (int k = 0; k < merged.length; k++) {
+        final existing = merged[k];
         final exName = (existing['_name'] ?? '').toString().toLowerCase();
         final exLat = double.tryParse(existing['lat'].toString()) ?? 0;
         final exLon = double.tryParse(existing['lon'].toString()) ?? 0;
@@ -2853,11 +5193,32 @@ class MapScreenState extends State<MapScreen>
                 candName.contains(exName) ||
                 exName.contains(candName));
         final distDiff = (candLat - exLat).abs() + (candLon - exLon).abs();
-        return (nameMatch && distDiff < 0.08) || distDiff < 0.0005;
-      });
+        if ((nameMatch && distDiff < 0.08) || distDiff < 0.0005) {
+          dupIndex = k;
+          break;
+        }
+      }
 
-      if (!isDuplicate) {
+      if (dupIndex == -1) {
         merged.add(candidate);
+        continue;
+      }
+
+      // Network geocoders report more precise coordinates than the hardcoded
+      // registry — upgrade the merged entry when the precise source arrives.
+      final dupSource = (candidate['_source'] ?? '').toString().toLowerCase();
+      final exSource = (merged[dupIndex]['_source'] ?? '')
+          .toString()
+          .toLowerCase();
+      final bool candIsNetwork = dupSource != 'bulacan lgu registry';
+      final bool mergedIsRegistry = exSource == 'bulacan lgu registry';
+      if (candIsNetwork && mergedIsRegistry) {
+        merged[dupIndex] = candidate;
+      } else {
+        final mergedScore =
+            (merged[dupIndex]['_score'] as num?)?.toDouble() ?? 0.0;
+        final candScore = (candidate['_score'] as num?)?.toDouble() ?? 0.0;
+        if (candScore > mergedScore) merged[dupIndex] = candidate;
       }
     }
 
@@ -2866,7 +5227,7 @@ class MapScreenState extends State<MapScreen>
       (a, b) => (b['_score'] as double).compareTo(a['_score'] as double),
     );
 
-    return merged.take(5).toList();
+    return merged.take(8).toList();
   }
 
   void _swapOriginDestination() {
@@ -2886,6 +5247,11 @@ class MapScreenState extends State<MapScreen>
       _destination = _currentPosition;
     }
 
+    // Texts and locations swapped together; any pending typed-change from
+    // before the swap is now obsolete.
+    _originTextDirty = false;
+    _destinationTextDirty = false;
+
     setState(() {});
     if (_originController.text.isNotEmpty &&
         _searchController.text.isNotEmpty) {
@@ -2894,6 +5260,8 @@ class MapScreenState extends State<MapScreen>
   }
 
   void _selectSuggestion(dynamic suggestion) {
+    _searchRevision++;
+    _debounceTimer?.cancel();
     final lat = double.parse(suggestion['lat'].toString());
     final lon = double.parse(suggestion['lon'].toString());
     final name =
@@ -2910,6 +5278,7 @@ class MapScreenState extends State<MapScreen>
           _originController.text = name;
           _customOrigin = selectedLoc;
           _suggestions = [];
+          _originTextDirty = false;
         });
         _originFocusNode.unfocus();
         final dest =
@@ -2925,41 +5294,65 @@ class MapScreenState extends State<MapScreen>
           _searchController.text = name;
           _destination = selectedLoc;
           _suggestions = [];
+          _destinationTextDirty = false;
         });
         _destinationFocusNode.unfocus();
+        _showPointToPointPill(
+          point: selectedLoc,
+          name: name,
+          address: shortAddr.isNotEmpty
+              ? shortAddr
+              : (suggestion['display_name'] ?? '').toString(),
+        );
+        if (_originController.text.trim().isEmpty) {
+          _originController.text = 'Your location';
+          _customOrigin = null;
+        }
         final start =
             (_originController.text == 'Your location' || _customOrigin == null)
-            ? _currentPosition
+            ? (_currentPosition ?? _bulacanCenter)
             : _customOrigin;
         _calculateRoute(selectedLoc, customOrigin: start);
       }
     } else {
-      // Direct Point A to Point B Routing on Suggestion Click
+      final addressText = shortAddr.isNotEmpty
+          ? shortAddr
+          : (suggestion['display_name'] ?? '').toString();
+      final double distMeters = Geolocator.distanceBetween(
+        (_currentPosition ?? _bulacanCenter).latitude,
+        (_currentPosition ?? _bulacanCenter).longitude,
+        lat,
+        lon,
+      );
+      _stopRouteSimulation();
       setState(() {
-        _isRoutePlanningMode = true;
+        _isRoutePlanningMode = false;
         _isEditingOrigin = false;
         _searchController.text = name;
-        _destination = selectedLoc;
-        _originController.text = 'Your location';
-        _customOrigin = null;
         _suggestions = [];
         _isSearchHistoryOpen = false;
         _selectedPothole = null;
-        _searchedPlace = null;
+        _appliedInitialReportId = null;
+        _isSearchingPlaces = false;
+        _resetRoutePlannerState();
+        _isP2pPillVisible = false;
+        _searchedPlace = {
+          'name': name,
+          'address': addressText,
+          'location': selectedLoc,
+          'distanceKm': distMeters / 1000.0,
+          'category': suggestion['_is_barangay'] == true
+              ? 'BARANGAY / LGU'
+              : 'PLACE / ADDRESS',
+        };
       });
-
+      widget.onSelectedReportChanged?.call(null);
       _searchFocusNode.unfocus();
-
-      _addToSearchHistory(
-        name: name,
-        address: shortAddr.isNotEmpty
-            ? shortAddr
-            : (suggestion['display_name'] ?? '').toString(),
-        lat: lat,
-        lon: lon,
+      _addToSearchHistory(name: name, address: addressText, lat: lat, lon: lon);
+      _animatedMapMove(
+        selectedLoc,
+        suggestion['_is_barangay'] == true ? 15.2 : 16.5,
       );
-
-      _calculateRoute(selectedLoc, customOrigin: _currentPosition);
     }
   }
 
@@ -3010,7 +5403,7 @@ class MapScreenState extends State<MapScreen>
         'addressdetails': '1',
       });
       final res = await http
-          .get(url, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+          .get(url, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -3020,22 +5413,23 @@ class MapScreenState extends State<MapScreen>
         String road = addr['house_number'] != null
             ? '${addr['house_number']} ${addr['road'] ?? ''}'.trim()
             : (addr['road'] ??
-                    addr['pedestrian'] ??
-                    addr['amenity'] ??
-                    addr['building'] ??
+                      addr['pedestrian'] ??
+                      addr['amenity'] ??
+                      addr['building'] ??
+                      '')
+                  .toString()
+                  .trim();
+
+        // 2. Philippine Barangay (Suburb, Village, Quarter, Neighbourhood, District)
+        String rawBrgy =
+            (addr['suburb'] ??
+                    addr['village'] ??
+                    addr['quarter'] ??
+                    addr['neighbourhood'] ??
+                    addr['city_district'] ??
                     '')
                 .toString()
                 .trim();
-
-        // 2. Philippine Barangay (Suburb, Village, Quarter, Neighbourhood, District)
-        String rawBrgy = (addr['suburb'] ??
-                addr['village'] ??
-                addr['quarter'] ??
-                addr['neighbourhood'] ??
-                addr['city_district'] ??
-                '')
-            .toString()
-            .trim();
         String brgy = '';
         if (rawBrgy.isNotEmpty) {
           final lower = rawBrgy.toLowerCase();
@@ -3049,17 +5443,19 @@ class MapScreenState extends State<MapScreen>
         }
 
         // 3. City / Municipality
-        String city = (addr['city'] ??
-                addr['town'] ??
-                addr['municipality'] ??
-                addr['county'] ??
-                '')
-            .toString()
-            .trim();
+        String city =
+            (addr['city'] ??
+                    addr['town'] ??
+                    addr['municipality'] ??
+                    addr['county'] ??
+                    '')
+                .toString()
+                .trim();
 
         // 4. Province
-        String province =
-            (addr['province'] ?? addr['state'] ?? 'Bulacan').toString().trim();
+        String province = (addr['province'] ?? addr['state'] ?? 'Bulacan')
+            .toString()
+            .trim();
 
         // Structured Philippine Address Format
         String primary = '';
@@ -3125,27 +5521,39 @@ class MapScreenState extends State<MapScreen>
   Future<LatLng?> _geocodeQueryUncached(String text) async {
     final normalized = _normalizeQuery(text);
 
-    // 0. Instant Check: Local Bulacan Barangay Registry (<1ms)
-    final localMatches = _fetchLocalBarangayCandidates(normalized);
-    if (localMatches.isNotEmpty) {
-      final best = localMatches.first;
-      final lat = double.tryParse(best['lat'].toString());
-      final lon = double.tryParse(best['lon'].toString());
-      if (lat != null && lon != null) return LatLng(lat, lon);
+    // Direct numeric coordinate check: "lat, lng" or "lat, lon"
+    final coordMatch = RegExp(
+      r'^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$',
+    ).firstMatch(normalized);
+    if (coordMatch != null) {
+      final lat = double.tryParse(coordMatch.group(1) ?? '');
+      final lon = double.tryParse(coordMatch.group(2) ?? '');
+      if (lat != null &&
+          lon != null &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180) {
+        return LatLng(lat, lon);
+      }
     }
 
-    // 1. Primary: OSM Nominatim Geocoding API with Bulacan viewbox bias
+    final refPos = _currentPosition ?? _bulacanCenter;
+    final viewbox =
+        '${refPos.longitude - 0.75},${refPos.latitude + 0.75},${refPos.longitude + 0.75},${refPos.latitude - 0.75}';
+
+    // 1. Primary: OSM Nominatim Geocoding API with viewport bias
     try {
       final nomUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
         'q': normalized,
         'format': 'json',
         'limit': '1',
         'countrycodes': 'ph',
-        'viewbox': '120.55,15.25,121.35,14.65',
+        'viewbox': viewbox,
         'bounded': '0',
       });
       final nomRes = await http
-          .get(nomUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+          .get(nomUrl, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
       if (nomRes.statusCode == 200) {
         final List data = jsonDecode(nomRes.body) as List;
@@ -3159,18 +5567,18 @@ class MapScreenState extends State<MapScreen>
       print('OSM Nominatim Geocode Error: $e');
     }
 
-    // 1b. Fallback: Query with Province & Country Context if not specified
-    if (!normalized.toLowerCase().contains('bulacan') &&
-        !normalized.toLowerCase().contains('philippines')) {
+    // 1b. Fallback: Query with country context if not specified
+    if (!normalized.toLowerCase().contains('philippines')) {
       try {
-        final fallbackUrl = Uri.https('nominatim.openstreetmap.org', '/search', {
-          'q': '$normalized, Bulacan, Philippines',
-          'format': 'json',
-          'limit': '1',
-          'countrycodes': 'ph',
-        });
+        final fallbackUrl =
+            Uri.https('nominatim.openstreetmap.org', '/search', {
+              'q': '$normalized, Philippines',
+              'format': 'json',
+              'limit': '1',
+              'countrycodes': 'ph',
+            });
         final fallbackRes = await http
-            .get(fallbackUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+            .get(fallbackUrl, headers: _safeHeaders())
             .timeout(const Duration(seconds: 4));
         if (fallbackRes.statusCode == 200) {
           final List data = jsonDecode(fallbackRes.body) as List;
@@ -3183,29 +5591,35 @@ class MapScreenState extends State<MapScreen>
       } catch (_) {}
     }
 
-    // 2. Secondary: Photon OSM Geocoding API
+    // 2. Secondary: Photon OSM Geocoding API (filtered for Philippines)
     try {
-      final refPos = _currentPosition ?? _bulacanCenter;
       final photUrl = Uri.https('photon.komoot.io', '/api/', {
         'q': normalized,
         'lat': refPos.latitude.toString(),
         'lon': refPos.longitude.toString(),
-        'limit': '1',
+        'limit': '5',
       });
       final photRes = await http
-          .get(photUrl, headers: {'User-Agent': 'RoadSense-GIS/1.0'})
+          .get(photUrl, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
       if (photRes.statusCode == 200) {
         final payload = jsonDecode(photRes.body) as Map<String, dynamic>;
         final features = (payload['features'] as List?) ?? [];
-        if (features.isNotEmpty) {
-          final geometry =
-              (features.first['geometry'] as Map<String, dynamic>?) ?? {};
+        for (final item in features) {
+          final props = (item['properties'] as Map<String, dynamic>?) ?? {};
+          final country = (props['country'] ?? props['countrycode'] ?? '')
+              .toString()
+              .toLowerCase();
+          if (country.isNotEmpty &&
+              country != 'philippines' &&
+              country != 'ph') {
+            continue;
+          }
+          final geometry = (item['geometry'] as Map<String, dynamic>?) ?? {};
           final coords = (geometry['coordinates'] as List?) ?? [0, 0];
-          return LatLng(
-            ((coords.length > 1 ? coords[1] : 0) as num).toDouble(),
-            ((coords.isNotEmpty ? coords[0] : 0) as num).toDouble(),
-          );
+          final lat = ((coords.length > 1 ? coords[1] : 0) as num).toDouble();
+          final lon = ((coords.isNotEmpty ? coords[0] : 0) as num).toDouble();
+          if (lat != 0 && lon != 0) return LatLng(lat, lon);
         }
       }
     } catch (e) {
@@ -3230,7 +5644,7 @@ class MapScreenState extends State<MapScreen>
         queryParams,
       );
       final geoRes = await http
-          .get(geoUrl, headers: {'User-Agent': 'PotholeScannerApp/1.0'})
+          .get(geoUrl, headers: _safeHeaders())
           .timeout(const Duration(seconds: 4));
       if (geoRes.statusCode == 200) {
         final payload = jsonDecode(geoRes.body) as Map<String, dynamic>;
@@ -3247,6 +5661,18 @@ class MapScreenState extends State<MapScreen>
       }
     } catch (e) {
       print('ORS Geocoding error for "$text": $e');
+    }
+
+    // 4. Last Fallback: Local Bulacan Barangay Registry (high confidence exact matches only)
+    final localMatches = _fetchLocalBarangayCandidates(normalized);
+    if (localMatches.isNotEmpty) {
+      final best = localMatches.first;
+      final bestScore = (best['_score'] as num?)?.toDouble() ?? 0.0;
+      if (bestScore >= 200.0) {
+        final lat = double.tryParse(best['lat'].toString());
+        final lon = double.tryParse(best['lon'].toString());
+        if (lat != null && lon != null) return LatLng(lat, lon);
+      }
     }
 
     return null;
@@ -3335,32 +5761,46 @@ class MapScreenState extends State<MapScreen>
     if (start == null) {
       if (_originController.text == 'Your location' ||
           _originController.text.trim().isEmpty) {
-        start = _currentPosition;
+        if (_currentPosition == null) {
+          await _determinePosition(requestPermission: true);
+        }
+        start = _currentPosition ?? _bulacanCenter;
       } else {
         start = await _geocodeQuery(_originController.text);
         if (start != null) {
           _customOrigin = start;
         } else {
-          start = _currentPosition;
+          start = _currentPosition ?? _bulacanCenter;
         }
       }
     }
-
-    if (start == null) return;
+    final int seq = ++_routingRequestSeq;
     if (!silent) {
+      _stopRouteSimulation();
       setState(() {
         _isRouting = true;
-        _alternativeRoutes = [];
-        _routePotholeCounts = [];
-        _routeSteps = [];
-        _alternativeRouteSteps = [];
+        _routeErrorMessage = null;
+        _hasEvaluatedFewerPotholes = false;
       });
+    } else {
+      // Dynamic recalculation: keep existing route polylines rendered seamlessly
+      if (!_isRouting && mounted) {
+        setState(() {
+          _isRouting = true;
+          _routeErrorMessage = null;
+          _rubberBandActiveRoute(newStart: start, newEnd: destination);
+        });
+      } else {
+        _rubberBandActiveRoute(newStart: start, newEnd: destination);
+      }
     }
 
     List<List<LatLng>> routes = [];
     List<double> durations = [];
     List<double> distances = [];
     List<List<RouteStep>> stepsByRoute = [];
+    bool loadedFromCache = false;
+    _lastRoutingEngineCode = '';
 
     // 1. Primary: Project-OSRM Routing Engine API with 3 Travel Modes
     try {
@@ -3369,37 +5809,38 @@ class MapScreenState extends State<MapScreen>
         osrmUrl = Uri.parse(
           'https://routing.openstreetmap.de/routed-bike/route/v1/driving/'
           '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
-          '?overview=full&geometries=geojson&alternatives=true&steps=true&annotations=true',
+          '?overview=full&geometries=geojson&alternatives=3&steps=true&annotations=true',
         );
       } else if (_travelMode == OsrmTravelMode.foot) {
         osrmUrl = Uri.parse(
           'https://routing.openstreetmap.de/routed-foot/route/v1/driving/'
           '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
-          '?overview=full&geometries=geojson&alternatives=true&steps=true&annotations=true',
+          '?overview=full&geometries=geojson&alternatives=3&steps=true&annotations=true',
         );
       } else {
         osrmUrl = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/'
           '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
-          '?overview=full&geometries=geojson&alternatives=true&steps=true&annotations=true',
+          '?overview=full&geometries=geojson&alternatives=3&steps=true&annotations=true',
         );
       }
 
-      var osrmRes = await http.get(osrmUrl).timeout(const Duration(seconds: 6));
+      var osrmRes = await http.get(osrmUrl).timeout(const Duration(seconds: 8));
       if (osrmRes.statusCode != 200 && _travelMode != OsrmTravelMode.car) {
         final fallbackUrl = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/'
           '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
-          '?overview=full&geometries=geojson&alternatives=true&steps=true&annotations=true',
+          '?overview=full&geometries=geojson&alternatives=3&steps=true&annotations=true',
         );
         osrmRes = await http
             .get(fallbackUrl)
-            .timeout(const Duration(seconds: 6));
+            .timeout(const Duration(seconds: 8));
       }
 
       if (osrmRes.statusCode == 200) {
         final data = jsonDecode(osrmRes.body);
         final List osrmRoutes = data['routes'] ?? [];
+        _lastRoutingEngineCode = (data['code'] ?? '').toString();
         for (final r in osrmRoutes.take(3)) {
           final List coords =
               (r['geometry'] as Map<String, dynamic>)['coordinates'] as List;
@@ -3441,7 +5882,7 @@ class MapScreenState extends State<MapScreen>
     }
 
     // 2. Secondary Fallback: OpenRouteService Directions API
-    if (routes.isEmpty) {
+    if (routes.isEmpty && _orsApiKey.isNotEmpty) {
       try {
         String orsProfile = 'driving-car';
         if (_travelMode == OsrmTravelMode.bike) orsProfile = 'cycling-regular';
@@ -3467,11 +5908,10 @@ class MapScreenState extends State<MapScreen>
         final response = await http
             .post(
               url,
-              headers: {
+              headers: _safeHeaders({
                 'Authorization': _orsApiKey,
                 'Content-Type': 'application/json',
-                'User-Agent': 'PotholeScannerApp/1.0',
-              },
+              }),
               body: jsonEncode(requestBody),
             )
             .timeout(const Duration(seconds: 7));
@@ -3511,12 +5951,60 @@ class MapScreenState extends State<MapScreen>
       }
     }
 
+    if (routes.isNotEmpty && routes.length < 3 && !silent) {
+      await _tryDiscoverAvoidanceRoutes(
+        start: start,
+        destination: destination,
+        routes: routes,
+        durations: durations,
+        distances: distances,
+        stepsByRoute: stepsByRoute,
+        requestSeq: seq,
+      );
+    }
+
+    if (!mounted || seq != _routingRequestSeq) return;
+
     if (routes.isEmpty || durations.isEmpty) {
-      setState(() => _isRouting = false);
-      if (mounted && !silent) {
+      final cachedRoute = await RoadReportCache.loadRecentRoute(
+        RoadReportCache.routeCacheKey(
+          origin: start,
+          destination: destination,
+          travelMode: _travelMode.name,
+        ),
+      );
+      if (!mounted || seq != _routingRequestSeq) return;
+      if (cachedRoute != null && cachedRoute.routes.isNotEmpty) {
+        loadedFromCache = true;
+        routes = cachedRoute.routes;
+        durations = cachedRoute.durations;
+        distances = cachedRoute.distances;
+        stepsByRoute = List<List<RouteStep>>.generate(
+          routes.length,
+          (_) => const [],
+        );
+      }
+    }
+
+    if (routes.isEmpty || durations.isEmpty) {
+      final code = _lastRoutingEngineCode.toLowerCase();
+      final noRoad =
+          code.contains('noroute') ||
+          code.contains('waypointnotfound') ||
+          code.contains('notraceroute');
+      final String errMsg = noRoad
+          ? 'No road path found to that destination.'
+          : 'Unable to calculate route right now. Active route preserved — check your connection and retry.';
+      if (mounted && seq == _routingRequestSeq) {
+        setState(() {
+          _isRouting = false;
+          _routeErrorMessage = errMsg;
+        });
+      }
+      if (mounted && !silent && seq == _routingRequestSeq) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text("📍 Unable to calculate route to destination."),
+            content: Text(errMsg),
             backgroundColor: Colors.red,
             action: SnackBarAction(
               label: 'RETRY',
@@ -3529,6 +6017,8 @@ class MapScreenState extends State<MapScreen>
       return;
     }
 
+    if (!mounted || seq != _routingRequestSeq) return;
+
     await _processRoutes(
       routes,
       durations,
@@ -3536,6 +6026,8 @@ class MapScreenState extends State<MapScreen>
       destination,
       stepsByRoute: stepsByRoute,
       fitCamera: fitCamera,
+      requestSeq: seq,
+      fromCache: loadedFromCache,
     );
   }
 
@@ -3545,7 +6037,6 @@ class MapScreenState extends State<MapScreen>
       if (mounted) {
         setState(() {
           _isLocationDisabled = true;
-          _isLoadingLocation = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -3574,7 +6065,6 @@ class MapScreenState extends State<MapScreen>
         if (mounted) {
           setState(() {
             _isPermissionDenied = true;
-            _isLoadingLocation = false;
           });
         }
         return;
@@ -3585,7 +6075,6 @@ class MapScreenState extends State<MapScreen>
       if (mounted) {
         setState(() {
           _isPermissionDenied = true;
-          _isLoadingLocation = false;
         });
       }
       return;
@@ -3599,19 +6088,6 @@ class MapScreenState extends State<MapScreen>
     }
 
     try {
-      Position? lastKnown = await Geolocator.getLastKnownPosition();
-      if (lastKnown != null && mounted) {
-        final lastPos = LatLng(lastKnown.latitude, lastKnown.longitude);
-        setState(() {
-          if (!_useMockLocation && _currentPosition == null) {
-            _currentPosition = lastPos;
-            _cachedGlobalPosition = lastPos;
-          }
-          _isLoadingLocation = false;
-        });
-        _startFollowing();
-      }
-
       Position position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -3623,11 +6099,13 @@ class MapScreenState extends State<MapScreen>
 
       if (mounted) {
         setState(() {
+          _lastGpsAccuracyMeters = position.accuracy;
+          _lastGpsSpeedMps = position.speed;
+          _lastGpsTimestamp = position.timestamp;
           if (!_useMockLocation) {
             _currentPosition = livePosition;
             _cachedGlobalPosition = livePosition;
           }
-          _isLoadingLocation = false;
         });
         if (_currentPosition != null) {
           _checkPotholeProximity(_currentPosition!);
@@ -3638,7 +6116,6 @@ class MapScreenState extends State<MapScreen>
       print('Location fetch error or timeout: $e');
       if (mounted) {
         setState(() {
-          _isLoadingLocation = false;
           _currentPosition ??= _cachedGlobalPosition ?? _bulacanCenter;
         });
         _startFollowing();
@@ -3670,18 +6147,7 @@ class MapScreenState extends State<MapScreen>
         ? 'VERIFIED'
         : (isRejected ? 'REJECTED' : 'PENDING REVIEW');
 
-    final isHighSeverity = pothole.overallSeverity.toLowerCase() == 'high';
-    final isMediumSeverity = pothole.overallSeverity.toLowerCase() == 'medium';
-
-    final Color severityColor = isHighSeverity
-        ? const Color(0xFFEF4444)
-        : (isMediumSeverity
-              ? const Color(0xFFF97316)
-              : const Color(0xFFEAB308));
-
-    final String severityLabel = isHighSeverity
-        ? 'HIGH SEVERITY'
-        : (isMediumSeverity ? 'MEDIUM SEVERITY' : 'LOW SEVERITY');
+    final Color severityColor = const Color(0xFF0284C7);
 
     final String docIdStr = pothole.docId != null && pothole.docId!.isNotEmpty
         ? (pothole.docId!.length > 8
@@ -4019,32 +6485,11 @@ class MapScreenState extends State<MapScreen>
                           ),
                           child: Row(
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: severityColor.withValues(alpha: 0.18),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.warning_amber_rounded,
-                                  color: severityColor,
-                                  size: 18,
-                                ),
-                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      severityLabel,
-                                      style: TextStyle(
-                                        color: severityColor,
-                                        fontSize: 12.5,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
                                     const SizedBox(height: 2),
                                     Text(
                                       pothole.potholeCount > 1
@@ -4156,12 +6601,14 @@ class MapScreenState extends State<MapScreen>
                           width: double.infinity,
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
-                                .withValues(alpha: isDark ? 0.12 : 0.07),
+                            color: DpwhStandards.getClassColor(
+                              pothole.primaryDefect,
+                            ).withValues(alpha: isDark ? 0.12 : 0.07),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
-                                  .withValues(alpha: 0.35),
+                              color: DpwhStandards.getClassColor(
+                                pothole.primaryDefect,
+                              ).withValues(alpha: 0.35),
                             ),
                           ),
                           child: Column(
@@ -4170,9 +6617,14 @@ class MapScreenState extends State<MapScreen>
                               Row(
                                 children: [
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
+                                      color: DpwhStandards.getClassColor(
+                                        pothole.primaryDefect,
+                                      ),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
@@ -4191,16 +6643,25 @@ class MapScreenState extends State<MapScreen>
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                        color: isDark
+                                            ? Colors.white
+                                            : const Color(0xFF0F172A),
                                       ),
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                                      color: const Color(
+                                        0xFF2563EB,
+                                      ).withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: const Color(0xFF2563EB)),
+                                      border: Border.all(
+                                        color: const Color(0xFF2563EB),
+                                      ),
                                     ),
                                     child: Text(
                                       'SLA: ${pothole.responseTime}',
@@ -4219,7 +6680,9 @@ class MapScreenState extends State<MapScreen>
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  color: isDark
+                                      ? const Color(0xFF94A3B8)
+                                      : const Color(0xFF64748B),
                                 ),
                               ),
                               const SizedBox(height: 2),
@@ -4228,14 +6691,19 @@ class MapScreenState extends State<MapScreen>
                                 style: TextStyle(
                                   fontSize: 12.5,
                                   height: 1.35,
-                                  color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                                  color: isDark
+                                      ? const Color(0xFFE2E8F0)
+                                      : const Color(0xFF1E293B),
                                 ),
                               ),
-                              if (pothole.detections != null && pothole.detections!.isNotEmpty) ...[
+                              if (pothole.detections != null &&
+                                  pothole.detections!.isNotEmpty) ...[
                                 const SizedBox(height: 12),
                                 Divider(
                                   height: 1,
-                                  color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode).withValues(alpha: 0.2),
+                                  color: DpwhStandards.getClassColor(
+                                    pothole.primaryDefect,
+                                  ).withValues(alpha: 0.2),
                                 ),
                                 const SizedBox(height: 10),
                                 Text(
@@ -4243,17 +6711,26 @@ class MapScreenState extends State<MapScreen>
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
                                   ),
                                 ),
                                 const SizedBox(height: 6),
                                 ...pothole.detections!.map((det) {
-                                  final name = det['className'] as String? ?? 'Distress';
-                                  final conf = (det['confidence'] as num?)?.toDouble() ?? 0.0;
+                                  final name =
+                                      det['className'] as String? ?? 'Distress';
+                                  final conf =
+                                      (det['confidence'] as num?)?.toDouble() ??
+                                      0.0;
                                   final code = det['dpwhCode'] as String? ?? '';
-                                  final cls = DpwhStandards.classifyByName(name);
+                                  final cls = DpwhStandards.classifyByName(
+                                    name,
+                                  );
                                   return Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 2.5),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2.5,
+                                    ),
                                     child: Row(
                                       children: [
                                         Container(
@@ -4279,7 +6756,9 @@ class MapScreenState extends State<MapScreen>
                                             name,
                                             style: TextStyle(
                                               fontSize: 12,
-                                              color: isDark ? Colors.white70 : Colors.black87,
+                                              color: isDark
+                                                  ? Colors.white70
+                                                  : Colors.black87,
                                             ),
                                           ),
                                         ),
@@ -4288,7 +6767,9 @@ class MapScreenState extends State<MapScreen>
                                           style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
-                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                            color: isDark
+                                                ? const Color(0xFF94A3B8)
+                                                : const Color(0xFF64748B),
                                           ),
                                         ),
                                       ],
@@ -4520,11 +7001,18 @@ class MapScreenState extends State<MapScreen>
   }
 
   Future<void> _showEditPotholeDialog(PotholeMarker pothole) async {
+    if (DeveloperMarkers.owns(pothole.docId)) {
+      await showDeveloperMarkerEditor(
+        context,
+        location: pothole.location,
+        markerId: pothole.docId,
+      );
+      return;
+    }
+
     if (pothole.docId == null) return;
     final isDark = AppSettings.instance.isDarkMode;
-    String selectedSeverity = pothole.overallSeverity.toLowerCase();
     int potholeCount = pothole.potholeCount;
-    final noteController = TextEditingController();
 
     await showDialog(
       context: context,
@@ -4568,47 +7056,8 @@ class MapScreenState extends State<MapScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Overall Severity',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppDesign.textPrimary(isDark),
-                        ),
-                      ),
                       const SizedBox(height: 6),
-                      DropdownButtonFormField<String>(
-                        value: selectedSeverity,
-                        dropdownColor: AppDesign.surface(isDark),
-                        decoration: InputDecoration(
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'low',
-                            child: Text('Low Severity'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'medium',
-                            child: Text('Medium Severity'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'high',
-                            child: Text('High Severity'),
-                          ),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() => selectedSeverity = val);
-                          }
-                        },
-                      ),
+
                       const SizedBox(height: 16),
                       Text(
                         'Potholes in Cluster',
@@ -4628,9 +7077,7 @@ class MapScreenState extends State<MapScreen>
                                 : null,
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Text(
                               '$potholeCount',
                               style: TextStyle(
@@ -4648,29 +7095,8 @@ class MapScreenState extends State<MapScreen>
                         ],
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        'Maintenance / Review Notes',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppDesign.textPrimary(isDark),
-                        ),
-                      ),
+
                       const SizedBox(height: 6),
-                      TextField(
-                        controller: noteController,
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          hintText: 'Add or update hazard notes...',
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -4690,9 +7116,8 @@ class MapScreenState extends State<MapScreen>
                     try {
                       await CloudService.instance.editPothole(
                         pothole.docId!,
-                        overallSeverity: selectedSeverity,
+
                         potholeCount: potholeCount,
-                        note: noteController.text.trim(),
                       );
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -4829,38 +7254,60 @@ class MapScreenState extends State<MapScreen>
   void _showFullScreenPhoto(String imagePath) {
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.black.withValues(alpha: 0.92),
-        insetPadding: const EdgeInsets.all(12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: Colors.black.withValues(alpha: 0.94),
+        insetPadding: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Stack(
           alignment: Alignment.center,
           children: [
             InteractiveViewer(
               minScale: 0.5,
               maxScale: 4.0,
-              child:
-                  imagePath.startsWith('http') || imagePath.startsWith('blob:')
-                  ? Image.network(imagePath, fit: BoxFit.contain)
-                  : Image.network(
-                      imagePath,
-                      fit: BoxFit.contain,
-                      errorBuilder: (ctx, e, st) => const Icon(
-                        Icons.broken_image,
-                        color: Colors.white,
-                        size: 64,
-                      ),
+              child: Image.network(
+                imagePath,
+                fit: BoxFit.contain,
+                loadingBuilder: (ctx, child, progress) {
+                  if (progress == null) return child;
+                  return const SizedBox(
+                    width: 240,
+                    height: 200,
+                    child: Center(
+                      child: CircularProgressIndicator(color: Colors.white),
                     ),
+                  );
+                },
+                errorBuilder: (ctx, e, st) => const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white70,
+                        size: 56,
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        'Photo could not be loaded.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             Positioned(
-              top: 16,
-              right: 16,
+              top: 12,
+              right: 12,
               child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
                   shape: BoxShape.circle,
                 ),
                 child: IconButton(
+                  tooltip: 'Close photo',
                   icon: const Icon(
                     Icons.close_rounded,
                     color: Colors.white,
@@ -4887,6 +7334,7 @@ class MapScreenState extends State<MapScreen>
       if (!_isRoutePlanningMode) {
         final destLoc = await _geocodeQuery(destQuery);
         if (destLoc == null) {
+          _destinationTextDirty = true;
           throw 'Location "$destQuery" not found.';
         }
 
@@ -4899,50 +7347,65 @@ class MapScreenState extends State<MapScreen>
           _selectedPothole = null;
           _suggestions = [];
           _searchedPlace = null;
+          _destinationTextDirty = false;
+          _originTextDirty = false;
         });
 
         _searchFocusNode.unfocus();
+        _showPointToPointPill(point: destLoc, name: destQuery);
         await _calculateRoute(destLoc, customOrigin: _currentPosition);
         return;
       }
 
       // Route Planning Mode (Point A → Point B)
       LatLng? destLoc = _destination;
-      if (destLoc == null || destQuery == 'Your location') {
+      // Re-geocode when no destination is resolved yet, or when the user has
+      // retyped Point B — otherwise the route targets the OLD destination
+      // while the field shows the NEW text.
+      if (destLoc == null ||
+          destQuery == 'Your location' ||
+          _destinationTextDirty) {
         if (destQuery == 'Your location') {
-          destLoc = _currentPosition;
+          if (_currentPosition == null) {
+            await _determinePosition(requestPermission: true);
+          }
+          destLoc = _currentPosition ?? _bulacanCenter;
           _destination = destLoc;
         } else {
           destLoc = await _geocodeQuery(destQuery);
           if (destLoc == null) {
+            _destinationTextDirty = true;
             throw 'Destination location not found.';
           }
           _destination = destLoc;
         }
+        _destinationTextDirty = false;
+        _showPointToPointPill(point: destLoc, name: destQuery);
       }
 
       // 2. Resolve Start Origin (Point A)
       LatLng? originLoc;
       if (originQuery.isEmpty || originQuery == 'Your location') {
         _customOrigin = null;
-        originLoc = _currentPosition;
+        _originTextDirty = false;
+        if (_currentPosition == null) {
+          await _determinePosition(requestPermission: true);
+        }
+        originLoc = _currentPosition ?? _bulacanCenter;
       } else {
-        if (_customOrigin != null) {
+        // Re-geocode retyped origin text - a stale _customOrigin (Point A
+        // chosen earlier) must not silently override the text the user sees.
+        if (_customOrigin != null && !_originTextDirty) {
           originLoc = _customOrigin;
         } else {
           originLoc = await _geocodeQuery(originQuery);
           if (originLoc == null) {
+            _originTextDirty = true;
             throw 'Start location (Point A) not found.';
           }
           _customOrigin = originLoc;
+          _originTextDirty = false;
         }
-      }
-
-      if (destLoc == null) {
-        throw 'Destination location unavailable.';
-      }
-      if (originLoc == null) {
-        throw 'Current location unavailable.';
       }
 
       await _calculateRoute(destLoc, customOrigin: originLoc);
@@ -5063,6 +7526,20 @@ class MapScreenState extends State<MapScreen>
   }
 
   Future<void> _deleteDetectedPothole(PotholeMarker pothole) async {
+    if (DeveloperMarkers.owns(pothole.docId)) {
+      await DeveloperMarkers.instance.remove(pothole.docId!);
+      return;
+    }
+
+    if (isSampleStaMariaMarkerId(pothole.docId)) {
+      setState(() {
+        _dismissedSampleIds.add(pothole.docId!);
+        _snappedPotholeCache.remove(_potholeKey(pothole.location));
+      });
+      await _refreshRouteAwarePotholeState();
+      return;
+    }
+
     if (widget.onDeleteDetectedPothole == null) {
       throw StateError('Delete callback is not configured.');
     }
@@ -5076,165 +7553,38 @@ class MapScreenState extends State<MapScreen>
     await _refreshRouteAwarePotholeState();
   }
 
-  double _getDynamicMarkerSize() {
-    double zoom = 15.0;
+  /// Map rotation, or 0° before the FlutterMap widget has rendered — the
+  /// MapController throws if read before then, and this is used during build.
+  double get _safeMapRotation {
     try {
-      zoom = _mapController.camera.zoom;
-    } catch (_) {}
+      return _mapController.camera.rotation;
+    } catch (_) {
+      return 0.0;
+    }
+  }
 
-    if (zoom < 10) return 14.0;
-    if (zoom < 12) return 20.0;
-    if (zoom < 14) return 28.0;
-    if (zoom < 16) return 36.0;
-    return 44.0;
+  double _getDynamicMarkerSize() {
+    try {
+      return RoadHazardMarker.sizeForZoom(_mapController.camera.zoom);
+    } catch (_) {
+      return RoadHazardMarker.sizeForZoom(15);
+    }
   }
 
   Widget _buildUnifiedPotholeIcon({
     String status = 'approved',
     String severity = 'medium',
+    String primaryDefect = 'Pothole',
     int count = 1,
-    double size = 38.0,
+    double size = 38,
     bool isSelected = false,
-  }) {
-    Color iconColor;
-    IconData iconData;
-    if (status == 'pending') {
-      iconColor = const Color(0xFFF59E0B);
-      iconData = Icons.pending_actions_rounded;
-    } else if (status == 'rejected') {
-      iconColor = Colors.grey;
-      iconData = Icons.block_rounded;
-    } else {
-      if (severity == 'high') {
-        iconColor = const Color(0xFFEF4444);
-        iconData = Icons.dangerous_rounded;
-      } else if (severity == 'low') {
-        iconColor = const Color(0xFFEAB308);
-        iconData = Icons.warning_amber_rounded;
-      } else {
-        iconColor = const Color(0xFFF97316);
-        iconData = Icons.warning_rounded;
-      }
-    }
-
-    final isDark = AppSettings.instance.isDarkMode;
-    final double iconInnerSize = (size * 0.52).clamp(8.0, 26.0);
-    final double borderWidth = isSelected ? 3.0 : (size < 20 ? 1.0 : 2.2);
-    final double padding = size < 28 ? 2.0 : 4.0;
-
-    final pinWidget = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: AppDesign.surface(isDark),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isSelected
-              ? (status == 'approved'
-                    ? const Color(0xFF10B981)
-                    : const Color(0xFFF59E0B))
-              : iconColor,
-          width: borderWidth,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.2),
-            blurRadius: isSelected ? 8 : 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: EdgeInsets.all(padding),
-      child: Center(
-        child: Icon(iconData, size: iconInnerSize, color: iconColor),
-      ),
-    );
-
-    // 1. Pending report indicator tag ("YOU 🕒")
-    if (status == 'pending' && size >= 24) {
-      return Stack(
-        clipBehavior: Clip.none,
-        children: [
-          pinWidget,
-          Positioned(
-            top: -4,
-            right: -6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF59E0B),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white, width: 1.2),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black38,
-                    blurRadius: 3,
-                    offset: Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.schedule_rounded, size: 8, color: Colors.white),
-                  SizedBox(width: 2),
-                  Text(
-                    'YOU',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 7.5,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    // 2. Multi-pothole count badge
-    if (count > 1 && size >= 24) {
-      return Stack(
-        clipBehavior: Clip.none,
-        children: [
-          pinWidget,
-          Positioned(
-            top: -2,
-            right: -4,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              decoration: BoxDecoration(
-                color: iconColor,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white, width: 1.2),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black38,
-                    blurRadius: 3,
-                    offset: Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  height: 1.1,
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return pinWidget;
-  }
+  }) => RoadHazardMarker(
+    primaryDefect: primaryDefect,
+    status: status,
+    count: count,
+    size: size,
+    isSelected: isSelected,
+  );
 
   /// Groups potholes within a 10-meter barrier tolerance radius into clusters.
   /// When multiple potholes (approved and/or pending) exist nearby, they form
@@ -5292,39 +7642,6 @@ class MapScreenState extends State<MapScreen>
   }
 
   /// Builds the radial Spider Tree marker with connecting stems and anchor ring
-  Widget _severityBreakdownDot(Color color, int count) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color, width: 1.2),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1)),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-          ),
-          const SizedBox(width: 2),
-          Text(
-            '$count',
-            style: TextStyle(
-              fontSize: 8.5,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildSpiderClusterMarker(PotholeCluster cluster, bool isDark) {
     final count = cluster.items.length;
@@ -5357,39 +7674,44 @@ class MapScreenState extends State<MapScreen>
 
           // 2. Center Anchor Ring
           Positioned(
-            left: centerXY - 12,
-            top: centerXY - 12,
-            child: GestureDetector(
+            left: centerXY - 24,
+            top: centerXY - 24,
+            width: 48,
+            height: 48,
+            child: WebMapMarkerButton(
+              label: 'Collapse nearby reports',
               onTap: () {
                 setState(() {
                   _expandedClusterId = null;
                 });
               },
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                  border: Border.all(
-                    color: const Color(0xFF00796B),
-                    width: 3.2,
-                  ),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black38,
-                      blurRadius: 6,
-                      offset: Offset(0, 2),
+              child: Center(
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                    border: Border.all(
+                      color: const Color(0xFF00796B),
+                      width: 3.2,
                     ),
-                  ],
-                ),
-                child: Center(
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFF00796B),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black38,
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF00796B),
+                      ),
                     ),
                   ),
                 ),
@@ -5400,27 +7722,40 @@ class MapScreenState extends State<MapScreen>
           // 3. Child Pothole Nodes
           for (int i = 0; i < count; i++) ...[
             Positioned(
-              left: centerXY + childOffsets[i].dx - 16,
-              top: centerXY + childOffsets[i].dy - 16,
-              child: GestureDetector(
+              left: centerXY + childOffsets[i].dx - 24,
+              top: centerXY + childOffsets[i].dy - 24,
+              child: WebMapMarkerButton(
+                label:
+                    '${cluster.items[i].primaryDefect} (${cluster.items[i].primaryDpwhCode}), ${cluster.items[i].status}',
                 onTap: () {
                   final item = cluster.items[i];
-                  setState(() {
-                    _selectedPothole = item;
-                  });
+                  if (DeveloperMarkers.owns(item.docId)) {
+                    _startMarkerPlacement(item);
+                    return;
+                  }
+                  _setSelectedPothole(item, notify: true, animate: false);
+                  if (kIsWeb && MediaQuery.sizeOf(context).width < 900) {
+                    _openCompactReportSheet(item);
+                  }
                 },
-                child: _buildSpiderChildNode(
-                  pothole: cluster.items[i],
-                  isSelected:
-                      _selectedPothole == cluster.items[i] ||
-                      (_selectedPothole?.docId != null &&
-                          _selectedPothole?.docId == cluster.items[i].docId) ||
-                      (_selectedPothole != null &&
-                          _selectedPothole!.location.latitude ==
-                              cluster.items[i].location.latitude &&
-                          _selectedPothole!.location.longitude ==
-                              cluster.items[i].location.longitude),
-                  isDark: isDark,
+                child: SizedBox.square(
+                  dimension: 48,
+                  child: Center(
+                    child: _buildSpiderChildNode(
+                      pothole: cluster.items[i],
+                      isSelected:
+                          _selectedPothole == cluster.items[i] ||
+                          (_selectedPothole?.docId != null &&
+                              _selectedPothole?.docId ==
+                                  cluster.items[i].docId) ||
+                          (_selectedPothole != null &&
+                              _selectedPothole!.location.latitude ==
+                                  cluster.items[i].location.latitude &&
+                              _selectedPothole!.location.longitude ==
+                                  cluster.items[i].location.longitude),
+                      isDark: isDark,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -5434,50 +7769,626 @@ class MapScreenState extends State<MapScreen>
     required PotholeMarker pothole,
     required bool isSelected,
     required bool isDark,
-  }) {
-    Color nodeColor = const Color(0xFF9333EA);
-    IconData nodeIcon = Icons.warning_rounded;
+  }) => RoadHazardMarker(
+    primaryDefect: pothole.primaryDefect,
+    status: pothole.status,
+    size: 32,
+    isSelected: isSelected,
+    compact: true,
+  );
 
-    if (pothole.status == 'pending') {
-      nodeColor = const Color(0xFFF59E0B);
-      nodeIcon = Icons.schedule_rounded;
-    } else if (pothole.status == 'rejected') {
-      nodeColor = Colors.grey;
-      nodeIcon = Icons.block_rounded;
-    } else {
-      if (pothole.overallSeverity == 'high') {
-        nodeColor = const Color(0xFFEF4444);
-        nodeIcon = Icons.dangerous_rounded;
-      } else if (pothole.overallSeverity == 'low') {
-        nodeColor = const Color(0xFFEAB308);
-        nodeIcon = Icons.warning_amber_rounded;
-      } else {
-        nodeColor = const Color(0xFFF97316);
-        nodeIcon = Icons.warning_rounded;
-      }
+  int _countNearbyPlaceHazards(LatLng? target) {
+    if (target == null) return 0;
+    int count = 0;
+    for (final p in _effectivePotholes) {
+      if (p.status == 'deleted' || p.status == 'rejected') continue;
+      final d = Geolocator.distanceBetween(
+        target.latitude,
+        target.longitude,
+        p.location.latitude,
+        p.location.longitude,
+      );
+      if (d <= 1000) count++;
     }
+    return count;
+  }
 
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: nodeColor,
-        border: Border.all(
-          color: isSelected ? const Color(0xFF10B981) : Colors.white,
-          width: isSelected ? 3.0 : 2.0,
+  void _startDirectionsToPoint(LatLng dest, {String? label}) {
+    setState(() {
+      _isRoutePlanningMode = true;
+      _isEditingOrigin = false;
+      _destination = dest;
+      if (label != null && label.trim().isNotEmpty) {
+        _searchController.text = label.trim();
+      }
+      if (_originController.text.trim().isEmpty) {
+        _originController.text = 'Your location';
+        _customOrigin = null;
+      }
+      _destinationTextDirty = false;
+      _originTextDirty = false;
+      _searchedPlace = null;
+      _isLegendOpen = false;
+    });
+    _calculateRoute(
+      dest,
+      customOrigin:
+          (_originController.text == 'Your location' || _customOrigin == null)
+          ? (_currentPosition ?? _bulacanCenter)
+          : _customOrigin,
+    );
+  }
+
+  Widget _buildWorkspacePanelWidget({
+    required bool isDark,
+    required WebReportQueryResult queryResult,
+    required List<WebUnifiedSearchSuggestion> unifiedSuggestions,
+    required Widget routePlannerContent,
+    bool showCollapseButton = true,
+  }) {
+    final LatLng? searchedLoc = _searchedPlace?['location'] is LatLng
+        ? _searchedPlace!['location'] as LatLng
+        : null;
+    final selectedItem = _selectedPothole?.toReportItem();
+    return WebMapWorkspacePanel(
+      searchController: _searchController,
+      searchFocusNode: _searchFocusNode,
+      searchQuery: _searchController.text,
+      isSearchingPlaces: _isSearchingPlaces,
+      isSearchHistoryOpen: _isSearchHistoryOpen,
+      unifiedSuggestions: unifiedSuggestions,
+      highlightedSuggestionIndex: _highlightedSuggestionIndex,
+      searchHistory: _searchHistory,
+      searchedPlace: _searchedPlace,
+      nearbyPlaceHazardCount: _countNearbyPlaceHazards(searchedLoc),
+      onClearSearchedPlace: () => setState(() => _searchedPlace = null),
+      onDirectionsToPlace: (loc) => _startDirectionsToPoint(
+        loc,
+        label: (_searchedPlace?['name'] ?? '').toString(),
+      ),
+      filter: _reportFilter,
+      onFilterChanged: _updateReportFilter,
+      isFilterDrawerOpen: _isFilterDrawerOpen,
+      onToggleFilterDrawer: () =>
+          setState(() => _isFilterDrawerOpen = !_isFilterDrawerOpen),
+      onOpenBarangayPicker: _openBarangayPicker,
+      queryResult: queryResult,
+      visibleResultLimit: _visibleResultLimit,
+      onLoadMoreResults: () => setState(() => _visibleResultLimit += 25),
+      selectedReport: selectedItem,
+      onSelectReport: (item) {
+        final marker = _findMarkerForItem(item);
+        if (marker != null) {
+          _setSelectedPothole(marker, notify: true, animate: true);
+        }
+      },
+      onBackToResults: () =>
+          _setSelectedPothole(null, notify: true, animate: false),
+      currentUid: widget.currentUid,
+      isAdminUser: widget.isAdminUser,
+      hasUserLocation: _currentPosition != null,
+      isCloudLoading: widget.isCloudLoading,
+      cloudError: widget.cloudError,
+      onRetryCloud: widget.onRetryCloud ?? () {},
+      onOpenRoutePlanner: () {
+        setState(() {
+          _isRoutePlanningMode = true;
+          if (_originController.text.trim().isEmpty) {
+            _originController.text = 'Your location';
+            _customOrigin = null;
+          }
+        });
+      },
+      routePlannerContent: routePlannerContent,
+      isRoutePlanningMode: _isRoutePlanningMode,
+      onSearchChanged: _onSearchChanged,
+      onSubmitSearch: () {
+        if (unifiedSuggestions.isNotEmpty) {
+          unawaited(_selectUnifiedSuggestion(unifiedSuggestions.first));
+          return;
+        }
+        final q = _searchController.text.trim();
+        if (q.isEmpty) return;
+        unawaited(() async {
+          final resolved = await _geocodeQuery(_normalizeQuery(q));
+          if (!mounted || resolved == null) return;
+          _selectSuggestion({
+            'lat': resolved.latitude.toString(),
+            'lon': resolved.longitude.toString(),
+            '_name': q,
+            '_short_addr': 'Bulacan, Philippines',
+            'display_name': q,
+          });
+        }());
+      },
+      onClearSearch: () {
+        _debounceTimer?.cancel();
+        _searchRevision++;
+        setState(() {
+          _searchController.clear();
+          _suggestions = [];
+          _isSearchingPlaces = false;
+          _highlightedSuggestionIndex = -1;
+          _searchedPlace = null;
+        });
+      },
+      onSelectSuggestion: (s) => unawaited(_selectUnifiedSuggestion(s)),
+      onSelectHistoryItem: (item) => unawaited(
+        _selectPlaceSuggestion({
+          'lat': (item['lat'] ?? _bulacanCenter.latitude).toString(),
+          'lon': (item['lon'] ?? _bulacanCenter.longitude).toString(),
+          '_name': item['name'] ?? 'Saved Place',
+          '_short_addr': item['address'] ?? '',
+          'display_name': item['address'] ?? item['name'] ?? '',
+        }),
+      ),
+      onRemoveHistoryItem: _removeFromSearchHistory,
+      onClearHistory: _clearSearchHistory,
+      onMoveSuggestionHighlight: (idx) =>
+          setState(() => _highlightedSuggestionIndex = idx),
+      onCenterReportOnMap: (item) {
+        _animatedMapMove(item.location, 17.8);
+      },
+      onDirectionsToReport: (item) =>
+          _startDirectionsToPoint(item.location, label: item.locationLabel),
+      onViewFullPhoto: _showFullScreenPhoto,
+      onEditReport: null,
+      onDeleteReport: _confirmTrashReport,
+      onAdminModerate: widget.isAdminUser ? _handleAdminModeration : null,
+      onCollapsePanel: showCollapseButton
+          ? () => setState(() => _isSidePanelCollapsed = true)
+          : null,
+    );
+  }
+
+  Widget _buildCompactTopBar({
+    required bool isDark,
+    required WebReportQueryResult queryResult,
+    required List<WebUnifiedSearchSuggestion> unifiedSuggestions,
+    required Widget routePlannerContent,
+  }) {
+    final activeFilters = _reportFilter.activeFilterCount;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        WebCard(
+          elevated: true,
+          padding: const EdgeInsets.symmetric(
+            horizontal: WebDesign.space2,
+            vertical: WebDesign.space1,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: WebDesign.textMuted(isDark),
+              ),
+              const SizedBox(width: WebDesign.space2),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) {
+                    if (unifiedSuggestions.isNotEmpty) {
+                      unawaited(
+                        _selectUnifiedSuggestion(unifiedSuggestions.first),
+                      );
+                    }
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search Bulacan, barangay, or #ID',
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    suffixIcon: _searchController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            icon: const Icon(Icons.close_rounded, size: 16),
+                            onPressed: () {
+                              _debounceTimer?.cancel();
+                              setState(() {
+                                _searchController.clear();
+                                _suggestions = [];
+                                _isSearchingPlaces = false;
+                                _searchedPlace = null;
+                              });
+                            },
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: WebDesign.space1),
+              OutlinedButton.icon(
+                onPressed: () => _openCompactFiltersSheet(isDark),
+                icon: Icon(
+                  Icons.tune_rounded,
+                  size: 16,
+                  color: activeFilters > 0
+                      ? WebDesign.brandOnSurface(isDark)
+                      : null,
+                ),
+                label: Text(
+                  activeFilters > 0 ? 'Filters ($activeFilters)' : 'Filters',
+                ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, WebDesign.touchTarget),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  side: BorderSide(
+                    color: activeFilters > 0
+                        ? WebDesign.brand(isDark)
+                        : WebDesign.border(isDark),
+                  ),
+                ),
+              ),
+              const SizedBox(width: WebDesign.space1),
+              ElevatedButton(
+                onPressed: () => _openCompactReportsSheet(isDark, queryResult),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(0, WebDesign.touchTarget),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: Text('List (${queryResult.items.length})'),
+              ),
+            ],
+          ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isSelected
-                ? const Color(0xFF10B981).withValues(alpha: 0.6)
-                : Colors.black38,
-            blurRadius: isSelected ? 8 : 4,
-            offset: const Offset(0, 2),
+        if (unifiedSuggestions.isNotEmpty) ...[
+          const SizedBox(height: WebDesign.space2),
+          WebCard(
+            elevated: true,
+            padding: EdgeInsets.zero,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: unifiedSuggestions.length,
+                separatorBuilder: (_, _) =>
+                    Divider(height: 1, color: WebDesign.border(isDark)),
+                itemBuilder: (ctx, i) {
+                  final entry = unifiedSuggestions[i];
+                  if (entry.isReport && entry.report != null) {
+                    final r = entry.report!;
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        WebDesign.defectIcon(
+                          DpwhStandards.classForReport({
+                                'primaryDefect': r.primaryDefect,
+                                'primaryDpwhCode': r.primaryDpwhCode,
+                              }) ??
+                              DpwhStandards.pothole,
+                        ),
+                      ),
+                      title: Text(
+                        '${r.primaryDefect} · #${r.shortId}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        entry.reportMatchReason ?? r.locationLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => unawaited(_selectUnifiedSuggestion(entry)),
+                    );
+                  }
+                  final place = entry.rawPlace ?? const {};
+                  final name =
+                      (place['_name'] ?? place['display_name'] ?? 'Location')
+                          .toString();
+                  final addr =
+                      (place['_short_addr'] ?? place['display_name'] ?? '')
+                          .toString();
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: addr.isEmpty
+                        ? null
+                        : Text(
+                            addr,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    onTap: () => unawaited(_selectUnifiedSuggestion(entry)),
+                  );
+                },
+              ),
+            ),
+          ),
+        ] else if (_searchedPlace != null &&
+            !_isRoutePlanningMode &&
+            _selectedPothole == null) ...[
+          const SizedBox(height: WebDesign.space2),
+          WebCard(
+            elevated: true,
+            padding: const EdgeInsets.all(WebDesign.space3),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.place_rounded,
+                  color: WebDesign.brandOnSurface(isDark),
+                ),
+                const SizedBox(width: WebDesign.space2),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (_searchedPlace!['name'] ?? 'Place').toString(),
+                        style: Theme.of(context).textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${_countNearbyPlaceHazards(_searchedPlace!['location'] as LatLng?)} hazards within 1 km',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final loc = _searchedPlace?['location'] as LatLng?;
+                    if (loc != null) {
+                      _startDirectionsToPoint(
+                        loc,
+                        label: (_searchedPlace?['name'] ?? '').toString(),
+                      );
+                    }
+                  },
+                  child: const Text('Directions'),
+                ),
+                IconButton(
+                  tooltip: 'Dismiss place',
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () => setState(() => _searchedPlace = null),
+                ),
+              ],
+            ),
           ),
         ],
+      ],
+    );
+  }
+
+  Future<void> _openCompactFiltersSheet(bool isDark) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: WebDesign.surface(isDark),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      child: Center(child: Icon(nodeIcon, size: 16, color: Colors.white)),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.82,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        WebDesign.space4,
+                        WebDesign.space3,
+                        WebDesign.space2,
+                        WebDesign.space2,
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Filter Road Reports',
+                            style: Theme.of(sheetCtx).textTheme.titleMedium,
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: !_reportFilter.hasAnyFilter
+                                ? null
+                                : () {
+                                    _updateReportFilter(
+                                      _reportFilter.clearAll(),
+                                    );
+                                    setSheetState(() {});
+                                  },
+                            child: const Text('Reset'),
+                          ),
+                          IconButton(
+                            tooltip: 'Close filters',
+                            onPressed: () => Navigator.of(sheetCtx).pop(),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Divider(height: 1, color: WebDesign.border(isDark)),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(WebDesign.space4),
+                        child: WebMapFilterControls(
+                          filter: _reportFilter,
+                          onChanged: (next) {
+                            _updateReportFilter(next);
+                            setSheetState(() {});
+                          },
+                          onOpenBarangayPicker: () async {
+                            await _openBarangayPicker();
+                            setSheetState(() {});
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openCompactReportsSheet(
+    bool isDark,
+    WebReportQueryResult queryResult,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: WebDesign.surface(isDark),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        final items = queryResult.items;
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetCtx).height * 0.78,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    WebDesign.space4,
+                    WebDesign.space3,
+                    WebDesign.space2,
+                    WebDesign.space2,
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Matching Reports (${items.length})',
+                        style: Theme.of(sheetCtx).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Close reports list',
+                        onPressed: () => Navigator.of(sheetCtx).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: WebDesign.border(isDark)),
+                Expanded(
+                  child: items.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(WebDesign.space5),
+                            child: EmptyState(
+                              icon: Icons.filter_alt_off_outlined,
+                              title: 'No matching reports',
+                              message:
+                                  'Adjust your search or active filters to see reports here.',
+                              action: _reportFilter.hasAnyFilter
+                                  ? OutlinedButton(
+                                      onPressed: () {
+                                        _updateReportFilter(
+                                          _reportFilter.clearAll(),
+                                        );
+                                        Navigator.of(sheetCtx).pop();
+                                      },
+                                      child: const Text('Reset filters'),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(WebDesign.space3),
+                          itemCount: items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: WebDesign.space2),
+                          itemBuilder: (ctx, i) {
+                            final item = items[i];
+                            return WebReportSummaryCard(
+                              report: item,
+                              isSelected: _selectedPothole?.docId == item.docId,
+                              onTap: () {
+                                Navigator.of(sheetCtx).pop();
+                                final marker = _findMarkerForItem(item);
+                                if (marker != null) {
+                                  _setSelectedPothole(
+                                    marker,
+                                    notify: true,
+                                    animate: true,
+                                  );
+                                  _openCompactReportSheet(marker);
+                                }
+                              },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openCompactReportSheet(PotholeMarker pothole) async {
+    final isDark = AppSettings.instance.isDarkMode;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: WebDesign.surface(isDark),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        final item = pothole.toReportItem();
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetCtx).height * 0.82,
+            child: WebReportDetailPanel(
+              report: item,
+              currentUid: widget.currentUid,
+              isAdminUser: widget.isAdminUser,
+              onBack: () {
+                Navigator.of(sheetCtx).pop();
+                _setSelectedPothole(null, notify: true, animate: false);
+              },
+              onCenterOnMap: () {
+                Navigator.of(sheetCtx).pop();
+                _animatedMapMove(item.location, 17.8);
+              },
+              onDirectionsHere: () {
+                Navigator.of(sheetCtx).pop();
+                _startDirectionsToPoint(
+                  item.location,
+                  label: item.locationLabel,
+                );
+              },
+              onViewFullPhoto: () => _showFullScreenPhoto(item.imageUrl),
+              onEditReport: null,
+              onDeleteReport: () {
+                Navigator.of(sheetCtx).pop();
+                _confirmTrashReport(item);
+              },
+              onAdminModerate: widget.isAdminUser
+                  ? (status) => _handleAdminModeration(item, status)
+                  : null,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -5493,6 +8404,18 @@ class MapScreenState extends State<MapScreen>
             final bool isDark = AppSettings.instance.isDarkMode;
             final double viewportWidth = MediaQuery.sizeOf(context).width;
             final bool isCompactViewport = viewportWidth < 420;
+            final bool isCompactWorkspace = kIsWeb && viewportWidth < 900;
+            final double sidePanelWidth = viewportWidth < 1180
+                ? WebDesign.mapPanelCompactWidth
+                : WebDesign.mapPanelWidth;
+
+            final WebReportQueryResult queryResult = _computeReportQuery();
+            final List<PotholeMarker> filteredMarkers = _markersForMapDisplay(
+              _markersForResult(queryResult),
+            );
+            final List<WebUnifiedSearchSuggestion> unifiedSuggestions =
+                _buildUnifiedSuggestions(queryResult.items);
+
             final bool isClearAhead =
                 _nearestPotholeInfo.isEmpty ||
                 _nearestPotholeInfo == 'Clear ahead';
@@ -5501,12 +8424,18 @@ class MapScreenState extends State<MapScreen>
                     _selectedRouteIndex < _alternativeRoutes.length
                 ? _selectedRouteIndex
                 : 0;
+            final RouteHazardSummary? activeSummary =
+                _activeRouteIndex?.summary ??
+                (_routeComparison != null &&
+                        activeRouteIndex < _routeComparison!.options.length
+                    ? _routeComparison!.options[activeRouteIndex].summary
+                    : null);
             final int activePotholeCount =
                 (_destination != null || _routePoints.isNotEmpty)
-                ? (activeRouteIndex < _routePotholeCounts.length &&
-                          _routePotholeCounts[activeRouteIndex] > 0
-                      ? _routePotholeCounts[activeRouteIndex]
-                      : _potholesOnRoute.length)
+                ? (activeSummary?.distinctPotholeCount ??
+                      (activeRouteIndex < _routePotholeCounts.length
+                          ? _routePotholeCounts[activeRouteIndex]
+                          : _potholesOnRoute.length))
                 : 0;
             final List<LatLng> activeRoutePolyline =
                 _alternativeRoutes.isNotEmpty
@@ -5554,595 +8483,943 @@ class MapScreenState extends State<MapScreen>
               potholeCount: activePotholeCount,
             );
 
-            return Scaffold(
-              body: _isLoadingLocation && _currentPosition == null
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 16),
-                          Text("Locating you on the map..."),
-                        ],
-                      ),
-                    )
-                  : Stack(
-                      children: [
-                        MouseRegion(
-                          cursor: _isPlacingMarker || _isEditingDevLocation
-                              ? SystemMouseCursors.precise
-                              : (_isMapDragging
-                                    ? SystemMouseCursors.grabbing
-                                    : SystemMouseCursors.grab),
-                          child: Listener(
-                            onPointerDown: (_) {
-                              if (!_isMapDragging && mounted) {
-                                setState(() => _isMapDragging = true);
+            final Widget routePlannerWidget = _buildRoutePlanningContent(
+              isDark: isDark,
+              isClearAhead: isClearAhead,
+              distStr: distStr,
+              totalEtaStr: totalEtaStr,
+              activePotholeCount: activePotholeCount,
+            );
+
+            final Widget mapCanvasStack = Stack(
+              children: [
+                MouseRegion(
+                  cursor: _isPlacingMarker || _isEditingDevLocation
+                      ? SystemMouseCursors.precise
+                      : (_isMapDragging
+                            ? SystemMouseCursors.grabbing
+                            : SystemMouseCursors.grab),
+                  child: Listener(
+                    onPointerDown: (_) {
+                      if (!_isMapDragging && mounted) {
+                        setState(() => _isMapDragging = true);
+                      }
+                    },
+                    onPointerUp: (_) {
+                      if (_isMapDragging && mounted) {
+                        setState(() => _isMapDragging = false);
+                      }
+                    },
+                    onPointerCancel: (_) {
+                      if (_isMapDragging && mounted) {
+                        setState(() => _isMapDragging = false);
+                      }
+                    },
+                    child: FlutterMap(
+                      mapController: _mapController,
+                      options: MapOptions(
+                        initialCenter:
+                            _initialUrlCenter ??
+                            _currentPosition ??
+                            _bulacanCenter,
+                        initialZoom: _initialUrlZoom ?? 15.0,
+                        minZoom: 3.0,
+                        maxZoom: 19.0,
+                        interactionOptions: const InteractionOptions(
+                          flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                          pinchMoveThreshold: 35.0,
+                          scrollWheelVelocity: 0.005,
+                        ),
+                        onPositionChanged: _onMapPositionChanged,
+                        onTap: (_, point) {
+                          if (_isPlacingMarker) {
+                            setState(() => _pendingMarkerLocation = point);
+                          } else if (_isEditingDevLocation) {
+                            setState(() => _pendingDevLocation = point);
+                          } else if (_isRoutePlanningMode) {
+                            // Route Planning Mode: tapping the map sets Point A or Point B directly
+                            if (_isSearchHistoryOpen ||
+                                _suggestions.isNotEmpty) {
+                              setState(() {
+                                _isSearchHistoryOpen = false;
+                                _suggestions = [];
+                              });
+                              _searchFocusNode.unfocus();
+                              _originFocusNode.unfocus();
+                              _destinationFocusNode.unfocus();
+                            }
+
+                            // 1. If user tapped directly on an alternative route, select that route
+                            if (_alternativeRoutes.length > 1) {
+                              int? tappedIndex;
+                              double minD = double.infinity;
+                              final double zoom = _mapController.camera.zoom;
+                              final double threshold =
+                                  (60000.0 / (1 << zoom.floor())).clamp(
+                                    30.0,
+                                    200.0,
+                                  );
+
+                              for (
+                                int i = 0;
+                                i < _alternativeRoutes.length;
+                                i++
+                              ) {
+                                final d = _distancePointToRouteMeters(
+                                  point,
+                                  _alternativeRoutes[i],
+                                );
+                                if (d <= threshold && d < minD) {
+                                  minD = d;
+                                  tappedIndex = i;
+                                }
                               }
-                            },
-                            onPointerUp: (_) {
-                              if (_isMapDragging && mounted) {
-                                setState(() => _isMapDragging = false);
+
+                              if (tappedIndex != null &&
+                                  tappedIndex != _selectedRouteIndex) {
+                                _selectActiveRoute(tappedIndex);
+                                return;
                               }
-                            },
-                            onPointerCancel: (_) {
-                              if (_isMapDragging && mounted) {
-                                setState(() => _isMapDragging = false);
+                            }
+
+                            if (_isEditingOrigin) {
+                              // User is choosing Point A (Starting Point)
+                              final coordStr =
+                                  '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+                              setState(() {
+                                _customOrigin = point;
+                                _originController.text = coordStr;
+                                _originTextDirty = false;
+                                _suggestions = [];
+                                _isSearchHistoryOpen = false;
+                              });
+                              _reverseGeocodeLabel(point).then((label) {
+                                if (mounted &&
+                                    _customOrigin == point &&
+                                    label.isNotEmpty) {
+                                  setState(
+                                    () => _originController.text = label,
+                                  );
+                                }
+                              });
+                              final dest =
+                                  _destination ??
+                                  (_routePoints.isNotEmpty
+                                      ? _routePoints.last
+                                      : null);
+                              if (dest != null) {
+                                _ensureEndpointInView(point);
+                                _calculateRoute(
+                                  dest,
+                                  customOrigin: point,
+                                  fitCamera: false,
+                                  silent: true,
+                                );
                               }
-                            },
-                            child: FlutterMap(
-                              mapController: _mapController,
-                              options: MapOptions(
-                                initialCenter: _initialUrlCenter ??
-                                    _currentPosition ??
-                                    _bulacanCenter,
-                                initialZoom: _initialUrlZoom ?? 15.0,
-                                minZoom: 3.0,
-                                maxZoom: 19.0,
-                                interactionOptions: const InteractionOptions(
-                                  flags:
-                                      InteractiveFlag.all &
-                                      ~InteractiveFlag.rotate,
-                                  pinchMoveThreshold: 35.0,
-                                  scrollWheelVelocity: 0.005,
-                                ),
-                                onPositionChanged: _onMapPositionChanged,
-                                onTap: (_, point) {
-                                  if (_isPlacingMarker) {
-                                    setState(
-                                      () => _pendingMarkerLocation = point,
-                                    );
-                                  } else if (_isEditingDevLocation) {
-                                    setState(() => _pendingDevLocation = point);
-                                  } else {
-                                    // Any map tap closes the search dropdowns first
-                                    if (_isSearchHistoryOpen ||
-                                        _suggestions.isNotEmpty) {
-                                      setState(() {
-                                        _isSearchHistoryOpen = false;
-                                        _suggestions = [];
-                                      });
-                                      _searchFocusNode.unfocus();
-                                      _originFocusNode.unfocus();
-                                      _destinationFocusNode.unfocus();
-                                      return;
-                                    }
+                            } else {
+                              // User is choosing Point B (Destination)
+                              final coordStr =
+                                  '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+                              setState(() {
+                                _destination = point;
+                                _searchController.text = coordStr;
+                                _destinationTextDirty = false;
+                                _suggestions = [];
+                                _isSearchHistoryOpen = false;
+                              });
+                              _showPointToPointPill(
+                                point: point,
+                                autoRoute: false,
+                              );
+                              _rubberBandActiveRoute(newEnd: point);
+                              _reverseGeocodeLabel(point).then((label) {
+                                if (mounted &&
+                                    _destination == point &&
+                                    label.isNotEmpty) {
+                                  setState(
+                                    () => _searchController.text = label,
+                                  );
+                                }
+                              });
+                              if (_originController.text.trim().isEmpty) {
+                                _originController.text = 'Your location';
+                                _customOrigin = null;
+                              }
+                              final start =
+                                  (_originController.text == 'Your location' ||
+                                      _customOrigin == null)
+                                  ? (_currentPosition ?? _bulacanCenter)
+                                  : _customOrigin;
+                              _ensureEndpointInView(point);
+                              _calculateRoute(
+                                point,
+                                customOrigin: start,
+                                fitCamera: false,
+                                silent: true,
+                              );
+                            }
+                          } else {
+                            // Any map tap closes the search dropdowns first
+                            if (_isSearchHistoryOpen ||
+                                _suggestions.isNotEmpty) {
+                              setState(() {
+                                _isSearchHistoryOpen = false;
+                                _suggestions = [];
+                              });
+                              _searchFocusNode.unfocus();
+                              _originFocusNode.unfocus();
+                              _destinationFocusNode.unfocus();
+                              return;
+                            }
 
-                                    // Check if user tapped directly on an alternative route line
-                                    if (_alternativeRoutes.length > 1) {
-                                      int? tappedIndex;
-                                      double minD = double.infinity;
-                                      final double zoom =
-                                          _mapController.camera.zoom;
-                                      final double threshold =
-                                          (60000.0 / (1 << zoom.floor())).clamp(
-                                            30.0,
-                                            200.0,
-                                          );
+                            // Check if user tapped directly on an alternative route line
+                            if (_alternativeRoutes.length > 1) {
+                              int? tappedIndex;
+                              double minD = double.infinity;
+                              final double zoom = _mapController.camera.zoom;
+                              final double threshold =
+                                  (60000.0 / (1 << zoom.floor())).clamp(
+                                    30.0,
+                                    200.0,
+                                  );
 
-                                      for (
-                                        int i = 0;
-                                        i < _alternativeRoutes.length;
-                                        i++
-                                      ) {
-                                        final d = _distancePointToRouteMeters(
-                                          point,
-                                          _alternativeRoutes[i],
-                                        );
-                                        if (d <= threshold && d < minD) {
-                                          minD = d;
-                                          tappedIndex = i;
-                                        }
-                                      }
+                              for (
+                                int i = 0;
+                                i < _alternativeRoutes.length;
+                                i++
+                              ) {
+                                final d = _distancePointToRouteMeters(
+                                  point,
+                                  _alternativeRoutes[i],
+                                );
+                                if (d <= threshold && d < minD) {
+                                  minD = d;
+                                  tappedIndex = i;
+                                }
+                              }
 
-                                      if (tappedIndex != null) {
-                                        _selectActiveRoute(tappedIndex);
-                                        return;
-                                      }
-                                    }
+                              if (tappedIndex != null) {
+                                _selectActiveRoute(tappedIndex);
+                                return;
+                              }
+                            }
 
-                                    if (_selectedPothole != null ||
-                                        _searchedPlace != null ||
-                                        _suggestions.isNotEmpty ||
-                                        _isSearchHistoryOpen) {
-                                      setState(() {
-                                        _selectedPothole = null;
-                                        _searchedPlace = null;
-                                      });
-                                    }
+                            if (_selectedPothole != null ||
+                                _searchedPlace != null ||
+                                _suggestions.isNotEmpty ||
+                                _isSearchHistoryOpen) {
+                              setState(() {
+                                _selectedPothole = null;
+                                _searchedPlace = null;
+                              });
+                            }
 
-                                    // Any map tap while the bar is open closes it
-                                    if (_tappedPoint != null) {
-                                      setState(() {
-                                        _tappedRequestSeq++;
-                                        _tappedPoint = null;
-                                        _tappedPointLabel = '';
-                                        _tappedPointSecondary = '';
-                                      });
-                                      return;
-                                    }
-
-                                    setState(() {
-                                      _tappedRequestSeq++;
-                                      _tappedPoint = point;
-                                      _tappedPointLabel = '';
-                                      _tappedPointSecondary = '';
-                                    });
-                                    _resolveTappedLabel(_tappedRequestSeq);
+                            if (_isP2pPillVisible && _p2pPoint != null) {
+                              final double dist = Geolocator.distanceBetween(
+                                _p2pPoint!.latitude,
+                                _p2pPoint!.longitude,
+                                point.latitude,
+                                point.longitude,
+                              );
+                              if (dist < 10.0) {
+                                setState(() {
+                                  _isP2pPillVisible = false;
+                                  _p2pPoint = null;
+                                  _tappedPoint = null;
+                                  if (!_isRoutePlanningMode) {
+                                    _stopRouteSimulation();
+                                    _resetRoutePlannerState();
                                   }
-                                },
+                                });
+                                return;
+                              }
+                            }
+
+                            setState(() {
+                              _tappedRequestSeq++;
+                              _tappedPoint = point;
+                              _tappedPointLabel = '';
+                              _tappedPointSecondary = '';
+                            });
+                            _resolveTappedLabel(_tappedRequestSeq);
+                            _showPointToPointPill(point: point);
+                          }
+                        },
+                      ),
+                      children: [
+                        ValueListenableBuilder<String>(
+                          valueListenable:
+                              AppSettings.instance.webMapStyleNotifier,
+                          builder: (context, mapStyle, _) {
+                            String url;
+                            List<String>? subdomains;
+                            if (mapStyle == 'Satellite') {
+                              url =
+                                  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+                            } else if (mapStyle == 'Dark Canvas') {
+                              url =
+                                  'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+                            } else if (mapStyle == 'OpenStreetMap') {
+                              url =
+                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+                            } else {
+                              url =
+                                  'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+                              subdomains = const ['0', '1', '2', '3'];
+                            }
+                            return TileLayer(
+                              key: ValueKey(mapStyle),
+                              urlTemplate: url,
+                              subdomains: subdomains ?? const ['a', 'b', 'c'],
+                              userAgentPackageName:
+                                  'com.example.pothole_scanner',
+                              tileDisplay: const TileDisplay.fadeIn(
+                                duration: Duration(milliseconds: 120),
                               ),
-                              children: [
-                                ValueListenableBuilder<String>(
-                                  valueListenable:
-                                      AppSettings.instance.webMapStyleNotifier,
-                                  builder: (context, mapStyle, _) {
-                                    String url;
-                                    List<String>? subdomains;
-                                    if (mapStyle == 'Satellite') {
-                                      url =
-                                          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-                                    } else if (mapStyle == 'Dark Canvas') {
-                                      url =
-                                          'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
-                                    } else if (mapStyle == 'OpenStreetMap') {
-                                      url =
-                                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-                                    } else {
-                                      url =
-                                          'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
-                                      subdomains = const ['0', '1', '2', '3'];
-                                    }
-                                    return TileLayer(
-                                      key: ValueKey(mapStyle),
-                                      urlTemplate: url,
-                                      subdomains: subdomains ?? const ['a', 'b', 'c'],
-                                      userAgentPackageName:
-                                          'com.example.pothole_scanner',
-                                      tileDisplay: const TileDisplay.fadeIn(
-                                        duration: Duration(milliseconds: 120),
-                                      ),
-                                      panBuffer: 2,
-                                      keepBuffer: 6,
-                                      minZoom: 3,
-                                      maxZoom: 20,
-                                      maxNativeZoom: 20,
+                              panBuffer: 2,
+                              keepBuffer: 6,
+                              minZoom: 3,
+                              maxZoom: 20,
+                              maxNativeZoom: 20,
+                            );
+                          },
+                        ),
+                        // Route Polylines (Google Maps Style: Bold Main + Faint Alternatives)
+                        if (_alternativeRoutes.isNotEmpty)
+                          PolylineLayer(
+                            polylines: [
+                              // 1. Draw unselected alternative routes as faint slate/grey lines
+                              ..._alternativeRoutes
+                                  .asMap()
+                                  .entries
+                                  .where((e) => e.key != _selectedRouteIndex)
+                                  .map((e) {
+                                    return Polyline(
+                                      points: e.value,
+                                      color: isDark
+                                          ? const Color(
+                                              0xFF475569,
+                                            ).withValues(alpha: 0.8)
+                                          : const Color(
+                                              0xFF94A3B8,
+                                            ).withValues(alpha: 0.85),
+                                      strokeWidth: 5.5,
+                                      strokeCap: StrokeCap.round,
+                                      strokeJoin: StrokeJoin.round,
                                     );
-                                  },
-                                ),
-                                // Route Polylines (Google Maps Style: Bold Main + Faint Alternatives)
-                                if (_alternativeRoutes.isNotEmpty)
-                                  PolylineLayer(
-                                    polylines: [
-                                      // 1. Draw unselected alternative routes as faint slate/grey lines
-                                      ..._alternativeRoutes
-                                          .asMap()
-                                          .entries
-                                          .where(
-                                            (e) => e.key != _selectedRouteIndex,
-                                          )
-                                          .map((e) {
-                                            return Polyline(
-                                              points: e.value,
-                                              color: isDark
-                                                  ? const Color(
-                                                      0xFF475569,
-                                                    ).withValues(alpha: 0.8)
-                                                  : const Color(
-                                                      0xFF94A3B8,
-                                                    ).withValues(alpha: 0.85),
-                                              strokeWidth: 5.5,
-                                              strokeCap: StrokeCap.round,
-                                              strokeJoin: StrokeJoin.round,
-                                            );
-                                          }),
-                                      // 2. Draw selected main route with Google Blue glow & core
-                                      Polyline(
-                                        points: activeRoutePolyline,
-                                        color: const Color(
-                                          0xFF1557A6,
-                                        ).withValues(alpha: 0.5),
-                                        strokeWidth: 11.5,
-                                        strokeCap: StrokeCap.round,
-                                        strokeJoin: StrokeJoin.round,
-                                      ),
-                                      Polyline(
-                                        points: activeRoutePolyline,
-                                        color: const Color(0xFF2563EB),
-                                        strokeWidth: 6.5,
-                                        strokeCap: StrokeCap.round,
-                                        strokeJoin: StrokeJoin.round,
-                                      ),
-                                    ],
-                                  )
-                                else if (_routePoints.isNotEmpty)
-                                  PolylineLayer(
-                                    polylines: [
-                                      Polyline(
-                                        points: _routePoints,
-                                        color: AppDesign.accent(
-                                          isDark,
-                                        ).withValues(alpha: 0.5),
-                                        strokeWidth: 10.0,
-                                        strokeCap: StrokeCap.round,
-                                        strokeJoin: StrokeJoin.round,
-                                      ),
-                                      Polyline(
-                                        points: _routePoints,
-                                        color: AppDesign.accent(isDark),
-                                        strokeWidth: 6.0,
-                                        strokeCap: StrokeCap.round,
-                                        strokeJoin: StrokeJoin.round,
-                                      ),
-                                    ],
-                                  ),
-                                if (_showHeatmap)
-                                  CircleLayer(
-                                    key: const ValueKey('pothole_heatmap'),
-                                    circles: widget.detectedPotholes
-                                        .where(
-                                          (p) =>
-                                              p.status != 'deleted' &&
-                                              p.status != 'rejected',
-                                        )
-                                        .map((p) {
-                                          final severity = p.overallSeverity
-                                              .toLowerCase();
-                                          final Color color = severity == 'high'
-                                              ? const Color(0xFFEF4444)
-                                              : severity == 'low'
-                                              ? const Color(0xFFEAB308)
-                                              : const Color(0xFFF97316);
-                                          return CircleMarker(
-                                            point: p.location,
-                                            radius: 110,
-                                            useRadiusInMeter: true,
-                                            color: color.withValues(
-                                              alpha: 0.38,
+                                  }),
+                              // 2. Draw selected main route with Google Blue glow & core
+                              Polyline(
+                                points: activeRoutePolyline,
+                                color: const Color(
+                                  0xFF1557A6,
+                                ).withValues(alpha: 0.5),
+                                strokeWidth: 11.5,
+                                strokeCap: StrokeCap.round,
+                                strokeJoin: StrokeJoin.round,
+                              ),
+                              Polyline(
+                                points: activeRoutePolyline,
+                                color: const Color(0xFF2563EB),
+                                strokeWidth: 6.5,
+                                strokeCap: StrokeCap.round,
+                                strokeJoin: StrokeJoin.round,
+                              ),
+                            ],
+                          )
+                        else if (_routePoints.isNotEmpty)
+                          PolylineLayer(
+                            polylines: [
+                              Polyline(
+                                points: _routePoints,
+                                color: AppDesign.accent(
+                                  isDark,
+                                ).withValues(alpha: 0.5),
+                                strokeWidth: 10.0,
+                                strokeCap: StrokeCap.round,
+                                strokeJoin: StrokeJoin.round,
+                              ),
+                              Polyline(
+                                points: _routePoints,
+                                color: AppDesign.accent(isDark),
+                                strokeWidth: 6.0,
+                                strokeCap: StrokeCap.round,
+                                strokeJoin: StrokeJoin.round,
+                              ),
+                            ],
+                          ),
+                        if (_showHeatmap)
+                          CircleLayer(
+                            key: const ValueKey('pothole_heatmap'),
+                            circles: filteredMarkers.map((p) {
+                              final severity = p.overallSeverity.toLowerCase();
+                              final Color color = severity == 'high'
+                                  ? const Color(0xFFEF4444)
+                                  : severity == 'low'
+                                  ? const Color(0xFFEAB308)
+                                  : const Color(0xFF0284C7);
+                              return CircleMarker(
+                                point: p.location,
+                                radius: 110,
+                                useRadiusInMeter: true,
+                                color: color.withValues(alpha: 0.38),
+                                borderColor: color.withValues(alpha: 0.85),
+                                borderStrokeWidth: 2,
+                              );
+                            }).toList(),
+                          ),
+                        MarkerLayer(
+                          markers: [
+                            if (_currentPosition != null)
+                              Marker(
+                                point: _currentPosition!,
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // Google Maps Breathing Radar Pulse Halo
+                                      AnimatedBuilder(
+                                        animation: _puckPulseController,
+                                        builder: (context, _) {
+                                          final t = _puckPulseController.value;
+                                          final haloSize = 18.0 + t * 28.0;
+                                          final haloOpacity = (1.0 - t) * 0.42;
+                                          return Container(
+                                            width: haloSize,
+                                            height: haloSize,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: const Color(
+                                                0xFF1A73E8,
+                                              ).withValues(alpha: haloOpacity),
                                             ),
-                                            borderColor: color.withValues(
-                                              alpha: 0.85,
-                                            ),
-                                            borderStrokeWidth: 2,
                                           );
-                                        })
-                                        .toList(),
-                                  ),
-                                MarkerLayer(
-                                  markers: [
-                                    if (_currentPosition != null)
-                                      Marker(
-                                        point: _currentPosition!,
-                                        width: 48,
-                                        height: 48,
-                                        child: Center(
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              // Google Maps Breathing Radar Pulse Halo
-                                              AnimatedBuilder(
-                                                animation: _puckPulseController,
-                                                builder: (context, _) {
-                                                  final t =
-                                                      _puckPulseController.value;
-                                                  final haloSize =
-                                                      18.0 + t * 28.0;
-                                                  final haloOpacity =
-                                                      (1.0 - t) * 0.42;
-                                                  return Container(
-                                                    width: haloSize,
-                                                    height: haloSize,
-                                                    decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
-                                                      color: const Color(
-                                                        0xFF1A73E8,
-                                                      ).withValues(
-                                                        alpha: haloOpacity,
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                              // Core Google Blue Dot
-                                              Container(
-                                                width: 18,
-                                                height: 18,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: const Color(0xFF1A73E8),
-                                                  boxShadow: const [
-                                                    BoxShadow(
-                                                      color: Colors.black26,
-                                                      blurRadius: 6,
-                                                      spreadRadius: 1,
-                                                    ),
-                                                  ],
-                                                  border: Border.all(
-                                                    color: Colors.white,
-                                                    width: 2.5,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
+                                        },
+                                      ),
+                                      // Core Google Blue Dot
+                                      Container(
+                                        width: 18,
+                                        height: 18,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: const Color(0xFF1A73E8),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Colors.black26,
+                                              blurRadius: 6,
+                                              spreadRadius: 1,
+                                            ),
+                                          ],
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2.5,
                                           ),
                                         ),
                                       ),
-                                    // Tappable clustered pothole markers with 10m Radial Spider Tree expansion
-                                    ..._clusterPotholes(
-                                      widget.detectedPotholes
-                                          .where(
-                                            (p) =>
-                                                p.status != 'deleted' &&
-                                                p.status != 'rejected',
-                                          )
-                                          .where(
-                                            (p) => _visibleBounds.contains(
-                                              p.location,
-                                            ),
-                                          )
-                                          .toList(),
-                                      radiusMeters: 10.0,
-                                    ).map((cluster) {
-                                      if (cluster.isSingle) {
-                                        final pothole = cluster.singleItem;
-                                        final bool isSelected =
-                                            _selectedPothole != null &&
-                                            (_selectedPothole == pothole ||
-                                                (_selectedPothole!.docId !=
-                                                        null &&
-                                                    pothole.docId != null &&
-                                                    _selectedPothole!.docId ==
-                                                        pothole.docId) ||
-                                                (_selectedPothole!
-                                                            .location
-                                                            .latitude ==
-                                                        pothole
-                                                            .location
-                                                            .latitude &&
-                                                    _selectedPothole!
-                                                            .location
-                                                            .longitude ==
-                                                        pothole
-                                                            .location
-                                                            .longitude));
-                                        final double baseMarkerSize =
-                                            _getDynamicMarkerSize();
-                                        final double dynamicSize = isSelected
-                                            ? (baseMarkerSize * 1.35).clamp(
-                                                24.0,
-                                                56.0,
-                                              )
-                                            : baseMarkerSize;
-
-                                        return Marker(
-                                          key: ValueKey(
-                                            'detected_${pothole.id ?? pothole.docId ?? pothole.timestamp.millisecondsSinceEpoch}',
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (_searchedPlace != null &&
+                                _searchedPlace!['location'] is LatLng)
+                              Marker(
+                                key: const ValueKey('searched_place_pin'),
+                                point: _searchedPlace!['location'] as LatLng,
+                                width: 44,
+                                height: 44,
+                                child: Tooltip(
+                                  message:
+                                      (_searchedPlace!['name'] ??
+                                              'Searched place')
+                                          .toString(),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: WebDesign.brand(isDark),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 2.5,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.25,
                                           ),
-                                          point: pothole.location,
-                                          width: dynamicSize,
-                                          height: dynamicSize,
-                                          child: GestureDetector(
-                                            onTap: () {
-                                              if (_selectedPothole != null ||
-                                                  _searchedPlace != null ||
-                                                  _suggestions.isNotEmpty ||
-                                                  _isSearchHistoryOpen) {
-                                                setState(() {
-                                                  _selectedPothole = null;
-                                                  _searchedPlace = null;
-                                                  _suggestions = [];
-                                                  _isSearchHistoryOpen = false;
-                                                });
-                                                _searchFocusNode.unfocus();
-                                                _originFocusNode.unfocus();
-                                                _destinationFocusNode.unfocus();
-                                              }
-                                              setState(() {
-                                                _selectedPothole = pothole;
-                                                _expandedClusterId = null;
-                                              });
-                                              _animatedMapMove(
-                                                pothole.location,
-                                                17.5,
-                                                offsetForSidebar: true,
-                                              );
-                                            },
-                                            child: _buildUnifiedPotholeIcon(
-                                              status: pothole.status,
-                                              severity: pothole.overallSeverity,
-                                              count: pothole.potholeCount,
-                                              size: dynamicSize,
-                                              isSelected: isSelected,
-                                            ),
-                                          ),
-                                        );
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.place_rounded,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            // Tappable clustered pothole markers with 10m Radial Spider Tree expansion
+                            ..._clusterPotholes(
+                              _filterMarkersInViewport(filteredMarkers),
+                              radiusMeters: 10.0,
+                            ).map((cluster) {
+                              if (cluster.isSingle) {
+                                final pothole = cluster.singleItem;
+                                final bool isSelected =
+                                    _selectedPothole != null &&
+                                    (_selectedPothole == pothole ||
+                                        (_selectedPothole!.docId != null &&
+                                            pothole.docId != null &&
+                                            _selectedPothole!.docId ==
+                                                pothole.docId) ||
+                                        (_selectedPothole!.location.latitude ==
+                                                pothole.location.latitude &&
+                                            _selectedPothole!
+                                                    .location
+                                                    .longitude ==
+                                                pothole.location.longitude));
+                                final double baseMarkerSize =
+                                    _getDynamicMarkerSize();
+                                final double dynamicSize = isSelected
+                                    ? (baseMarkerSize * 1.35).clamp(24.0, 56.0)
+                                    : baseMarkerSize;
+                                return Marker(
+                                  key: ValueKey(
+                                    'detected_${pothole.id ?? pothole.docId ?? pothole.timestamp.millisecondsSinceEpoch}',
+                                  ),
+                                  point: pothole.location,
+                                  width: math.max(48, dynamicSize + 26),
+                                  height: math.max(48, dynamicSize + 26),
+                                  child: WebMapMarkerButton(
+                                    label:
+                                        '${pothole.primaryDefect} (${pothole.primaryDpwhCode}), ${pothole.status}',
+                                    onTap: () {
+                                      if (DeveloperMarkers.owns(
+                                        pothole.docId,
+                                      )) {
+                                        _startMarkerPlacement(pothole);
+                                        return;
                                       }
 
-                                      // Multiple distinct potholes within 10m tolerance
-                                      final bool isExpanded =
-                                          _expandedClusterId == cluster.id;
+                                      _searchFocusNode.unfocus();
+                                      _originFocusNode.unfocus();
+                                      _destinationFocusNode.unfocus();
+                                      setState(() {
+                                        _searchedPlace = null;
+                                        _isSearchHistoryOpen = false;
+                                      });
+                                      _setSelectedPothole(
+                                        pothole,
+                                        notify: true,
+                                        animate: true,
+                                      );
+                                      if (isCompactWorkspace) {
+                                        _openCompactReportSheet(pothole);
+                                      }
+                                    },
+                                    child: Center(
+                                      child: _buildUnifiedPotholeIcon(
+                                        status: pothole.status,
+                                        severity: pothole.overallSeverity,
+                                        primaryDefect: pothole.primaryDefect,
+                                        count: pothole.potholeCount,
+                                        size: dynamicSize,
+                                        isSelected: isSelected,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
 
-                                      if (isExpanded) {
-                                        final count = cluster.items.length;
-                                        final double radius = count <= 2
-                                            ? 46.0
-                                            : (count <= 4 ? 54.0 : 64.0);
-                                        final double boxSize =
-                                            (radius + 28.0) * 2;
+                              // Multiple distinct potholes within 10m tolerance
+                              final bool isExpanded =
+                                  _expandedClusterId == cluster.id;
 
-                                        return Marker(
-                                          key: ValueKey('spider_${cluster.id}'),
-                                          point: cluster.center,
-                                          width: boxSize,
-                                          height: boxSize,
-                                          child: _buildSpiderClusterMarker(
-                                            cluster,
-                                            isDark,
+                              if (isExpanded) {
+                                final count = cluster.items.length;
+                                final double radius = count <= 2
+                                    ? 46.0
+                                    : (count <= 4 ? 54.0 : 64.0);
+                                final double boxSize = (radius + 28.0) * 2;
+
+                                return Marker(
+                                  key: ValueKey('spider_${cluster.id}'),
+                                  point: cluster.center,
+                                  width: boxSize,
+                                  height: boxSize,
+                                  child: _buildSpiderClusterMarker(
+                                    cluster,
+                                    isDark,
+                                  ),
+                                );
+                              } else {
+                                // Unexpanded 10m Cluster Marker
+                                return Marker(
+                                  key: ValueKey('cluster_${cluster.id}'),
+                                  point: cluster.center,
+                                  width: 48,
+                                  height: 48,
+                                  child: WebMapMarkerButton(
+                                    label:
+                                        'Expand ${cluster.items.length} nearby reports',
+                                    onTap: () {
+                                      setState(() {
+                                        _expandedClusterId = cluster.id;
+                                      });
+                                      _animatedMapMove(
+                                        cluster.center,
+                                        _mapController.camera.zoom.clamp(
+                                          16.0,
+                                          18.5,
+                                        ),
+                                      );
+                                    },
+                                    child: Center(
+                                      child: SizedBox.square(
+                                        dimension: (_getDynamicMarkerSize() + 4)
+                                            .clamp(22.0, 34.0),
+                                        child: Stack(
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            Container(
+                                              width:
+                                                  (_getDynamicMarkerSize() + 4)
+                                                      .clamp(22.0, 34.0),
+                                              height:
+                                                  (_getDynamicMarkerSize() + 4)
+                                                      .clamp(22.0, 34.0),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: const Color(0xFF9333EA),
+                                                border: Border.all(
+                                                  color: Colors.white,
+                                                  width: 2.2,
+                                                ),
+                                                boxShadow: const [
+                                                  BoxShadow(
+                                                    color: Colors.black38,
+                                                    blurRadius: 6,
+                                                    offset: Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: const Center(
+                                                child: Icon(
+                                                  Icons.hub_rounded,
+                                                  color: Colors.white,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                            ),
+
+                                            Positioned(
+                                              top: -2,
+                                              right: -2,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 5,
+                                                      vertical: 1.5,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFF00796B,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 1.2,
+                                                  ),
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                      color: Colors.black26,
+                                                      blurRadius: 3,
+                                                      offset: Offset(0, 1),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Text(
+                                                  '${cluster.items.length}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                            }),
+
+                            // Custom Start Location Pin (Draggable — shown whenever an active route/destination exists)
+                            if (_customOrigin != null || _destination != null)
+                              _buildDraggableEndpointPin(
+                                point:
+                                    _customOrigin ??
+                                    _currentPosition ??
+                                    _bulacanCenter,
+                                kind: 1,
+                                color: const Color(0xFF0284C7),
+                              ),
+
+                            // Destination Location Pin (Draggable)
+                            if (_destination != null)
+                              _buildDraggableEndpointPin(
+                                point: _destination!,
+                                kind: 2,
+                                color: const Color(0xFFFB7185),
+                              ),
+
+                            // Active Selected Turn-by-Turn Maneuver Dot (Clean, High-Visibility Google Maps / OSRM Waypoint Dot)
+                            if (_selectedStepIndex != null &&
+                                _routeSteps.isNotEmpty &&
+                                _selectedStepIndex! < _routeSteps.length)
+                              Marker(
+                                key: ValueKey(
+                                  'active_step_marker_$_selectedStepIndex',
+                                ),
+                                point:
+                                    _routeSteps[_selectedStepIndex!].location,
+                                width: 36,
+                                height: 36,
+                                child: Center(
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // 1. Translucent Focus Glow Ring (Leaves map roads 100% visible)
+                                      Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: const Color(
+                                            0xFF2563EB,
+                                          ).withValues(alpha: 0.25),
+                                        ),
+                                      ),
+                                      // 2. High-Visibility Crisp Focus Core Dot
+                                      Container(
+                                        width: 15,
+                                        height: 15,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: const Color(0xFF2563EB),
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2.5,
                                           ),
-                                        );
-                                      } else {
-                                        // Unexpanded 10m Cluster Marker
-                                        return Marker(
-                                          key: ValueKey(
-                                            'cluster_${cluster.id}',
-                                          ),
-                                          point: cluster.center,
-                                          width: 44,
-                                          height: 44,
-                                          child: GestureDetector(
-                                            onTap: () {
-                                              setState(() {
-                                                _expandedClusterId = cluster.id;
-                                              });
-                                              _animatedMapMove(
-                                                cluster.center,
-                                                _mapController.camera.zoom
-                                                    .clamp(16.0, 18.5),
-                                              );
-                                            },
-                                            child: Stack(
-                                              clipBehavior: Clip.none,
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Colors.black45,
+                                              blurRadius: 4,
+                                              offset: Offset(0, 1.5),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                            // Google Maps Style Floating Route Duration & Selection Badges
+                            if (_alternativeRoutes.length > 1) ...[
+                              for (
+                                int rIdx = 0;
+                                rIdx < _alternativeRoutes.length;
+                                rIdx++
+                              )
+                                if (_alternativeRoutes[rIdx].length > 2)
+                                  Marker(
+                                    key: ValueKey('route_eta_badge_$rIdx'),
+                                    point:
+                                        _alternativeRoutes[rIdx][_alternativeRoutes[rIdx]
+                                                .length ~/
+                                            2],
+                                    width: 158,
+                                    height: 38,
+                                    child: Builder(
+                                      builder: (context) {
+                                        final int rHazards =
+                                            rIdx < _routePotholeCounts.length
+                                            ? _routePotholeCounts[rIdx]
+                                            : 0;
+                                        final bool isSelected =
+                                            rIdx == _selectedRouteIndex;
+                                        final bool isRecommended =
+                                            _routeSwitchSuggestion
+                                                ?.recommendedRouteIndex ==
+                                            rIdx;
+                                        return GestureDetector(
+                                          onTap: () => _selectActiveRoute(rIdx),
+                                          child: AnimatedContainer(
+                                            duration: const Duration(
+                                              milliseconds: 200,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: isSelected
+                                                  ? const Color(0xFF2563EB)
+                                                  : (isRecommended
+                                                        ? const Color(
+                                                            0xFF059669,
+                                                          )
+                                                        : (isDark
+                                                              ? const Color(
+                                                                  0xFF1E293B,
+                                                                )
+                                                              : Colors.white)),
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              border: Border.all(
+                                                color:
+                                                    (isSelected ||
+                                                        isRecommended)
+                                                    ? Colors.white
+                                                    : (isDark
+                                                          ? const Color(
+                                                              0xFF475569,
+                                                            )
+                                                          : const Color(
+                                                              0xFFCBD5E1,
+                                                            )),
+                                                width: isSelected ? 2.0 : 1.2,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: isSelected
+                                                      ? const Color(
+                                                          0xFF2563EB,
+                                                        ).withValues(
+                                                          alpha: 0.45,
+                                                        )
+                                                      : Colors.black26,
+                                                  blurRadius: 6,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
                                               children: [
+                                                Icon(
+                                                  _travelMode ==
+                                                          OsrmTravelMode.bike
+                                                      ? Icons
+                                                            .directions_bike_rounded
+                                                      : (_travelMode ==
+                                                                OsrmTravelMode
+                                                                    .foot
+                                                            ? Icons
+                                                                  .directions_walk_rounded
+                                                            : Icons
+                                                                  .directions_car_rounded),
+                                                  size: 13,
+                                                  color:
+                                                      (isSelected ||
+                                                          isRecommended)
+                                                      ? Colors.white
+                                                      : (isDark
+                                                            ? Colors.white70
+                                                            : const Color(
+                                                                0xFF5F6368,
+                                                              )),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Flexible(
+                                                  child: Text(
+                                                    rIdx <
+                                                            _routeDurations
+                                                                .length
+                                                        ? (isSelected
+                                                              ? totalEtaStr
+                                                              : _formatEta(
+                                                                  _routeDurations[rIdx],
+                                                                  distanceMeters:
+                                                                      rIdx <
+                                                                          _routeDistances
+                                                                              .length
+                                                                      ? _routeDistances[rIdx]
+                                                                      : 0,
+                                                                  potholeCount:
+                                                                      rHazards,
+                                                                ))
+                                                        : 'Route ${rIdx + 1}',
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 11.0,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color:
+                                                          (isSelected ||
+                                                              isRecommended)
+                                                          ? Colors.white
+                                                          : (isDark
+                                                                ? Colors.white
+                                                                : const Color(
+                                                                    0xFF202124,
+                                                                  )),
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 5),
                                                 Container(
-                                                  width: 38,
-                                                  height: 38,
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 5,
+                                                        vertical: 1.5,
+                                                      ),
                                                   decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    color: const Color(
-                                                      0xFF9333EA,
-                                                    ),
-                                                    border: Border.all(
-                                                      color: Colors.white,
-                                                      width: 2.2,
-                                                    ),
-                                                    boxShadow: const [
-                                                      BoxShadow(
-                                                        color: Colors.black38,
-                                                        blurRadius: 6,
-                                                        offset: Offset(0, 2),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  child: const Center(
-                                                    child: Icon(
-                                                      Icons.hub_rounded,
-                                                      color: Colors.white,
-                                                      size: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                Builder(
-                                                  builder: (context) {
-                                                    int highCount = 0;
-                                                    int medCount = 0;
-                                                    int lowCount = 0;
-                                                    for (final item
-                                                        in cluster.items) {
-                                                      final s = item
-                                                          .overallSeverity
-                                                          .toLowerCase();
-                                                      if (s == 'high') {
-                                                        highCount++;
-                                                      } else if (s == 'low') {
-                                                        lowCount++;
-                                                      } else {
-                                                        medCount++;
-                                                      }
-                                                    }
-                                                    return Positioned(
-                                                      bottom: -10,
-                                                      left: -6,
-                                                      right: -6,
-                                                      child: Row(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .center,
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          if (highCount > 0)
-                                                            _severityBreakdownDot(
-                                                              const Color(
-                                                                0xFFEF4444,
-                                                              ),
-                                                              highCount,
-                                                            ),
-                                                          if (medCount > 0)
-                                                            _severityBreakdownDot(
-                                                              const Color(
-                                                                0xFFF97316,
-                                                              ),
-                                                              medCount,
-                                                            ),
-                                                          if (lowCount > 0)
-                                                            _severityBreakdownDot(
-                                                              const Color(
-                                                                0xFFEAB308,
-                                                              ),
-                                                              lowCount,
-                                                            ),
-                                                        ],
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                                Positioned(
-                                                  top: -2,
-                                                  right: -2,
-                                                  child: Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 5,
-                                                          vertical: 1.5,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(
-                                                        0xFF00796B,
-                                                      ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            10,
+                                                    color: rHazards == 0
+                                                        ? const Color(
+                                                            0xFF10B981,
+                                                          ).withValues(
+                                                            alpha: 0.22,
+                                                          )
+                                                        : const Color(
+                                                            0xFFF59E0B,
+                                                          ).withValues(
+                                                            alpha: 0.25,
                                                           ),
-                                                      border: Border.all(
-                                                        color: Colors.white,
-                                                        width: 1.2,
-                                                      ),
-                                                      boxShadow: const [
-                                                        BoxShadow(
-                                                          color: Colors.black26,
-                                                          blurRadius: 3,
-                                                          offset: Offset(0, 1),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
                                                         ),
-                                                      ],
-                                                    ),
-                                                    child: Text(
-                                                      '${cluster.items.length}',
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 9.5,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
+                                                  ),
+                                                  child: Text(
+                                                    rHazards == 0
+                                                        ? 'Clear'
+                                                        : '$rHazards⚠️',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color:
+                                                          (isSelected ||
+                                                              isRecommended)
+                                                          ? Colors.white
+                                                          : (rHazards == 0
+                                                                ? const Color(
+                                                                    0xFF047857,
+                                                                  )
+                                                                : const Color(
+                                                                    0xFFB45309,
+                                                                  )),
                                                     ),
                                                   ),
                                                 ),
@@ -6150,1407 +9427,735 @@ class MapScreenState extends State<MapScreen>
                                             ),
                                           ),
                                         );
-                                      }
-                                    }),
-
-                                    // Custom Start Location Pin (Blue, Draggable — shown even when origin is "Your location")
-                                    if (_customOrigin != null ||
-                                        (_destination != null &&
-                                            _currentPosition != null))
-                                      _buildDraggableEndpointPin(
-                                        point:
-                                            _customOrigin ?? _currentPosition!,
-                                        kind: 1,
-                                        color: const Color(0xFF2563EB),
-                                      ),
-
-                                    // Destination Location Pin (Red, Draggable)
-                                    if (_destination != null)
-                                      _buildDraggableEndpointPin(
-                                        point: _destination!,
-                                        kind: 2,
-                                        color: const Color(0xFFEA4335),
-                                      ),
-
-                                    // Tapped location dot (Google Maps style drop)
-                                    if (_tappedPoint != null)
-                                      Marker(
-                                        key: const ValueKey('tapped_point'),
-                                        point: _tappedPoint!,
-                                        width: 20,
-                                        height: 20,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: Colors.white,
-                                            border: Border.all(
-                                              color: const Color(0xFFEA4335),
-                                              width: 2,
-                                            ),
-                                            boxShadow: const [
-                                              BoxShadow(
-                                                color: Colors.black38,
-                                                blurRadius: 4,
-                                                offset: Offset(0, 1),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Center(
-                                            child: Container(
-                                              width: 7,
-                                              height: 7,
-                                              decoration: const BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: Color(0xFFEA4335),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-
-                                    // Active Selected Turn-by-Turn Maneuver Dot (Clean, High-Visibility Google Maps / OSRM Waypoint Dot)
-                                    if (_selectedStepIndex != null &&
-                                        _routeSteps.isNotEmpty &&
-                                        _selectedStepIndex! <
-                                            _routeSteps.length)
-                                      Marker(
-                                        key: ValueKey(
-                                          'active_step_marker_$_selectedStepIndex',
-                                        ),
-                                        point: _routeSteps[_selectedStepIndex!]
-                                            .location,
-                                        width: 36,
-                                        height: 36,
-                                        child: Center(
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              // 1. Translucent Focus Glow Ring (Leaves map roads 100% visible)
-                                              Container(
-                                                width: 32,
-                                                height: 32,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: const Color(
-                                                    0xFF2563EB,
-                                                  ).withValues(alpha: 0.25),
-                                                ),
-                                              ),
-                                              // 2. High-Visibility Crisp Focus Core Dot
-                                              Container(
-                                                width: 15,
-                                                height: 15,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: const Color(
-                                                    0xFF2563EB,
-                                                  ),
-                                                  border: Border.all(
-                                                    color: Colors.white,
-                                                    width: 2.5,
-                                                  ),
-                                                  boxShadow: const [
-                                                    BoxShadow(
-                                                      color: Colors.black45,
-                                                      blurRadius: 4,
-                                                      offset: Offset(0, 1.5),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-
-                                    // Google Maps Style Floating Route Duration & Selection Badges
-                                    if (_alternativeRoutes.length > 1) ...[
-                                      for (
-                                        int rIdx = 0;
-                                        rIdx < _alternativeRoutes.length;
-                                        rIdx++
-                                      )
-                                        if (_alternativeRoutes[rIdx].length > 2)
-                                          Marker(
-                                            key: ValueKey(
-                                              'route_eta_badge_$rIdx',
-                                            ),
-                                            point:
-                                                _alternativeRoutes[rIdx][_alternativeRoutes[rIdx]
-                                                        .length ~/
-                                                    2],
-                                            width: 105,
-                                            height: 38,
-                                            child: GestureDetector(
-                                              onTap: () =>
-                                                  _selectActiveRoute(rIdx),
-                                              child: AnimatedContainer(
-                                                duration: const Duration(
-                                                  milliseconds: 200,
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      rIdx ==
-                                                          _selectedRouteIndex
-                                                      ? const Color(0xFF2563EB)
-                                                      : (isDark
-                                                            ? const Color(
-                                                                0xFF1E293B,
-                                                              )
-                                                            : Colors.white),
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  border: Border.all(
-                                                    color:
-                                                        rIdx ==
-                                                            _selectedRouteIndex
-                                                        ? Colors.white
-                                                        : (isDark
-                                                              ? const Color(
-                                                                  0xFF475569,
-                                                                )
-                                                              : const Color(
-                                                                  0xFFCBD5E1,
-                                                                )),
-                                                    width:
-                                                        rIdx ==
-                                                            _selectedRouteIndex
-                                                        ? 2.0
-                                                        : 1.2,
-                                                  ),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color:
-                                                          rIdx ==
-                                                              _selectedRouteIndex
-                                                          ? const Color(
-                                                              0xFF2563EB,
-                                                            ).withValues(
-                                                              alpha: 0.45,
-                                                            )
-                                                          : Colors.black26,
-                                                      blurRadius: 6,
-                                                      offset: const Offset(
-                                                        0,
-                                                        2,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      _travelMode ==
-                                                              OsrmTravelMode
-                                                                  .bike
-                                                          ? Icons
-                                                                .directions_bike_rounded
-                                                          : (_travelMode ==
-                                                                    OsrmTravelMode
-                                                                        .foot
-                                                                ? Icons
-                                                                      .directions_walk_rounded
-                                                                : Icons
-                                                                      .directions_car_rounded),
-                                                      size: 13,
-                                                      color:
-                                                          rIdx ==
-                                                              _selectedRouteIndex
-                                                          ? Colors.white
-                                                          : (isDark
-                                                                ? Colors.white70
-                                                                : const Color(
-                                                                    0xFF5F6368,
-                                                                  )),
-                                                    ),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      rIdx <
-                                                              _routeDurations
-                                                                  .length
-                                                          ? (rIdx ==
-                                                                    _selectedRouteIndex
-                                                                ? totalEtaStr
-                                                                : _formatEta(
-                                                                    _routeDurations[rIdx],
-                                                                    distanceMeters:
-                                                                        rIdx <
-                                                                            _routeDistances.length
-                                                                        ? _routeDistances[rIdx]
-                                                                        : 0,
-                                                                    potholeCount:
-                                                                        rIdx <
-                                                                            _routePotholeCounts.length
-                                                                        ? _routePotholeCounts[rIdx]
-                                                                        : 0,
-                                                                  ))
-                                                          : 'Route ${rIdx + 1}',
-                                                      style: TextStyle(
-                                                        fontSize: 11.5,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                        color:
-                                                            rIdx ==
-                                                                _selectedRouteIndex
-                                                            ? Colors.white
-                                                            : (isDark
-                                                                  ? Colors.white
-                                                                  : const Color(
-                                                                      0xFF202124,
-                                                                    )),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                    ],
-
-                                    if (_isPlacingMarker &&
-                                        _pendingMarkerLocation != null)
-                                      Marker(
-                                        key: const ValueKey(
-                                          'pending_marker_placement',
-                                        ),
-                                        point: _pendingMarkerLocation!,
-                                        width: 42,
-                                        height: 42,
-                                        child: DecoratedBox(
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: const Color(0xFF0B6E4F),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          child: _buildUnifiedPotholeIcon(),
-                                        ),
-                                      ),
-
-                                    if (_isEditingDevLocation &&
-                                        _pendingDevLocation != null)
-                                      Marker(
-                                        key: const ValueKey(
-                                          'pending_dev_location_marker',
-                                        ),
-                                        point: _pendingDevLocation!,
-                                        width: 40,
-                                        height: 40,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF2563EB),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.white,
-                                              width: 2,
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.person_pin_circle_rounded,
-                                            color: Colors.white,
-                                            size: 22,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // 1. Floating Top-Left Search Bar, Route Planner, & Dropdowns (Web)
-                        if (kIsWeb && widget.isMapActive)
-                          Positioned(
-                            top: 16,
-                            left: isCompactViewport ? 12 : 20,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: isCompactViewport
-                                    ? (viewportWidth - 24)
-                                    : viewportWidth < 900
-                                    ? 330.0
-                                    : 396.0,
-                                maxHeight:
-                                    (MediaQuery.of(context).size.height - 32)
-                                        .clamp(200.0, 760.0),
-                              ),
-                              child: _isSidePanelCollapsed
-                                  ? _buildCollapsedPanelPill(isDark)
-                                  : (_isRoutePlanningMode
-                                      ? Container(
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? const Color(0xFF1E293B)
-                                                : Colors.white,
-                                            borderRadius:
-                                                BorderRadius.circular(16),
-                                            border: Border.all(
-                                              color: isDark
-                                                  ? const Color(0xFF334155)
-                                                  : const Color(0xFFE2E8F0),
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withValues(
-                                                  alpha: isDark ? 0.45 : 0.15,
-                                                ),
-                                                blurRadius: 18,
-                                                offset: const Offset(0, 4),
-                                              ),
-                                            ],
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: _buildRoutePlanningContent(
-                                            isDark: isDark,
-                                            isClearAhead: isClearAhead,
-                                            distStr: distStr,
-                                            totalEtaStr: totalEtaStr,
-                                            activePotholeCount:
-                                                activePotholeCount,
-                                          ),
-                                        )
-                                      : Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            _buildFloatingSearchBar(
-                                              isDark: isDark,
-                                              isCompactViewport:
-                                                  isCompactViewport,
-                                            ),
-                                            if (_suggestions.isNotEmpty) ...[
-                                              const SizedBox(height: 6),
-                                              ConstrainedBox(
-                                                constraints:
-                                                    const BoxConstraints(
-                                                  maxHeight: 280,
-                                                ),
-                                                child:
-                                                    _buildSuggestionsDropdown(
-                                                  isDark,
-                                                ),
-                                              ),
-                                            ] else if (_isSearchHistoryOpen &&
-                                                _searchController.text.isEmpty &&
-                                                _searchHistory.isNotEmpty) ...[
-                                              const SizedBox(height: 6),
-                                              ConstrainedBox(
-                                                constraints:
-                                                    const BoxConstraints(
-                                                  maxHeight: 340,
-                                                ),
-                                                child:
-                                                    _buildSearchHistoryDropdown(
-                                                  isDark,
-                                                ),
-                                              ),
-                                            ] else ...[
-                                              const SizedBox(height: 8),
-                                              _buildCategoryChipsRow(isDark),
-                                            ],
-                                          ],
-                                        )),
-                            ),
-                          ),
-
-                        // 2. Floating Top-Right Map / Profile / Settings Switcher (Web)
-                        if (kIsWeb && widget.isMapActive)
-                          Positioned(
-                            top: 16,
-                            right: isCompactViewport ? 12 : 20,
-                            child: _buildTopRightMapProfileToggle(
-                              isMapActive: true,
-                            ),
-                          ),
-
-                        // 3. Floating Pothole Hazard Warning Banner (Web)
-                        if (_showWarningBanner &&
-                            _showMarkers &&
-                            !_isLocationDisabled &&
-                            !_isPermissionDenied)
-                          Positioned(
-                            top: 16,
-                            left: isCompactViewport ? 12 : 430,
-                            right: isCompactViewport ? 12 : 360,
-                            child: Center(
-                              child: _buildWebPotholeWarningBanner(
-                                activePotholeCount: activePotholeCount,
-                                nearestInfo: _nearestPotholeInfo,
-                                nextPotholeEta: _nextPotholeEta,
-                              ),
-                            ),
-                          ),
-
-                        // 5. Location Permission Warning (Only when permission denied) — centered
-                        if (widget.isMapActive &&
-                            !_isRoutePlanningMode &&
-                            (_isLocationDisabled || _isPermissionDenied))
-                          Positioned.fill(
-                            child: Center(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: isCompactViewport ? 20 : 0,
-                                ),
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 440,
+                                      },
+                                    ),
                                   ),
-                                  child: _buildLocationPermissionCard(isDark),
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (_isPlacingMarker && _pendingMarkerLocation != null)
-                          Positioned(
-                            left: 12,
-                            right: 12,
-                            bottom: _isSearchVisible
-                                ? (_showWarningBanner ? 186 : 130)
-                                : (_showWarningBanner ? 76 : 20),
-                            child: SafeArea(
-                              child: Container(
-                                padding: const EdgeInsets.fromLTRB(
-                                  14,
-                                  12,
-                                  14,
-                                  12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _inProximityWarning
-                                      ? const Color(0xF2B72A2A)
-                                      : const Color(0xF20F2C25),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: _inProximityWarning
-                                        ? const Color(0x80FFFFFF)
-                                        : const Color(0x803EC9A7),
-                                    width: 1,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black45,
-                                      blurRadius: 12,
-                                      offset: Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text(
-                                      'Move map or tap to place marker',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Lat ${_pendingMarkerLocation!.latitude.toStringAsFixed(6)} • Lng ${_pendingMarkerLocation!.longitude.toStringAsFixed(6)}',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.82,
-                                        ),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: OutlinedButton(
-                                            onPressed: _isSavingPlacedMarker
-                                                ? null
-                                                : _cancelMarkerPlacement,
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.white,
-                                              side: const BorderSide(
-                                                color: Color(0x80FFFFFF),
-                                              ),
-                                            ),
-                                            child: const Text('Cancel'),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: ElevatedButton(
-                                            onPressed: _isSavingPlacedMarker
-                                                ? null
-                                                : _confirmMarkerPlacement,
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(
-                                                0xFF2563EB,
-                                              ),
-                                              foregroundColor: Colors.white,
-                                            ),
-                                            child: _isSavingPlacedMarker
-                                                ? const SizedBox(
-                                                    height: 16,
-                                                    width: 16,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                          color: Colors.white,
-                                                        ),
-                                                  )
-                                                : const Text('OK'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        if (_isEditingDevLocation &&
-                            _pendingDevLocation != null)
-                          Positioned(
-                            left: 12,
-                            right: 12,
-                            bottom: _isSearchVisible
-                                ? (_showWarningBanner ? 186 : 130)
-                                : (_showWarningBanner ? 76 : 20),
-                            child: SafeArea(
-                              child: Container(
-                                padding: const EdgeInsets.fromLTRB(
-                                  14,
-                                  12,
-                                  14,
-                                  12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xF21C2C45),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: const Color(0x805EA2FF),
-                                    width: 1,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black45,
-                                      blurRadius: 12,
-                                      offset: Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text(
-                                      'Developer mode: edit current location',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    const Text(
-                                      'Move the map or tap anywhere, then apply to test dynamic pathing.',
-                                      style: TextStyle(
-                                        color: Color(0xFFE0E9F8),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Lat ${_pendingDevLocation!.latitude.toStringAsFixed(6)} • Lng ${_pendingDevLocation!.longitude.toStringAsFixed(6)}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: OutlinedButton(
-                                            onPressed: _cancelDevLocationEdit,
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.white,
-                                              side: const BorderSide(
-                                                color: Color(0x80FFFFFF),
-                                              ),
-                                            ),
-                                            child: const Text('Cancel'),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: ElevatedButton(
-                                            onPressed: _applyDevLocationEdit,
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(
-                                                0xFF2563EB,
-                                              ),
-                                              foregroundColor: Colors.white,
-                                            ),
-                                            child: const Text('Apply location'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        // LEFT SIDE ACTION BUTTONS (Dev Tools)
-                        Positioned(
-                          left: 16,
-                          bottom: 118,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              FloatingActionButton(
-                                heroTag: 'map_dev_tools_btn',
-                                mini: true,
-                                onPressed: () {
-                                  setState(() {
-                                    _isDevToolsVisible = !_isDevToolsVisible;
-                                    if (!_isDevToolsVisible) {
-                                      _isEditingDevLocation = false;
-                                      _pendingDevLocation = null;
-                                    }
-                                  });
-                                },
-                                backgroundColor: _isDevToolsVisible
-                                    ? const Color(0xFF2563EB)
-                                    : Colors.white.withValues(alpha: 0.9),
-                                foregroundColor: _isDevToolsVisible
-                                    ? Colors.white
-                                    : const Color(0xFF2563EB),
-                                elevation: 3,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(
-                                  Icons.science_rounded,
-                                  size: 20,
-                                ),
-                              ),
-                              if (_isDevToolsVisible) const SizedBox(height: 8),
-                              if (_isDevToolsVisible)
-                                FloatingActionButton(
-                                  heroTag: 'map_dev_edit_location_btn',
-                                  mini: true,
-                                  onPressed: _isEditingDevLocation
-                                      ? _cancelDevLocationEdit
-                                      : _startDevLocationEdit,
-                                  backgroundColor: _isEditingDevLocation
-                                      ? const Color(0xFF8E2B2B)
-                                      : const Color(0xFF1C2C45),
-                                  foregroundColor: Colors.white,
-                                  elevation: 3,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: Icon(
-                                    _isEditingDevLocation
-                                        ? Icons.close_rounded
-                                        : Icons.edit_location_alt_rounded,
-                                    size: 18,
-                                  ),
-                                ),
-                              if (_isDevToolsVisible) const SizedBox(height: 8),
-                              if (_isDevToolsVisible)
-                                FloatingActionButton(
-                                  heroTag: 'map_dev_use_gps_btn',
-                                  mini: true,
-                                  onPressed: _resetToRealLocation,
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: const Color(0xFF1666A9),
-                                  elevation: 3,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: const Icon(
-                                    Icons.gps_fixed_rounded,
-                                    size: 18,
-                                  ),
-                                ),
                             ],
-                          ),
-                        ),
 
-                        // RIGHT SIDE ACTION BUTTONS (Google Maps Controls Stack)
-                        Positioned(
-                          right: 16,
-                          bottom: 32,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              // Route Switcher / Cycle Controller
-                              if (_alternativeRoutes.length > 1) ...[
-                                Container(
-                                  height: 42,
+                            if (_isPlacingMarker &&
+                                _pendingMarkerLocation != null)
+                              Marker(
+                                key: const ValueKey('pending_marker_placement'),
+                                point: _pendingMarkerLocation!,
+                                width: 42,
+                                height: 42,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: const Color(0xFF0B6E4F),
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: _buildUnifiedPotholeIcon(),
+                                ),
+                              ),
+
+                            if (_isEditingDevLocation &&
+                                _pendingDevLocation != null)
+                              Marker(
+                                key: const ValueKey(
+                                  'pending_dev_location_marker',
+                                ),
+                                point: _pendingDevLocation!,
+                                width: 40,
+                                height: 40,
+                                child: Container(
                                   decoration: BoxDecoration(
                                     color: const Color(0xFF2563EB),
-                                    borderRadius: BorderRadius.circular(21),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFF2563EB)
-                                            .withValues(alpha: 0.35),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 3),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: _cycleRoutes,
-                                      borderRadius: BorderRadius.circular(21),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.alt_route_rounded,
-                                              color: Colors.white,
-                                              size: 18,
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              'Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.length}',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            if (_potholesOnRoute.isNotEmpty) ...[
-                                              const SizedBox(width: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.25),
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
-                                                ),
-                                                child: Text(
-                                                  '${_potholesOnRoute.length} ⚠️',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
-                                      ),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-
-                              // 0. Standalone Floating Directions Action Button (Point A to Point B)
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF2563EB),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(
-                                        0xFF2563EB,
-                                      ).withValues(alpha: 0.35),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton(
-                                  icon: const Icon(
-                                    Icons.directions_rounded,
+                                  child: const Icon(
+                                    Icons.person_pin_circle_rounded,
                                     color: Colors.white,
                                     size: 22,
                                   ),
-                                  onPressed: () {
-                                    setState(() => _isRoutePlanningMode = true);
-                                    if (_routePoints.isNotEmpty) {
-                                      _calculateRoute(_routePoints.last);
-                                    } else if (_searchController
-                                        .text
-                                        .isNotEmpty) {
-                                      _searchAndRoute();
-                                    }
-                                  },
-                                  tooltip:
-                                      'Get Directions (Point A to Point B)',
                                 ),
                               ),
-                              const SizedBox(height: 12),
-
-                              // 1. Google Maps Navigation / Compass Mode Toggle with Bearing Indicator
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: AppDesign.surface(isDark),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppDesign.border(isDark),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: isDark ? 0.3 : 0.12,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton(
-                                  icon: Transform.rotate(
-                                    angle: -(_mapController.camera.rotation * math.pi / 180.0),
-                                    child: Icon(
-                                      _mapController.camera.rotation.abs() > 0.5
-                                          ? Icons.explore_rounded
-                                          : (_followMode == FollowMode.compass
-                                              ? Icons.explore_rounded
-                                              : Icons.navigation_rounded),
-                                      color: _mapController.camera.rotation.abs() > 0.5
-                                          ? const Color(0xFFEF4444)
-                                          : (_followMode == FollowMode.compass
-                                              ? AppDesign.accent(isDark)
-                                              : AppDesign.textSecondary(isDark)),
-                                      size: 22,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    if (_mapController.camera.rotation.abs() > 0.5) {
-                                      _mapController.rotate(0.0);
-                                    } else {
-                                      _toggleFollowMode();
-                                    }
-                                  },
-                                  tooltip: _mapController.camera.rotation.abs() > 0.5
-                                      ? 'Reset to North (0°)'
-                                      : 'Toggle Compass / Navigation Mode',
-                                ),
-                              ),
-
-                              const SizedBox(height: 12),
-
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: _showHeatmap
-                                      ? AppDesign.accent(isDark)
-                                      : AppDesign.surface(isDark),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppDesign.border(isDark),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: isDark ? 0.3 : 0.12,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton(
-                                  icon: Icon(
-                                    Icons.layers_rounded,
-                                    color: _showHeatmap
-                                        ? Colors.white
-                                        : AppDesign.textSecondary(isDark),
-                                    size: 22,
-                                  ),
-                                  onPressed: () {
-                                    setState(
-                                      () => _showHeatmap = !_showHeatmap,
-                                    );
-                                    if (_showHeatmap &&
-                                        widget.detectedPotholes.isEmpty) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'No reported hazards to show on the heatmap yet.',
-                                          ),
-                                          duration: Duration(seconds: 2),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  tooltip: 'Toggle Pothole Heatmap',
-                                ),
-                              ),
-
-                              const SizedBox(height: 12),
-
-                              // 2. Google Maps Zoom Controls Connected Vertical Pill
-                              Container(
-                                width: 44,
-                                decoration: BoxDecoration(
-                                  color: AppDesign.surface(isDark),
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(
-                                    color: AppDesign.border(isDark),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: isDark ? 0.3 : 0.12,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  children: [
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.add_rounded,
-                                        color: AppDesign.textPrimary(isDark),
-                                        size: 20,
-                                      ),
-                                      onPressed: () {
-                                        final currentZoom =
-                                            _mapController.camera.zoom;
-                                        _animatedMapMove(
-                                          _mapController.camera.center,
-                                          currentZoom + 1,
-                                        );
-                                      },
-                                      tooltip: 'Zoom In',
-                                    ),
-                                    Divider(
-                                      height: 1,
-                                      color: AppDesign.border(isDark),
-                                      indent: 8,
-                                      endIndent: 8,
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.remove_rounded,
-                                        color: AppDesign.textPrimary(isDark),
-                                        size: 20,
-                                      ),
-                                      onPressed: () {
-                                        final currentZoom =
-                                            _mapController.camera.zoom;
-                                        _animatedMapMove(
-                                          _mapController.camera.center,
-                                          currentZoom - 1,
-                                        );
-                                      },
-                                      tooltip: 'Zoom Out',
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              const SizedBox(height: 12),
-
-                              // 3. Google Maps Target My Location Button
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: AppDesign.surface(isDark),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppDesign.border(isDark),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: isDark ? 0.3 : 0.12,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton(
-                                  icon: Icon(
-                                    Icons.my_location_rounded,
-                                    color: AppDesign.accent(isDark),
-                                    size: 22,
-                                  ),
-                                  onPressed: () {
-                                    if (_currentPosition != null) {
-                                      if (_followMode == FollowMode.none) {
-                                        setState(
-                                          () =>
-                                              _followMode = FollowMode.location,
-                                        );
-                                      }
-                                      _animatedMapMove(_currentPosition!, 16.5);
-                                      _mapController.rotate(0.0);
-                                      _startFollowing();
-                                    } else {
-                                      _determinePosition();
-                                    }
-                                  },
-                                  tooltip: 'Center My Location',
-                                ),
-                              ),
-                            ],
-                          ),
+                          ],
                         ),
+                      ],
+                    ),
+                  ),
+                ),
 
-                        // Tapped location bar (bottom center)
-                        if (_tappedPoint != null)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 28,
-                            child: SafeArea(
-                              child: Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  child: _buildTappedLocationBar(isDark),
-                                ),
+                // 1. Desktop collapsed panel reopen pill OR <900px compact docked search bar
+                if (kIsWeb &&
+                    widget.isMapActive &&
+                    !isCompactWorkspace &&
+                    _isSidePanelCollapsed)
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    child: Semantics(
+                      button: true,
+                      label: 'Show search and reports panel',
+                      child: Material(
+                        color: WebDesign.surface(isDark),
+                        elevation: 2,
+                        borderRadius: BorderRadius.circular(WebDesign.radiusSm),
+                        child: InkWell(
+                          onTap: () =>
+                              setState(() => _isSidePanelCollapsed = false),
+                          borderRadius: BorderRadius.circular(
+                            WebDesign.radiusSm,
+                          ),
+                          child: Container(
+                            height: WebDesign.touchTarget,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: WebDesign.space3,
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: WebDesign.border(isDark),
+                              ),
+                              borderRadius: BorderRadius.circular(
+                                WebDesign.radiusSm,
                               ),
                             ),
-                          ),
-
-                        // Zoom-based distance scale bar (Google Maps style, always visible)
-                        Positioned(
-                          right: 76,
-                          bottom: 36,
-                          child: SafeArea(
-                            child: MapScaleBar(
-                              controller: _mapController,
-                              isDark: isDark,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.menu_open_rounded, size: 18),
+                                const SizedBox(width: WebDesign.space2),
+                                Text(
+                                  'Search & Reports (${queryResult.items.length})',
+                                  style: Theme.of(context).textTheme.labelLarge,
+                                ),
+                              ],
                             ),
                           ),
                         ),
+                      ),
+                    ),
+                  ),
+                if (kIsWeb && widget.isMapActive && isCompactWorkspace)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    right: 12,
+                    child: _buildCompactTopBar(
+                      isDark: isDark,
+                      queryResult: queryResult,
+                      unifiedSuggestions: unifiedSuggestions,
+                      routePlannerContent: routePlannerWidget,
+                    ),
+                  ),
 
-                        // 4. Floating Inspector Details Overlay Card (When a Pothole Marker is Selected)
-                        if (_selectedPothole != null)
-                          Positioned(
-                            left: isCompactViewport
-                                ? 16
-                                : (_isRoutePlanningMode ? null : 20),
-                            right: isCompactViewport
-                                ? 16
-                                : (_isRoutePlanningMode ? 80 : null),
-                            bottom: 24,
-                            child: SafeArea(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: isCompactViewport
-                                      ? (viewportWidth - 32)
-                                      : 480.0,
-                                ),
-                                child: _buildSelectedPotholeCard(
-                                  _selectedPothole!,
-                                  isDark,
-                                ),
+                // Explicit user-driven spatial bounds refresh ("Search this area")
+                if (kIsWeb &&
+                    widget.isMapActive &&
+                    _reportFilter.onlyInMapBounds &&
+                    _hasUnsearchedMapMove)
+                  Positioned(
+                    top: isCompactWorkspace ? 74 : 16,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: ElevatedButton.icon(
+                        onPressed: _searchThisAreaNow,
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Search this area'),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(0, 40),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Standalone fallback top-right toggle (suppressed when WebAppShellHeader hosts Map)
+                if (kIsWeb &&
+                    widget.isMapActive &&
+                    widget.showEmbeddedNavSwitcher)
+                  Positioned(
+                    top: 16,
+                    right: isCompactViewport ? 12 : 20,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: viewportWidth - (isCompactViewport ? 24 : 40),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: _buildTopRightMapProfileToggle(
+                          isMapActive: true,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 3. Natural Upper-Side Pothole Countdown Notification
+                if (_showMarkers &&
+                    (_upcomingHazard != null ||
+                        _navHazardState != null ||
+                        _showWarningBanner ||
+                        (_destination != null &&
+                            _alternativeRoutes.isNotEmpty)))
+                  Positioned(
+                    top:
+                        (_reportFilter.onlyInMapBounds && _hasUnsearchedMapMove)
+                        ? (isCompactWorkspace ? 122 : 66)
+                        : (isCompactWorkspace ? 72 : 16),
+                    left: isCompactWorkspace
+                        ? 12
+                        : (_isSidePanelCollapsed ? 228 : 16),
+                    right: isCompactWorkspace
+                        ? 12
+                        : (widget.showEmbeddedNavSwitcher ? 180 : 80),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: viewportWidth >= 720 && viewportWidth < 1080
+                              ? 360
+                              : 430,
+                        ),
+                        child: _buildWebPotholeWarningBanner(
+                          isDark: isDark,
+                          activePotholeCount: activePotholeCount,
+                          nearestInfo: _nearestPotholeInfo,
+                          nextPotholeEta: _nextPotholeEta,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 3b. Responsive <900px Bottom Route Planning Drawer
+                if (kIsWeb &&
+                    widget.isMapActive &&
+                    isCompactWorkspace &&
+                    _isRoutePlanningMode)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: _buildCompactRouteBottomDrawer(
+                      isDark: isDark,
+                      distStr: distStr,
+                      totalEtaStr: totalEtaStr,
+                      activePotholeCount: activePotholeCount,
+                      routePlannerWidget: routePlannerWidget,
+                    ),
+                  ),
+
+                // 5. Location Permission Warning (Only when permission denied)
+                if (widget.isMapActive &&
+                    !_isRoutePlanningMode &&
+                    !_dismissedLocationBanner &&
+                    (_isLocationDisabled || _isPermissionDenied))
+                  Positioned(
+                    top: isCompactWorkspace ? 76 : 16,
+                    right: 16,
+                    left: isCompactWorkspace ? 16 : null,
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 340),
+                        child: _buildLocationPermissionCard(isDark),
+                      ),
+                    ),
+                  ),
+                if (_isPlacingMarker && _pendingMarkerLocation != null)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: _isSearchVisible
+                        ? (_showWarningBanner ? 186 : 130)
+                        : (_showWarningBanner ? 76 : 20),
+                    child: SafeArea(
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        decoration: BoxDecoration(
+                          color: _inProximityWarning
+                              ? const Color(0xF2B72A2A)
+                              : const Color(0xF20F2C25),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _inProximityWarning
+                                ? const Color(0x80FFFFFF)
+                                : const Color(0x803EC9A7),
+                            width: 1,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black45,
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Move map or tap to place marker',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          ),
-
-                        // 5. Google Maps Style Searched Place Details Card
-                        if (_searchedPlace != null &&
-                            _selectedPothole == null &&
-                            _routePoints.isEmpty)
-                          Positioned(
-                            left: 16,
-                            right: isCompactViewport ? 16 : null,
-                            bottom: 24,
-                            child: SafeArea(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: isCompactViewport
-                                      ? (viewportWidth - 32)
-                                      : 420.0,
-                                ),
-                                child: _buildSearchedPlaceCard(isDark),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Lat ${_pendingMarkerLocation!.latitude.toStringAsFixed(6)} • Lng ${_pendingMarkerLocation!.longitude.toStringAsFixed(6)}',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontSize: 12,
                               ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: _isSavingPlacedMarker
+                                        ? null
+                                        : _cancelMarkerPlacement,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      side: const BorderSide(
+                                        color: Color(0x80FFFFFF),
+                                      ),
+                                    ),
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: _isSavingPlacedMarker
+                                        ? null
+                                        : _confirmMarkerPlacement,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2563EB),
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: _isSavingPlacedMarker
+                                        ? const SizedBox(
+                                            height: 16,
+                                            width: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Text('OK'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                if (_isEditingDevLocation && _pendingDevLocation != null)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: _isSearchVisible
+                        ? (_showWarningBanner ? 186 : 130)
+                        : (_showWarningBanner ? 76 : 20),
+                    child: SafeArea(
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xF21C2C45),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0x805EA2FF),
+                            width: 1,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black45,
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Developer mode: edit current location',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Move the map or tap anywhere, then apply to test dynamic pathing.',
+                              style: TextStyle(
+                                color: Color(0xFFE0E9F8),
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Lat ${_pendingDevLocation!.latitude.toStringAsFixed(6)} • Lng ${_pendingDevLocation!.longitude.toStringAsFixed(6)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: _cancelDevLocationEdit,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      side: const BorderSide(
+                                        color: Color(0x80FFFFFF),
+                                      ),
+                                    ),
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: _applyDevLocationEdit,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2563EB),
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('Apply location'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Optional developer tools are hidden in the normal map.
+                if (AppSettings.instance.devMockModeEnabled)
+                  Positioned(
+                    left: 16,
+                    bottom: 118,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FloatingActionButton(
+                          heroTag: 'map_dev_tools_btn',
+                          mini: true,
+                          onPressed: () {
+                            setState(() {
+                              _isDevToolsVisible = !_isDevToolsVisible;
+                              if (!_isDevToolsVisible) {
+                                _isEditingDevLocation = false;
+                                _pendingDevLocation = null;
+                              }
+                            });
+                          },
+                          backgroundColor: _isDevToolsVisible
+                              ? const Color(0xFF2563EB)
+                              : Colors.white.withValues(alpha: 0.9),
+                          foregroundColor: _isDevToolsVisible
+                              ? Colors.white
+                              : const Color(0xFF2563EB),
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(Icons.science_rounded, size: 20),
+                        ),
+                        if (_isDevToolsVisible) const SizedBox(height: 8),
+                        if (_isDevToolsVisible)
+                          FloatingActionButton(
+                            heroTag: 'map_dev_edit_location_btn',
+                            mini: true,
+                            onPressed: _isEditingDevLocation
+                                ? _cancelDevLocationEdit
+                                : _startDevLocationEdit,
+                            backgroundColor: _isEditingDevLocation
+                                ? const Color(0xFF8E2B2B)
+                                : const Color(0xFF1C2C45),
+                            foregroundColor: Colors.white,
+                            elevation: 3,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              _isEditingDevLocation
+                                  ? Icons.close_rounded
+                                  : Icons.edit_location_alt_rounded,
+                              size: 18,
+                            ),
+                          ),
+                        if (_isDevToolsVisible) const SizedBox(height: 8),
+                        if (_isDevToolsVisible)
+                          FloatingActionButton(
+                            heroTag: 'map_dev_use_gps_btn',
+                            mini: true,
+                            onPressed: _resetToRealLocation,
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF1666A9),
+                            elevation: 3,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.gps_fixed_rounded,
+                              size: 18,
                             ),
                           ),
                       ],
                     ),
+                  ),
+
+                // RIGHT SIDE ACTION BUTTONS (Google Maps Controls Stack)
+                Positioned(
+                  right: 16,
+                  bottom: 32,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // Route Switcher / Cycle Controller
+                      if (_alternativeRoutes.length > 1) ...[
+                        Container(
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2563EB),
+                            borderRadius: BorderRadius.circular(21),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF2563EB,
+                                ).withValues(alpha: 0.35),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _cycleRoutes,
+                              borderRadius: BorderRadius.circular(21),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.alt_route_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.length}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_potholesOnRoute.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.25,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${_potholesOnRoute.length} ⚠️',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // Unified Modern GIS Control Dock
+                      if (AppSettings.instance.devMockModeEnabled) ...[
+                        FloatingActionButton.small(
+                          heroTag: 'developer_custom_markers',
+                          tooltip: 'Custom markers (local)',
+                          onPressed: _startMarkerPlacement,
+                          child: const Icon(Icons.add_location_alt_outlined),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      _buildGisControlDock(isDark),
+                    ],
+                  ),
+                ),
+
+                // Point-to-Point Location Pill (Draggable anywhere on screen, eye-friendly design)
+                if (_isP2pPillVisible && _p2pPoint != null)
+                  _p2pPillOffset == null
+                      ? Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 28,
+                          child: SafeArea(
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: _buildPointToPointPill(isDark),
+                              ),
+                            ),
+                          ),
+                        )
+                      : Positioned(
+                          left: _p2pPillOffset!.dx,
+                          top: _p2pPillOffset!.dy,
+                          child: SafeArea(
+                            child: _buildPointToPointPill(isDark),
+                          ),
+                        )
+                else if (_tappedPoint != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 28,
+                    child: SafeArea(
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: _buildTappedLocationBar(isDark),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Zoom-based distance scale bar (Google Maps style, always visible)
+                Positioned(
+                  right: 76,
+                  bottom: 36,
+                  child: SafeArea(
+                    child: MapScaleBar(
+                      controller: _mapController,
+                      isDark: isDark,
+                    ),
+                  ),
+                ),
+
+                // Map key popover (defect shapes/colors & status explanation)
+                if (_isLegendOpen)
+                  Positioned(
+                    right: 76,
+                    bottom: 84,
+                    child: SafeArea(
+                      child: WebMapLegendCard(
+                        onClose: () => setState(() => _isLegendOpen = false),
+                      ),
+                    ),
+                  ),
+
+                // Non-web fallback overlays only (web desktop uses docked left rail; <900px uses modal bottom sheets)
+                if (!kIsWeb && _selectedPothole != null)
+                  Positioned(
+                    left: isCompactViewport ? 16 : 20,
+                    right: isCompactViewport ? 16 : null,
+                    bottom: 24,
+                    child: SafeArea(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: isCompactViewport
+                              ? (viewportWidth - 32)
+                              : 480.0,
+                        ),
+                        child: _buildSelectedPotholeCard(
+                          _selectedPothole!,
+                          isDark,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!kIsWeb &&
+                    _searchedPlace != null &&
+                    _selectedPothole == null &&
+                    _routePoints.isEmpty)
+                  Positioned(
+                    left: 16,
+                    right: isCompactViewport ? 16 : null,
+                    bottom: 24,
+                    child: SafeArea(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: isCompactViewport
+                              ? (viewportWidth - 32)
+                              : 420.0,
+                        ),
+                        child: _buildSearchedPlaceCard(isDark),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+
+            return Scaffold(
+              body: kIsWeb && !isCompactWorkspace
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_isSidePanelCollapsed)
+                          SizedBox(
+                            width: sidePanelWidth,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  right: BorderSide(
+                                    color: WebDesign.border(isDark),
+                                  ),
+                                ),
+                              ),
+                              child: _buildWorkspacePanelWidget(
+                                isDark: isDark,
+                                queryResult: queryResult,
+                                unifiedSuggestions: unifiedSuggestions,
+                                routePlannerContent: routePlannerWidget,
+                              ),
+                            ),
+                          ),
+                        Expanded(child: mapCanvasStack),
+                      ],
+                    )
+                  : mapCanvasStack,
             );
           },
         );
       },
-    );
-  }
-
-  Widget _buildCollapsedPanelPill(bool isDark) {
-    final Color cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final Color cardBorder =
-        isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
-    final Color textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final Color subtextColor =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    String label = 'Search RoadSense';
-    if (_isRoutePlanningMode) {
-      if (_searchController.text.isNotEmpty) {
-        label = _searchController.text;
-      } else {
-        label = 'Route Planner';
-      }
-    }
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => setState(() => _isSidePanelCollapsed = false),
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: cardBorder, width: 1.2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _isRoutePlanningMode
-                    ? Icons.directions_rounded
-                    : Icons.search_rounded,
-                color: brandBlue,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                height: 20,
-                width: 1,
-                color: cardBorder,
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: subtextColor,
-                size: 22,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryChipsRow(bool isDark) {
-    final bool isSatellite =
-        AppSettings.instance.webMapStyle == 'Satellite';
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildQuickActionChip(
-            icon: Icons.shield_rounded,
-            iconColor: const Color(0xFF10B981),
-            label: 'Safe Route',
-            isActive: false,
-            isDark: isDark,
-            onTap: () {
-              setState(() {
-                _isRoutePlanningMode = true;
-                _originController.text = 'Your location';
-                _customOrigin = null;
-                _isEditingOrigin = false;
-              });
-              _destinationFocusNode.requestFocus();
-            },
-          ),
-          const SizedBox(width: 8),
-          _buildQuickActionChip(
-            icon: Icons.warning_amber_rounded,
-            iconColor: const Color(0xFFEF4444),
-            label: 'Hazards (${widget.detectedPotholes.length})',
-            isActive: false,
-            isDark: isDark,
-            onTap: () {
-              if (widget.detectedPotholes.isNotEmpty) {
-                final LatLng ref = _currentPosition ?? _bulacanCenter;
-                PotholeMarker? nearest;
-                double minD = double.infinity;
-                for (final p in widget.detectedPotholes) {
-                  final d = Geolocator.distanceBetween(
-                    ref.latitude,
-                    ref.longitude,
-                    p.location.latitude,
-                    p.location.longitude,
-                  );
-                  if (d < minD) {
-                    minD = d;
-                    nearest = p;
-                  }
-                }
-                if (nearest != null) {
-                  setState(() {
-                    _selectedPothole = nearest;
-                    _expandedClusterId = null;
-                  });
-                  _animatedMapMove(nearest.location, 17.5, offsetForSidebar: true);
-                }
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('No reported hazards in this survey area.'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          _buildQuickActionChip(
-            icon: Icons.local_fire_department_rounded,
-            iconColor: _showHeatmap ? Colors.white : const Color(0xFFF97316),
-            label: 'Heatmap',
-            isActive: _showHeatmap,
-            activeBg: const Color(0xFFF97316),
-            isDark: isDark,
-            onTap: () {
-              setState(() => _showHeatmap = !_showHeatmap);
-            },
-          ),
-          const SizedBox(width: 8),
-          _buildQuickActionChip(
-            icon: Icons.satellite_alt_rounded,
-            iconColor: isSatellite ? Colors.white : const Color(0xFF0284C7),
-            label: isSatellite ? 'Satellite' : 'Default Map',
-            isActive: isSatellite,
-            activeBg: const Color(0xFF0284C7),
-            isDark: isDark,
-            onTap: () {
-              setState(() {
-                AppSettings.instance.webMapStyle =
-                    isSatellite ? 'Google Maps' : 'Satellite';
-              });
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActionChip({
-    required IconData icon,
-    required Color iconColor,
-    required String label,
-    required bool isActive,
-    Color? activeBg,
-    required bool isDark,
-    required VoidCallback onTap,
-  }) {
-    final Color bg = isActive
-        ? (activeBg ?? const Color(0xFF2563EB))
-        : (isDark ? const Color(0xFF1E293B) : Colors.white);
-    final Color border = isActive
-        ? Colors.transparent
-        : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0));
-    final Color textCol = isActive
-        ? Colors.white
-        : (isDark ? Colors.white : const Color(0xFF1E293B));
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: border, width: 1.0),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: isActive ? Colors.white : iconColor),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: textCol,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -7573,9 +10178,7 @@ class MapScreenState extends State<MapScreen>
           padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            border: Border(
-              bottom: BorderSide(color: cardBorder, width: 1),
-            ),
+            border: Border(bottom: BorderSide(color: cardBorder, width: 1)),
           ),
           child: Row(
             children: [
@@ -7663,15 +10266,14 @@ class MapScreenState extends State<MapScreen>
                   color: isSelected
                       ? brandBlue.withValues(alpha: isDark ? 0.20 : 0.08)
                       : isCurrent
-                      ? const Color(0xFF10B981).withValues(alpha: isDark ? 0.18 : 0.07)
+                      ? const Color(
+                          0xFF10B981,
+                        ).withValues(alpha: isDark ? 0.18 : 0.07)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: isSelected
                       ? const Border(
-                          left: BorderSide(
-                            color: brandBlue,
-                            width: 3.5,
-                          ),
+                          left: BorderSide(color: brandBlue, width: 3.5),
                         )
                       : isCurrent
                       ? const Border(
@@ -7690,10 +10292,7 @@ class MapScreenState extends State<MapScreen>
                     Expanded(child: _buildStepText(step, isDark)),
                     const SizedBox(width: 10),
                     if (!isLast)
-                      _formatStepDistanceWidget(
-                        step.distanceMeters,
-                        isDark,
-                      ),
+                      _formatStepDistanceWidget(step.distanceMeters, isDark),
                   ],
                 ),
               ),
@@ -7701,6 +10300,112 @@ class MapScreenState extends State<MapScreen>
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildCompactRouteBottomDrawer({
+    required bool isDark,
+    required String distStr,
+    required String totalEtaStr,
+    required int activePotholeCount,
+    required Widget routePlannerWidget,
+  }) {
+    final Color surface = WebDesign.surface(isDark);
+    final Color border = WebDesign.border(isDark);
+    final String headline = _routePoints.isEmpty
+        ? 'Plan route'
+        : '${distStr.isNotEmpty ? distStr : '0 m'} · ${totalEtaStr.isNotEmpty ? totalEtaStr : '-- min'} · '
+              '${activePotholeCount == 0 ? 'No reported potholes' : '$activePotholeCount reported pothole${activePotholeCount == 1 ? '' : 's'}'}';
+
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          setState(() {
+            if (_suggestions.isNotEmpty) {
+              _suggestions = [];
+            } else if (_isCompactRouteDrawerExpanded) {
+              _isCompactRouteDrawerExpanded = false;
+            } else {
+              _isRoutePlanningMode = false;
+            }
+          });
+        },
+      },
+      child: Material(
+        color: surface,
+        elevation: 6,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: border),
+          ),
+          constraints: BoxConstraints(
+            maxHeight: _isCompactRouteDrawerExpanded
+                ? (MediaQuery.sizeOf(context).height * 0.58).clamp(240.0, 520.0)
+                : 64.0,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              InkWell(
+                onTap: () => setState(
+                  () => _isCompactRouteDrawerExpanded =
+                      !_isCompactRouteDrawerExpanded,
+                ),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.directions_rounded,
+                          size: 18,
+                          color: WebDesign.brand(isDark),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            headline,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppDesign.textPrimary(isDark),
+                            ),
+                          ),
+                        ),
+                        Semantics(
+                          button: true,
+                          label: _isCompactRouteDrawerExpanded
+                              ? 'Collapse route sheet'
+                              : 'Expand route sheet',
+                          child: Icon(
+                            _isCompactRouteDrawerExpanded
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_up_rounded,
+                            color: AppDesign.textSecondary(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              if (_isCompactRouteDrawerExpanded)
+                Expanded(child: routePlannerWidget),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -7716,993 +10421,371 @@ class MapScreenState extends State<MapScreen>
     final Color subtextColor = AppDesign.textSecondary(isDark);
     const Color brandBlue = Color(0xFF2563EB);
 
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: (MediaQuery.sizeOf(context).height - 48).clamp(360.0, 780.0),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Top Travel Mode Row matching Google Maps Web ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-            child: Row(
-              children: [
-                // Active Directions Mode Pill
-                Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: brandBlue,
-                    borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: brandBlue.withValues(alpha: 0.35),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.directions_rounded,
-                    color: Colors.white,
-                    size: 19,
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // 3 OSRM Travel Modes: Driving (car), Bicycle (bike), Walking (foot)
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildModeIconButton(
-                        icon: Icons.directions_car_rounded,
-                        mode: OsrmTravelMode.car,
-                        label: 'Driving',
-                        isDark: isDark,
-                      ),
-                      _buildModeIconButton(
-                        icon: Icons.directions_bike_rounded,
-                        mode: OsrmTravelMode.bike,
-                        label: 'Bicycle',
-                        isDark: isDark,
-                      ),
-                      _buildModeIconButton(
-                        icon: Icons.directions_walk_rounded,
-                        mode: OsrmTravelMode.foot,
-                        label: 'Walking',
-                        isDark: isDark,
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Collapse Panel Button
-                IconButton(
-                  icon: Icon(
-                    Icons.chevron_left_rounded,
-                    color: subtextColor,
-                    size: 22,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  tooltip: 'Collapse directions panel',
-                  onPressed: () {
-                    setState(() {
-                      _isSidePanelCollapsed = true;
-                    });
-                  },
-                ),
-
-                // Close Button
-                IconButton(
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: subtextColor,
-                    size: 20,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  tooltip: 'Close directions',
-                  onPressed: () {
-                    setState(() {
-                      _isRoutePlanningMode = false;
-                      _showTurnByTurnSheet = false;
-                      _suggestions = [];
-                      _isEditingOrigin = false;
-                    });
-                  },
-                ),
-              ],
-            ),
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          setState(() {
+            if (_suggestions.isNotEmpty) {
+              _suggestions = [];
+            } else {
+              _isRoutePlanningMode = false;
+              _showTurnByTurnSheet = false;
+              _isEditingOrigin = false;
+            }
+          });
+        },
+      },
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: (MediaQuery.sizeOf(context).height - 48).clamp(
+            360.0,
+            780.0,
           ),
-          Divider(height: 1, thickness: 1, color: cardBorder),
-
-          // ── Origin & Destination Inputs with Dotted Connector & Swap Button ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Left Column: Circle + Dots + Pin
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.white70
-                              : const Color(0xFF64748B),
-                          width: 2.2,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Container(
-                      width: 2.5,
-                      height: 2.5,
-                      decoration: BoxDecoration(
-                        color: subtextColor.withValues(alpha: 0.6),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Container(
-                      width: 2.5,
-                      height: 2.5,
-                      decoration: BoxDecoration(
-                        color: subtextColor.withValues(alpha: 0.6),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Container(
-                      width: 2.5,
-                      height: 2.5,
-                      decoration: BoxDecoration(
-                        color: subtextColor.withValues(alpha: 0.6),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    const Icon(
-                      Icons.place_rounded,
-                      color: Color(0xFFEF4444),
-                      size: 16,
-                    ),
-                  ],
-                ),
-
-                const SizedBox(width: 10),
-
-                // Center Column: 2 Text Input Boxes
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Starting Point Input
-                      Container(
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _isEditingOrigin
-                                ? brandBlue
-                                : (isDark
-                                      ? const Color(0xFF475569)
-                                      : const Color(0xFFCBD5E1)),
-                            width: _isEditingOrigin ? 1.5 : 1.2,
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _originController,
-                                focusNode: _originFocusNode,
-                                style: TextStyle(
-                                  fontSize: 13.0,
-                                  color: textColor,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      "Choose starting point, or click on the map",
-                                  hintStyle: TextStyle(
-                                    color: subtextColor,
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.normal,
-                                  ),
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  filled: false,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
-                                onTap: () =>
-                                    setState(() => _isEditingOrigin = true),
-                                onChanged: (val) {
-                                  setState(() => _isEditingOrigin = true);
-                                  _onSearchChanged(val);
-                                },
-                                onSubmitted: (_) {
-                                  if (_originController.text.isNotEmpty) {
-                                    if (_searchController.text.isNotEmpty) {
-                                      _searchAndRoute();
-                                    } else {
-                                      _destinationFocusNode.requestFocus();
-                                    }
-                                  }
-                                },
-                              ),
-                            ),
-                            if (_originController.text.isNotEmpty)
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 24,
-                                  minHeight: 24,
-                                ),
-                                icon: Icon(
-                                  Icons.clear_rounded,
-                                  size: 15,
-                                  color: subtextColor,
-                                ),
-                                tooltip: 'Clear starting point',
-                                onPressed: () {
-                                  setState(() {
-                                    _originController.clear();
-                                    _customOrigin = null;
-                                    _suggestions = [];
-                                    _routePoints = [];
-                                    _alternativeRoutes = [];
-                                    _isEditingOrigin = true;
-                                  });
-                                  _originFocusNode.requestFocus();
-                                },
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      // Destination Input
-                      Container(
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: !_isEditingOrigin
-                                ? brandBlue
-                                : (isDark
-                                      ? const Color(0xFF475569)
-                                      : const Color(0xFFCBD5E1)),
-                            width: !_isEditingOrigin ? 1.5 : 1.2,
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                focusNode: _destinationFocusNode,
-                                style: TextStyle(
-                                  fontSize: 13.0,
-                                  color: textColor,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: "Choose destination...",
-                                  hintStyle: TextStyle(
-                                    color: subtextColor,
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.normal,
-                                  ),
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  filled: false,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
-                                onTap: () =>
-                                    setState(() => _isEditingOrigin = false),
-                                onChanged: (val) {
-                                  setState(() => _isEditingOrigin = false);
-                                  _onSearchChanged(val);
-                                },
-                                onSubmitted: (val) {
-                                  if (val.isNotEmpty) _searchAndRoute();
-                                },
-                              ),
-                            ),
-                            if (_searchController.text.isNotEmpty)
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 24,
-                                  minHeight: 24,
-                                ),
-                                icon: Icon(
-                                  Icons.clear_rounded,
-                                  size: 15,
-                                  color: subtextColor,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _searchController.clear();
-                                    _destination = null;
-                                    _suggestions = [];
-                                    _routePoints = [];
-                                    _alternativeRoutes = [];
-                                    _isEditingOrigin = false;
-                                  });
-                                },
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                // Right Column: Swap Button
-                IconButton(
-                  icon: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF475569)
-                            : const Color(0xFFCBD5E1),
-                        width: 1.2,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.swap_vert_rounded,
-                      color: brandBlue,
-                      size: 20,
-                    ),
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 36,
-                    minHeight: 36,
-                  ),
-                  tooltip: 'Reverse starting point and destination',
-                  onPressed: _swapOriginDestination,
-                ),
-              ],
-            ),
-          ),
-
-          Divider(height: 1, thickness: 1, color: cardBorder),
-
-          // ── Scrollable Body: Route Summary OR Suggestions OR History & Presets OR Turn-by-Turn Steps ──
-          Flexible(
-            child: SingleChildScrollView(
-              child: _suggestions.isNotEmpty
-                  ? _buildSuggestionsListInPlanner(isDark)
-                  : (_routePoints.isNotEmpty
-                        ? (_showTurnByTurnSheet && _routeSteps.isNotEmpty
-                              ? _buildTurnByTurnInPlanner(
-                                  isDark: isDark,
-                                  distStr: distStr,
-                                  durStr: totalEtaStr,
-                                )
-                              : _buildRouteSummaryInPlanner(
-                                  isDark: isDark,
-                                  isClearAhead: isClearAhead,
-                                  distStr: distStr,
-                                  totalEtaStr: totalEtaStr,
-                                  activePotholeCount: activePotholeCount,
-                                ))
-                        : _buildHistoryAndPresetsInPlanner(isDark)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRouteSummaryInPlanner({
-    required bool isDark,
-    required bool isClearAhead,
-    required String distStr,
-    required String totalEtaStr,
-    required int activePotholeCount,
-  }) {
-    final Color textColor = AppDesign.textPrimary(isDark);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 1. Primary Route Summary Card
-        Container(
-          margin: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Top Travel Mode Row ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+              child: Row(
                 children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: brandBlue,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.directions_rounded,
+                      color: Colors.white,
+                      size: 19,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            Text(
-                              totalEtaStr.isNotEmpty ? totalEtaStr : 'Ready',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF10B981),
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                            if (distStr.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                '($distStr)',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: subtextColor,
-                                ),
-                              ),
-                            ],
-                          ],
+                        _buildModeIconButton(
+                          icon: Icons.directions_car_rounded,
+                          mode: OsrmTravelMode.car,
+                          label: 'Driving',
+                          isDark: isDark,
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          'Fastest route • Usual traffic',
-                          style: TextStyle(fontSize: 12, color: subtextColor),
+                        _buildModeIconButton(
+                          icon: Icons.directions_bike_rounded,
+                          mode: OsrmTravelMode.bike,
+                          label: 'Bicycle',
+                          isDark: isDark,
+                        ),
+                        _buildModeIconButton(
+                          icon: Icons.directions_walk_rounded,
+                          mode: OsrmTravelMode.foot,
+                          label: 'Walking',
+                          isDark: isDark,
                         ),
                       ],
                     ),
                   ),
-                  InkWell(
-                    onTap: () {
+                  IconButton(
+                    icon: Icon(
+                      Icons.chevron_left_rounded,
+                      color: subtextColor,
+                      size: 22,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
+                    tooltip: 'Collapse directions panel',
+                    onPressed: () {
                       setState(() {
-                        _showTurnByTurnSheet = !_showTurnByTurnSheet;
+                        _isSidePanelCollapsed = true;
                       });
                     },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _showTurnByTurnSheet
-                            ? brandBlue
-                            : brandBlue.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.list_alt_rounded,
-                            color: _showTurnByTurnSheet
-                                ? Colors.white
-                                : brandBlue,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Steps',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: _showTurnByTurnSheet
-                                  ? Colors.white
-                                  : brandBlue,
-                            ),
-                          ),
-                        ],
-                      ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: subtextColor,
+                      size: 20,
                     ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
+                    tooltip: 'Close directions',
+                    onPressed: () {
+                      setState(() {
+                        _isRoutePlanningMode = false;
+                        _showTurnByTurnSheet = false;
+                        _suggestions = [];
+                        _isEditingOrigin = false;
+                      });
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              // Road Safety / Hazard Status Chip
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: activePotholeCount == 0
-                      ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                      : const Color(0xFFEF4444).withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: activePotholeCount == 0
-                        ? const Color(0xFF10B981).withValues(alpha: 0.3)
-                        : const Color(0xFFEF4444).withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      activePotholeCount == 0
-                          ? Icons.shield_rounded
-                          : Icons.warning_amber_rounded,
-                      size: 16,
-                      color: activePotholeCount == 0
-                          ? const Color(0xFF10B981)
-                          : const Color(0xFFEF4444),
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        activePotholeCount == 0
-                            ? 'Route Clear • 0 Reported Potholes'
-                            : '$activePotholeCount pothole hazard${activePotholeCount > 1 ? 's' : ''} detected on this route line${_nearestPotholeInfo.isNotEmpty && _nearestPotholeInfo != 'Clear ahead' ? ' • Next in $_nearestPotholeInfo${_nextPotholeEta != null ? ' (ETA: $_nextPotholeEta)' : ''}' : ''}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: activePotholeCount == 0
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFEF4444),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Text(
-                  'Road conditions & hazards factored into ETA',
-                  style: TextStyle(
-                    fontSize: 11.0,
-                    fontWeight: FontWeight.w500,
-                    color: subtextColor.withValues(alpha: 0.8),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // 2. Alternative Routes Selection (if any)
-        if (_alternativeRoutes.length > 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: List.generate(_alternativeRoutes.length, (idx) {
-                final isSelected = _selectedRouteIndex == idx;
-                final int hazardsOnRoute = idx < _routePotholeCounts.length
-                    ? _routePotholeCounts[idx]
-                    : 0;
-                final int minHazards = _routePotholeCounts.isEmpty
-                    ? 0
-                    : _routePotholeCounts.reduce((a, b) => a < b ? a : b);
-                final bool isSafest =
-                    _routePotholeCounts.isNotEmpty &&
-                    hazardsOnRoute == minHazards;
-                final String hazardBadge = isSafest && minHazards == 0
-                    ? ' • Safest 🛡️'
-                    : hazardsOnRoute > 0
-                    ? ' • $hazardsOnRoute ⚠️'
-                    : ' • Clear';
-                final routeDist = idx < _routeDistances.length
-                    ? '${(_routeDistances[idx] / 1000).toStringAsFixed(1)} km'
-                    : '';
-                final routeDur = idx < _routeDurations.length
-                    ? _formatEta(
-                        _routeDurations[idx],
-                        distanceMeters: idx < _routeDistances.length
-                            ? _routeDistances[idx]
-                            : 0,
-                        potholeCount: hazardsOnRoute,
-                      )
-                    : '';
-
-                return ChoiceChip(
-                  label: Text(
-                    'Route ${idx + 1}: $routeDur ($routeDist)$hazardBadge',
-                  ),
-                  selected: isSelected,
-                  onSelected: (_) => _selectActiveRoute(idx),
-                  selectedColor: brandBlue.withValues(alpha: 0.2),
-                  labelStyle: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
-                    color: isSelected ? brandBlue : textColor,
-                  ),
-                );
-              }),
             ),
-          ),
-      ],
-    );
-  }
+            Divider(height: 1, thickness: 1, color: cardBorder),
 
-  Widget _buildWebPotholeWarningBanner({
-    int activePotholeCount = 0,
-    String? nearestInfo,
-    String? nextPotholeEta,
-  }) {
-    final bool isOnRoute = _destination != null || _routePoints.isNotEmpty;
-
-    final String distText =
-        (nearestInfo != null &&
-            nearestInfo.isNotEmpty &&
-            nearestInfo != 'Clear ahead')
-        ? ' • $nearestInfo ahead'
-        : '';
-
-    // If on route, show ETA on next pothole ahead. If not searching any location, strictly NO ETA!
-    final String etaText =
-        (isOnRoute && nextPotholeEta != null && nextPotholeEta.isNotEmpty)
-        ? ' • ETA: $nextPotholeEta'
-        : '';
-
-    final String routeInfo = (isOnRoute && activePotholeCount > 0)
-        ? ' ($activePotholeCount on route)'
-        : '';
-
-    final String title = isOnRoute
-        ? 'POTHOLE HAZARD AHEAD'
-        : 'POTHOLE HAZARD NEARBY';
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFDC2626),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFCA5A5), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.red.withValues(alpha: 0.45),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.warning_amber_rounded,
-              color: Color(0xFFDC2626),
-              size: 16,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              '$title$distText$etaText$routeInfo • SLOW DOWN',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModeIconButton({
-    required IconData icon,
-    required OsrmTravelMode mode,
-    required String label,
-    required bool isDark,
-  }) {
-    final bool isSelected = _travelMode == mode;
-    const Color brandBlue = Color(0xFF2563EB);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-
-    return InkWell(
-      onTap: () {
-        setState(() => _travelMode = mode);
-        if (_searchController.text.isNotEmpty &&
-            _originController.text.isNotEmpty) {
-          _searchAndRoute();
-        } else if (_destination != null) {
-          _calculateRoute(_destination!);
-        }
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isSelected ? brandBlue : Colors.transparent,
-              width: 2.5,
-            ),
-          ),
-        ),
-        child: Icon(
-          icon,
-          size: 20,
-          color: isSelected ? brandBlue : subtextColor,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHistoryAndPresetsInPlanner(bool isDark) {
-    final Color textColor = AppDesign.textPrimary(isDark);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 1. "Your location" Quick Item
-        InkWell(
-          onTap: () {
-            if (_currentPosition != null) {
-              if (_isEditingOrigin) {
-                setState(() {
-                  _originController.text = 'Your location';
-                  _customOrigin = null;
-                });
-              } else {
-                setState(() {
-                  _searchController.text = 'Your location';
-                  _destination = _currentPosition;
-                });
-              }
-              if (_originController.text.isNotEmpty &&
-                  _searchController.text.isNotEmpty) {
-                _searchAndRoute();
-              }
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: brandBlue.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.my_location_rounded,
-                    color: brandBlue,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Text(
-                  'Your location',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: brandBlue,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // 2. "Home" Preset Item
-        InkWell(
-          onTap: () {
-            _selectHistoryItem({
-              'name': _homeName,
-              'address': _homeAddress,
-              'lat': _homeLat,
-              'lon': _homeLon,
-              'status': 'Home location',
-            });
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF0F172A)
-                        : const Color(0xFFF1F5F9),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.home_outlined,
-                    color: isDark ? Colors.white70 : const Color(0xFF475569),
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _homeName,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: textColor,
-                        ),
-                      ),
-                      Text(
-                        _homeAddress,
-                        style: TextStyle(fontSize: 11.5, color: subtextColor),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton(
-                  onPressed: _editHomeLocationDialog,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'Edit',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.bold,
-                      color: brandBlue,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        Divider(
-          height: 1,
-          thickness: 0.8,
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-        ),
-
-        // 3. Recent History List
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          itemCount: _searchHistory.length,
-          itemBuilder: (ctx, i) {
-            final h = _searchHistory[i];
-            final name = (h['name'] ?? '').toString();
-            final address = (h['address'] ?? '').toString();
-            final status = h['status']?.toString();
-            final bool isClosed =
-                status?.toLowerCase().contains('closed') == true;
-
-            return Material(
-              color: Colors.transparent,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
+            // ── Origin & Destination Inputs with Swap & "Use current location" ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _selectHistoryItem(h),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Container(
-                                width: 30,
-                                height: 30,
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? const Color(0xFF0F172A)
-                                      : const Color(0xFFF1F5F9),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.schedule_rounded,
-                                  color: subtextColor,
-                                  size: 16,
-                                ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF64748B),
+                                width: 2.2,
                               ),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          ),
+                          const SizedBox(height: 3),
+                          Container(
+                            width: 2.5,
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: subtextColor.withValues(alpha: 0.6),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Container(
+                            width: 2.5,
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: subtextColor.withValues(alpha: 0.6),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Container(
+                            width: 2.5,
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: subtextColor.withValues(alpha: 0.6),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          const Icon(
+                            Icons.place_rounded,
+                            color: Color(0xFFEF4444),
+                            size: 16,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Starting Point Input
+                            Container(
+                              constraints: const BoxConstraints(minHeight: 40),
+                              decoration: BoxDecoration(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _isEditingOrigin
+                                      ? brandBlue
+                                      : (isDark
+                                            ? const Color(0xFF475569)
+                                            : const Color(0xFFCBD5E1)),
+                                  width: _isEditingOrigin ? 1.8 : 1.2,
+                                ),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    name,
-                                    style: TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: textColor,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (address.isNotEmpty)
-                                    Text(
-                                      address,
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _originController,
+                                      focusNode: _originFocusNode,
                                       style: TextStyle(
-                                        fontSize: 11.5,
+                                        fontSize: 13.0,
+                                        color: textColor,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText:
+                                            "Choose starting point, or click on the map",
+                                        hintStyle: TextStyle(
+                                          color: subtextColor,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.normal,
+                                        ),
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        filled: false,
+                                        isDense: true,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              vertical: 8,
+                                            ),
+                                      ),
+                                      onTap: () => setState(
+                                        () => _isEditingOrigin = true,
+                                      ),
+                                      onChanged: (val) {
+                                        setState(() => _isEditingOrigin = true);
+                                        _originTextDirty = true;
+                                        _onSearchChanged(val);
+                                      },
+                                      onSubmitted: (_) {
+                                        if (_originController.text.isNotEmpty) {
+                                          if (_searchController
+                                              .text
+                                              .isNotEmpty) {
+                                            _searchAndRoute();
+                                          } else {
+                                            _destinationFocusNode
+                                                .requestFocus();
+                                          }
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                  if (_originController.text.isNotEmpty)
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 32,
+                                      ),
+                                      icon: Icon(
+                                        Icons.clear_rounded,
+                                        size: 15,
                                         color: subtextColor,
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                      tooltip: 'Clear starting point',
+                                      onPressed: () {
+                                        _stopRouteSimulation();
+                                        setState(() {
+                                          _originController.clear();
+                                          _customOrigin = null;
+                                          _originTextDirty = false;
+                                          _suggestions = [];
+                                          _resetRoutePlannerState(
+                                            clearDestination: false,
+                                          );
+                                          _isEditingOrigin = true;
+                                        });
+                                        _originFocusNode.requestFocus();
+                                      },
                                     ),
-                                  if (status != null && status.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        status,
-                                        style: TextStyle(
-                                          fontSize: 11.0,
-                                          fontWeight: FontWeight.w600,
-                                          color: isClosed
-                                              ? const Color(0xFFEF4444)
-                                              : const Color(0xFF10B981),
-                                        ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // Destination Input
+                            Container(
+                              constraints: const BoxConstraints(minHeight: 40),
+                              decoration: BoxDecoration(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: !_isEditingOrigin
+                                      ? brandBlue
+                                      : (isDark
+                                            ? const Color(0xFF475569)
+                                            : const Color(0xFFCBD5E1)),
+                                  width: !_isEditingOrigin ? 1.8 : 1.2,
+                                ),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _searchController,
+                                      focusNode: _destinationFocusNode,
+                                      style: TextStyle(
+                                        fontSize: 13.0,
+                                        color: textColor,
+                                        fontWeight: FontWeight.w500,
                                       ),
+                                      decoration: InputDecoration(
+                                        hintText: "Choose destination...",
+                                        hintStyle: TextStyle(
+                                          color: subtextColor,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.normal,
+                                        ),
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        filled: false,
+                                        isDense: true,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              vertical: 8,
+                                            ),
+                                      ),
+                                      onTap: () => setState(
+                                        () => _isEditingOrigin = false,
+                                      ),
+                                      onChanged: (val) {
+                                        setState(
+                                          () => _isEditingOrigin = false,
+                                        );
+                                        _destinationTextDirty = true;
+                                        _onSearchChanged(val);
+                                      },
+                                      onSubmitted: (val) {
+                                        if (val.isNotEmpty) _searchAndRoute();
+                                      },
+                                    ),
+                                  ),
+                                  if (_searchController.text.isNotEmpty)
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 32,
+                                      ),
+                                      icon: Icon(
+                                        Icons.clear_rounded,
+                                        size: 15,
+                                        color: subtextColor,
+                                      ),
+                                      tooltip: 'Clear destination',
+                                      onPressed: () {
+                                        _stopRouteSimulation();
+                                        setState(() {
+                                          _searchRevision++;
+                                          _debounceTimer?.cancel();
+                                          _searchController.clear();
+                                          _destinationTextDirty = false;
+                                          _suggestions = [];
+                                          _resetRoutePlannerState();
+                                          _isEditingOrigin = false;
+                                        });
+                                      },
                                     ),
                                 ],
                               ),
@@ -8710,2668 +10793,254 @@ class MapScreenState extends State<MapScreen>
                           ],
                         ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 16,
-                      color: subtextColor,
-                    ),
-                    padding: const EdgeInsets.all(8),
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    tooltip: 'Remove',
-                    onPressed: () => _removeFromSearchHistory(i),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-              ),
-            );
-          },
-        ),
-
-        // 4. Delays & Road Disruptions Footer matching Screenshot
-        Container(
-          margin: const EdgeInsets.all(14),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Delays',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Light traffic in this area',
-                style: TextStyle(fontSize: 11.5, color: subtextColor),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'No known road disruptions. Pothole hazards will show on route.',
-                style: TextStyle(
-                  fontSize: 11.0,
-                  color: subtextColor.withValues(alpha: 0.8),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSuggestionsListInPlanner(bool isDark) {
-    final Color textColor = AppDesign.textPrimary(isDark);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: _suggestions.length,
-      separatorBuilder: (ctx, i) => Divider(
-        height: 1,
-        thickness: 0.8,
-        color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-      ),
-      itemBuilder: (ctx, i) {
-        final s = _suggestions[i];
-        final name = (s['_name'] ?? s['display_name']).toString();
-        final shortAddr = (s['_short_addr'] ?? '').toString();
-        final bool isBarangay = s['_is_barangay'] == true ||
-            name.toLowerCase().contains('barangay');
-        const Color brgyTeal = Color(0xFF0D9488);
-
-        return InkWell(
-          onTap: () => _selectSuggestion(s),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: isBarangay
-                        ? brgyTeal.withValues(alpha: 0.14)
-                        : brandBlue.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isBarangay ? Icons.holiday_village_rounded : Icons.place_rounded,
-                    color: isBarangay ? brgyTeal : brandBlue,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              name,
-                              style: TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (isBarangay) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                                vertical: 1.5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: brgyTeal.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: brgyTeal.withValues(alpha: 0.35),
-                                  width: 0.8,
-                                ),
-                              ),
-                              child: const Text(
-                                'BARANGAY',
-                                style: TextStyle(
-                                  fontSize: 9.0,
-                                  fontWeight: FontWeight.bold,
-                                  color: brgyTeal,
-                                  letterSpacing: 0.4,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      if (shortAddr.isNotEmpty && shortAddr != name)
-                        Text(
-                          shortAddr,
-                          style: TextStyle(fontSize: 11.5, color: subtextColor),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildLocationPermissionCard(bool isDark) {
-    final bool isLocationOff = _isLocationDisabled;
-    final Color statusColor = isLocationOff
-        ? AppDesign.warning
-        : AppDesign.accent(isDark);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
-      decoration: BoxDecoration(
-        color: AppDesign.surface(isDark),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppDesign.border(isDark), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isLocationOff
-                ? Icons.location_off_rounded
-                : Icons.my_location_rounded,
-            color: statusColor,
-            size: 24,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            isLocationOff ? 'Location Disabled' : 'Location Permission Needed',
-            style: TextStyle(
-              color: AppDesign.textPrimary(isDark),
-              fontSize: 15.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            isLocationOff
-                ? 'Turn on GPS for live pothole warnings.'
-                : 'Grant access for live pothole warnings.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppDesign.textSecondary(isDark),
-              fontSize: 12.5,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          TextButton(
-            onPressed: () async {
-              if (isLocationOff) {
-                await Geolocator.openLocationSettings();
-              } else {
-                await _determinePosition(requestPermission: true);
-              }
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: statusColor,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: statusColor.withValues(alpha: 0.4)),
-              ),
-            ),
-            child: Text(
-              isLocationOff ? 'Turn On GPS' : 'Grant Access',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlaceTab(int index, String label, bool isDark) {
-    final isSelected = _placeCardTab == index;
-    return Expanded(
-      child: InkWell(
-        onTap: () => setState(() => _placeCardTab = index),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: isSelected
-                    ? const Color(0xFF00796B)
-                    : Colors.transparent,
-                width: 2.5,
-              ),
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              color: isSelected
-                  ? (isDark ? Colors.white : const Color(0xFF00796B))
-                  : (isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B)),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCircularAction({
-    required IconData icon,
-    required String label,
-    required bool isPrimary,
-    required bool isDark,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isPrimary
-                    ? const Color(0xFF00796B)
-                    : (isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFE0F2F1)),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                color: isPrimary ? Colors.white : const Color(0xFF00796B),
-                size: 22,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white70 : const Color(0xFF334155),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPlaceInfoRow({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool isDark,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: const Color(0xFF00796B)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : const Color(0xFF1E293B),
-                ),
-              ),
-              if (subtitle.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSearchedPlaceCard(bool isDark) {
-    if (_searchedPlace == null) return const SizedBox.shrink();
-
-    final String name =
-        _searchedPlace!['name'] as String? ?? 'Searched Location';
-    final String address = _searchedPlace!['address'] as String? ?? '';
-    final LatLng loc = _searchedPlace!['location'] as LatLng;
-    final double distKm =
-        (_searchedPlace!['distanceKm'] as num?)?.toDouble() ?? 0.0;
-    final int estMinutes = (distKm * 2.2).round().clamp(1, 999);
-    final String category =
-        _searchedPlace!['category'] as String? ?? 'DESTINATION';
-
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 520, maxWidth: 420),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-          width: 1.2,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black38,
-            blurRadius: 24,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Hero Image / Visual Banner Header
-              Stack(
-                children: [
-                  Container(
-                    height: 120,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: isDark
-                            ? [
-                                const Color(0xFF0F172A),
-                                const Color(0xFF1E293B),
-                                const Color(0xFF003853),
-                              ]
-                            : [
-                                const Color(0xFF0288D1),
-                                const Color(0xFF0097A7),
-                                const Color(0xFF00796B),
-                              ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                    ),
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.location_city_rounded,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Flexible(
-                              child: Text(
-                                name,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.4,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black45,
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 36),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Floating Close Button (✕)
-                  Positioned(
-                    top: 10,
-                    right: 10,
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _searchedPlace = null;
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.close_rounded,
-                          size: 18,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              // 2. Title & Rating Block
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: TextStyle(
-                        fontSize: 17.5,
-                        fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF202124),
-                      ),
-                    ),
-                    if (address.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        address,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : const Color(0xFF5F6368),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Text(
-                          '4.8',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFFF59E0B),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Row(
-                          children: [
-                            Icon(
-                              Icons.star_rounded,
-                              size: 15,
-                              color: Color(0xFFF59E0B),
-                            ),
-                            Icon(
-                              Icons.star_rounded,
-                              size: 15,
-                              color: Color(0xFFF59E0B),
-                            ),
-                            Icon(
-                              Icons.star_rounded,
-                              size: 15,
-                              color: Color(0xFFF59E0B),
-                            ),
-                            Icon(
-                              Icons.star_rounded,
-                              size: 15,
-                              color: Color(0xFFF59E0B),
-                            ),
-                            Icon(
-                              Icons.star_half_rounded,
-                              size: 15,
-                              color: Color(0xFFF59E0B),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '(OSM Verified)',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: isDark
-                                ? const Color(0xFF94A3B8)
-                                : const Color(0xFF5F6368),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: Container(
+                          padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF334155)
-                                : const Color(0xFFF1F3F4),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            category,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
+                            color: Colors.transparent,
+                            shape: BoxShape.circle,
+                            border: Border.all(
                               color: isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF3C4043),
+                                  ? const Color(0xFF475569)
+                                  : const Color(0xFFCBD5E1),
+                              width: 1.2,
                             ),
                           ),
+                          child: const Icon(
+                            Icons.swap_vert_rounded,
+                            color: brandBlue,
+                            size: 20,
+                          ),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // 3. Tab Bar (Overview, Routes & Safety, About)
-              Container(
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFE2E8F0),
-                      width: 1,
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    _buildPlaceTab(0, 'Overview', isDark),
-                    _buildPlaceTab(1, 'Routes & Safety', isDark),
-                    _buildPlaceTab(2, 'About', isDark),
-                  ],
-                ),
-              ),
-
-              // 4. Circular Actions Row (Directions, A->B Plan, Hazards, Share)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildCircularAction(
-                      icon: Icons.directions_rounded,
-                      label: 'Directions',
-                      isPrimary: true,
-                      isDark: isDark,
-                      onTap: () {
-                        setState(() {
-                          _isRoutePlanningMode = true;
-                          _originController.text = 'Your location';
-                          _searchController.text = name;
-                          _destination = loc;
-                          _customOrigin = null;
-                          _searchedPlace = null;
-                        });
-                        _calculateRoute(loc);
-                      },
-                    ),
-                    _buildCircularAction(
-                      icon: Icons.alt_route_rounded,
-                      label: 'A → B Plan',
-                      isPrimary: false,
-                      isDark: isDark,
-                      onTap: () {
-                        setState(() {
-                          _isRoutePlanningMode = true;
-                          _originController.text = 'Your location';
-                          _searchController.text = name;
-                          _destination = loc;
-                          _customOrigin = null;
-                          _searchedPlace = null;
-                        });
-                        _calculateRoute(loc);
-                      },
-                    ),
-                    _buildCircularAction(
-                      icon: Icons.warning_amber_rounded,
-                      label: 'Hazards',
-                      isPrimary: false,
-                      isDark: isDark,
-                      onTap: () {
-                        _animatedMapMove(loc, 17.0);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Scanning hazards near $name...'),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                    ),
-                    _buildCircularAction(
-                      icon: Icons.share_rounded,
-                      label: 'Share',
-                      isPrimary: false,
-                      isDark: isDark,
-                      onTap: () {
-                        Clipboard.setData(
-                          ClipboardData(
-                            text:
-                                '$name\n$address\nCoordinates: ${loc.latitude}, ${loc.longitude}',
-                          ),
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('📍 Location copied to clipboard!'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: isDark
-                    ? const Color(0xFF334155)
-                    : const Color(0xFFF1F5F9),
-              ),
-
-              // 5. Details List (Address, ETA, Coordinates, Safety)
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  children: [
-                    _buildPlaceInfoRow(
-                      icon: Icons.location_on_rounded,
-                      title: address.isNotEmpty ? address : name,
-                      subtitle: distKm > 0
-                          ? '${distKm.toStringAsFixed(1)} km from your location (approx. $estMinutes min)'
-                          : 'Bulacan, Philippines',
-                      isDark: isDark,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPlaceInfoRow(
-                      icon: Icons.alt_route_rounded,
-                      title: 'Project-OSRM & OpenStreetMap',
-                      subtitle:
-                          'Lat ${loc.latitude.toStringAsFixed(5)}, Lng ${loc.longitude.toStringAsFixed(5)}',
-                      isDark: isDark,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPlaceInfoRow(
-                      icon: Icons.shield_rounded,
-                      title: 'Pothole Scanner AI Active',
-                      subtitle: 'Automatic safe path & proximity alerts ready',
-                      isDark: isDark,
-                    ),
-                  ],
-                ),
-              ),
-
-              // 6. Bottom Primary CTA Button
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 42,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00796B),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.navigation_rounded, size: 18),
-                    label: const Text(
-                      'Start A → B Navigation',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _isRoutePlanningMode = true;
-                        _originController.text = 'Your location';
-                        _searchController.text = name;
-                        _destination = loc;
-                        _customOrigin = null;
-                        _searchedPlace = null;
-                      });
-                      _calculateRoute(loc);
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _formatStepDistanceWidget(double meters, bool isDark) {
-    String formatted;
-    if (meters >= 1000) {
-      final double km = meters / 1000.0;
-      if (km == km.roundToDouble()) {
-        formatted = '${km.round()} km';
-      } else {
-        formatted = '${km.toStringAsFixed(1)} km';
-      }
-    } else {
-      formatted = '${meters.round()} m';
-    }
-    return Text(
-      formatted,
-      style: TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-      ),
-    );
-  }
-
-  Widget _buildStepText(RouteStep step, bool isDark) {
-    final name = step.roadName;
-    final instruction = step.instruction;
-
-    if (name.isNotEmpty && instruction.contains(name)) {
-      final parts = instruction.split(name);
-      return RichText(
-        text: TextSpan(
-          style: TextStyle(
-            fontSize: 14.0,
-            color: isDark ? Colors.white70 : const Color(0xFF334155),
-            height: 1.3,
-          ),
-          children: [
-            TextSpan(text: parts[0]),
-            TextSpan(
-              text: name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
-              ),
-            ),
-            if (parts.length > 1) TextSpan(text: parts[1]),
-          ],
-        ),
-      );
-    }
-
-    return Text(
-      instruction,
-      style: TextStyle(
-        fontSize: 14.0,
-        fontWeight: FontWeight.w500,
-        color: isDark ? Colors.white70 : const Color(0xFF334155),
-        height: 1.3,
-      ),
-    );
-  }
-
-  Widget _buildManeuverIcon(
-    RouteStep step,
-    bool isFirst,
-    bool isLast,
-    bool isDark,
-  ) {
-    if (isFirst) {
-      return Container(
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        child: const Text(
-          'A',
-          style: TextStyle(
-            color: Color(0xFF10B981), // Emerald green
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            fontFamily: 'serif',
-          ),
-        ),
-      );
-    }
-    if (isLast) {
-      return Container(
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        child: const Text(
-          'B',
-          style: TextStyle(
-            color: Color(0xFFDC2626), // Deep red
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            fontFamily: 'serif',
-          ),
-        ),
-      );
-    }
-
-    final type = step.maneuverType.toLowerCase();
-    final modifier = (step.modifier ?? '').toLowerCase();
-
-    IconData iconData = Icons.navigation_rounded;
-
-    if (modifier.contains('slight right') ||
-        modifier.contains('sharp right') ||
-        modifier == 'right') {
-      iconData = Icons.turn_right_rounded;
-    } else if (modifier.contains('slight left') ||
-        modifier.contains('sharp left') ||
-        modifier == 'left') {
-      iconData = Icons.turn_left_rounded;
-    } else if (modifier.contains('uturn')) {
-      iconData = Icons.u_turn_left_rounded;
-    } else if (type == 'roundabout' || type == 'rotary') {
-      iconData = Icons.roundabout_right_rounded;
-    } else if (type == 'fork') {
-      iconData = modifier.contains('left')
-          ? Icons.fork_left_rounded
-          : Icons.fork_right_rounded;
-    } else if (type == 'merge') {
-      iconData = Icons.merge_rounded;
-    } else {
-      iconData = Icons.straight_rounded;
-    }
-
-    return Container(
-      width: 30,
-      height: 30,
-      alignment: Alignment.center,
-      child: Icon(
-        iconData,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-        size: 22,
-      ),
-    );
-  }
-
-
-
-  void _onEndpointPanStart(int kind) {
-    final LatLng? point = kind == 1
-        ? (_customOrigin ?? (_destination != null ? _currentPosition : null))
-        : _destination;
-    if (point == null) return;
-    _endpointPressStart = DateTime.now();
-    _endpointDragDistance = 0.0;
-    setState(() {
-      _draggingEndpointKind = kind;
-      _isDraggingEndpoint = true;
-      _endpointDragAccum = Offset.zero;
-      _endpointDragScreenBase = _mapController.camera.latLngToScreenOffset(
-        point,
-      );
-    });
-    _liveRerouteTimer?.cancel();
-    _liveRerouteTimer = Timer.periodic(
-      const Duration(milliseconds: 850),
-      (_) => _rerouteFromEndpoints(),
-    );
-  }
-
-  void _onEndpointPanUpdate(DragUpdateDetails details) {
-    final Offset? base = _endpointDragScreenBase;
-    if (!_isDraggingEndpoint || base == null) return;
-    _endpointDragAccum += details.delta;
-    _endpointDragDistance += details.delta.distance;
-    final LatLng moved = _mapController.camera.screenOffsetToLatLng(
-      base + _endpointDragAccum,
-    );
-    final String coords =
-        '${moved.latitude.toStringAsFixed(5)}, ${moved.longitude.toStringAsFixed(5)}';
-    setState(() {
-      if (_draggingEndpointKind == 1) {
-        _customOrigin = moved;
-        if (_originController.text != coords) _originController.text = coords;
-      } else {
-        _destination = moved;
-        if (_searchController.text != coords) _searchController.text = coords;
-      }
-    });
-  }
-
-  void _onEndpointPanEnd(DragEndDetails details) {
-    if (!_isDraggingEndpoint) return;
-    _liveRerouteTimer?.cancel();
-    _endpointDragScreenBase = null;
-    final int kind = _draggingEndpointKind;
-    final bool wasTap =
-        DateTime.now().difference(_endpointPressStart).inMilliseconds < 350 &&
-        _endpointDragDistance < 8.0;
-    setState(() => _isDraggingEndpoint = false);
-
-    if (wasTap) {
-      _handleEndpointTap(kind);
-      return;
-    }
-    _rerouteFromEndpoints();
-    _resolveDraggedLabel(kind);
-  }
-
-  void _handleEndpointTap(int kind) {
-    final LatLng? loc = kind == 1
-        ? (_customOrigin ?? _currentPosition)
-        : _destination;
-    if (loc == null || !mounted) return;
-    setState(() {
-      _tappedRequestSeq++;
-      _tappedPoint = loc;
-      _tappedPointLabel = '';
-    });
-    _resolveTappedLabel(_tappedRequestSeq);
-  }
-
-  Future<void> _resolveTappedLabel(int seq) async {
-    final LatLng? point = _tappedPoint;
-    if (point == null) return;
-    final parts = await _reverseGeocodeParts(point);
-    if (!mounted || seq != _tappedRequestSeq || _tappedPoint != point) {
-      return;
-    }
-    setState(() {
-      _tappedPointLabel = parts[0];
-      _tappedPointSecondary = parts.length > 1 ? parts[1] : '';
-    });
-  }
-
-  void _routeToTappedPoint() {
-    final LatLng? loc = _tappedPoint;
-    if (loc == null || !mounted) return;
-    final String combined = [
-      _tappedPointLabel,
-      _tappedPointSecondary,
-    ].where((e) => e.isNotEmpty).join(', ');
-    setState(() {
-      _isRoutePlanningMode = true;
-      _destination = loc;
-      _searchController.text = combined.isEmpty
-          ? '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}'
-          : combined;
-      _tappedPoint = null;
-      _tappedPointLabel = '';
-      _tappedPointSecondary = '';
-    });
-    _calculateRoute(loc, customOrigin: _customOrigin);
-  }
-
-  Widget _buildTappedLocationBar(bool isDark) {
-    final Color textColor = AppDesign.textPrimary(isDark);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-    const Color brandBlue = Color(0xFF2563EB);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 7, 7, 7),
-      decoration: BoxDecoration(
-        color: AppDesign.surface(isDark),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppDesign.border(isDark)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.18),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.place_rounded, color: Color(0xFFEA4335), size: 17),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 210),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _tappedPointLabel.isEmpty
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(
-                            width: 11,
-                            height: 11,
-                            child: CircularProgressIndicator(strokeWidth: 1.6),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Loading…',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: subtextColor,
-                            ),
-                          ),
-                        ],
-                      )
-                    : Text(
-                        _tappedPointLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: textColor,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 44,
+                          minHeight: 44,
                         ),
+                        tooltip: 'Reverse starting point and destination',
+                        onPressed: _swapOriginDestination,
                       ),
-                if (_tappedPointSecondary.isNotEmpty)
-                  Text(
-                    _tappedPointSecondary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: subtextColor),
+                    ],
                   ),
-                Text(
-                  '${_tappedPoint!.latitude.toStringAsFixed(5)}, ${_tappedPoint!.longitude.toStringAsFixed(5)}',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: subtextColor.withValues(alpha: 0.85),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-            icon: Icon(Icons.close_rounded, size: 15, color: subtextColor),
-            tooltip: 'Dismiss',
-            onPressed: () => setState(() {
-              _tappedPoint = null;
-              _tappedPointLabel = '';
-              _tappedPointSecondary = '';
-            }),
-          ),
-          const SizedBox(width: 3),
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: brandBlue,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: brandBlue.withValues(alpha: 0.35),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              icon: const Icon(
-                Icons.directions_rounded,
-                color: Colors.white,
-                size: 20,
-              ),
-              tooltip: 'Point A to Point B',
-              onPressed: _routeToTappedPoint,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _resolveDraggedLabel(int kind) async {
-    final LatLng? point = kind == 1
-        ? (_customOrigin ?? _currentPosition)
-        : _destination;
-    if (point == null || !mounted) return;
-    final String label = await _reverseGeocodeLabel(point);
-    if (!mounted || _isDraggingEndpoint) return;
-    setState(() {
-      if (kind == 1) {
-        _originController.text = label;
-      } else {
-        _searchController.text = label;
-      }
-    });
-  }
-
-  Future<void> _rerouteFromEndpoints() async {
-    final LatLng? dest = _destination;
-    if (dest == null || _silentRouting || _isRouting) return;
-    _silentRouting = true;
-    try {
-      await _calculateRoute(
-        dest,
-        customOrigin: _customOrigin,
-        fitCamera: false,
-        silent: true,
-      );
-    } finally {
-      _silentRouting = false;
-    }
-  }
-
-  void _onEndpointPanCancel() {
-    _liveRerouteTimer?.cancel();
-    _endpointDragScreenBase = null;
-    if (!_isDraggingEndpoint) return;
-    setState(() => _isDraggingEndpoint = false);
-  }
-
-  Marker _buildDraggableEndpointPin({
-    required LatLng point,
-    required int kind,
-    required Color color,
-  }) {
-    final bool active = _isDraggingEndpoint && _draggingEndpointKind == kind;
-    final String label = kind == 1 ? 'A' : 'B';
-    return Marker(
-      key: ValueKey('endpoint_pin_$kind'),
-      point: point,
-      width: 44,
-      height: 56,
-      child: Listener(
-        onPointerCancel: (_) => _onEndpointPanCancel(),
-        child: MouseRegion(
-          cursor: active
-              ? SystemMouseCursors.grabbing
-              : SystemMouseCursors.grab,
-          child: RawGestureDetector(
-            behavior: HitTestBehavior.opaque,
-            gestures: <Type, GestureRecognizerFactory<GestureRecognizer>>{
-              _EagerPanGestureRecognizer:
-                  GestureRecognizerFactoryWithHandlers<
-                    _EagerPanGestureRecognizer
-                  >(() => _EagerPanGestureRecognizer(), (instance) {
-                    instance.dragStartBehavior = DragStartBehavior.down;
-                    instance.onStart = (_) => _onEndpointPanStart(kind);
-                    instance.onUpdate = _onEndpointPanUpdate;
-                    instance.onEnd = _onEndpointPanEnd;
-                    instance.onCancel = _onEndpointPanCancel;
-                  }),
-            },
-            child: Transform.scale(
-              scale: active ? 1.12 : 1.0,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2.2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black45,
-                          blurRadius: active ? 10 : 5,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          height: 1.0,
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Semantics(
+                      button: true,
+                      label: 'Use current location as starting point',
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            unawaited(_useCurrentLocationForOrigin()),
+                        icon: const Icon(Icons.my_location_rounded, size: 16),
+                        label: const Text('Use current location'),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 38),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          foregroundColor: brandBlue,
                         ),
                       ),
                     ),
-                  ),
-                  ClipPath(
-                    clipper: _PinTipClipper(),
-                    child: Container(width: 10, height: 6, color: color),
                   ),
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
 
-  int _computedCurrentStepIndex() {
-    final pos = _currentPosition;
-    if (pos == null || _routeSteps.isEmpty) return -1;
-    int bestIdx = -1;
-    double bestDist = double.infinity;
-    for (int i = 0; i < _routeSteps.length; i++) {
-      final loc = _routeSteps[i].location;
-      final d = Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        loc.latitude,
-        loc.longitude,
-      );
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
-    }
-    return bestIdx;
-  }
-
-  Widget _buildSelectedPotholeCard(PotholeMarker pothole, bool isDark) {
-    final isApproved = pothole.status == 'approved';
-    final isRejected = pothole.status == 'rejected';
-    final Color statusColor = isApproved
-        ? const Color(0xFF10B981)
-        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
-    final IconData statusIcon = isApproved
-        ? Icons.verified_rounded
-        : (isRejected ? Icons.cancel_rounded : Icons.schedule_rounded);
-    final String statusText = isApproved
-        ? 'VERIFIED LIVE'
-        : (isRejected ? 'REJECTED' : 'PENDING REVIEW');
-
-    final String severity = pothole.overallSeverity.toLowerCase();
-    final Color severityColor = severity == 'high'
-        ? const Color(0xFFEF4444)
-        : (severity == 'low'
-              ? const Color(0xFFEAB308)
-              : const Color(0xFFF97316));
-    final IconData severityIcon = severity == 'high'
-        ? Icons.dangerous_rounded
-        : (severity == 'low'
-              ? Icons.warning_amber_rounded
-              : Icons.warning_rounded);
-    final String severityLabel = severity == 'high'
-        ? 'HIGH SEVERITY'
-        : (severity == 'low' ? 'LOW SEVERITY' : 'MEDIUM SEVERITY');
-
-    final String docIdStr = pothole.docId != null && pothole.docId!.isNotEmpty
-        ? (pothole.docId!.length > 8
-              ? pothole.docId!.substring(0, 8).toUpperCase()
-              : pothole.docId!.toUpperCase())
-        : (pothole.id != null ? '#${pothole.id}' : '#POTHOLE');
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
-          width: 1.5,
-        ),
-        boxShadow: [
-          // Ambient colored glow matching severity
-          BoxShadow(
-            color: severityColor.withValues(alpha: isDark ? 0.32 : 0.20),
-            blurRadius: 28,
-            spreadRadius: 2,
-            offset: const Offset(0, 6),
-          ),
-          // Deep drop shadow
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.65 : 0.18),
-            blurRadius: 36,
-            spreadRadius: 4,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(21),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 1. Top Severity Accent Stripe
-            Container(
-              height: 4.5,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [severityColor, statusColor]),
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Top Title & Badges Bar
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Hazard Icon Pill
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: severityColor.withValues(alpha: 0.14),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: severityColor.withValues(alpha: 0.4),
-                            width: 1.2,
-                          ),
-                        ),
-                        child: Center(
-                          child: Icon(
-                            severityIcon,
-                            color: severityColor,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  'Road Surface Hazard',
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white
-                                        : const Color(0xFF0F172A),
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 15.5,
-                                    letterSpacing: -0.2,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF334155)
-                                        : const Color(0xFFF1F5F9),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? const Color(0xFF475569)
-                                          : const Color(0xFFE2E8F0),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    docIdStr,
-                                    style: TextStyle(
-                                      color: isDark
-                                          ? const Color(0xFF94A3B8)
-                                          : const Color(0xFF64748B),
-                                      fontFamily: 'monospace',
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              'Surveyed road telemetry & optical hazard alert',
-                              style: TextStyle(
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
-                                fontSize: 11.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Close Button
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedPothole = null;
-                            });
-                          },
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF334155)
-                                  : const Color(0xFFF1F5F9),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isDark
-                                    ? const Color(0xFF475569)
-                                    : const Color(0xFFE2E8F0),
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.close_rounded,
-                              size: 16,
-                              color: isDark
-                                  ? const Color(0xFFCBD5E1)
-                                  : const Color(0xFF475569),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Middle Section: Thumbnail + Detailed Telemetry Badges
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Photo Thumbnail with Tap Preview
-                      _buildPotholeImageThumbnail(pothole.imagePath, isDark),
-                      const SizedBox(width: 14),
-
-                      // Info Badges Column
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Status & Severity Row
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 4,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
-                                        .withValues(alpha: 0.16),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode)
-                                          .withValues(alpha: 0.7),
-                                      width: 1.1,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '${pothole.primaryDpwhCode}: ${pothole.primaryDefect}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      color: DpwhStandards.getCodeColor(pothole.primaryDpwhCode),
-                                      letterSpacing: 0.4,
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF2563EB).withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: const Color(0xFF2563EB).withValues(alpha: 0.6),
-                                      width: 1.1,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'SLA: ${pothole.responseTime}',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF2563EB),
-                                      letterSpacing: 0.3,
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: statusColor.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: statusColor.withValues(alpha: 0.5),
-                                      width: 1.1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        statusIcon,
-                                        color: statusColor,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        statusText,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w800,
-                                          color: statusColor,
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: severityColor.withValues(
-                                      alpha: 0.14,
-                                    ),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: severityColor.withValues(
-                                        alpha: 0.5,
-                                      ),
-                                      width: 1.1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        severityIcon,
-                                        color: severityColor,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        severityLabel,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w800,
-                                          color: severityColor,
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (pothole.potholeCount > 1)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 7,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isDark
-                                          ? const Color(0xFF334155)
-                                          : const Color(0xFFF1F5F9),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isDark
-                                            ? const Color(0xFF475569)
-                                            : const Color(0xFFE2E8F0),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      '${pothole.potholeCount} hazards cluster',
-                                      style: TextStyle(
-                                        fontSize: 9.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: isDark
-                                            ? const Color(0xFF94A3B8)
-                                            : const Color(0xFF64748B),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 8),
-
-                            // Interactive GPS Pill
-                            MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: GestureDetector(
-                                onTap: () {
-                                  Clipboard.setData(
-                                    ClipboardData(
-                                      text:
-                                          '${pothole.location.latitude}, ${pothole.location.longitude}',
-                                    ),
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Coordinates copied to clipboard!',
-                                      ),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4.5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF0F172A)
-                                        : const Color(0xFFF1F5F9),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? const Color(0xFF334155)
-                                          : const Color(0xFFE2E8F0),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.gps_fixed_rounded,
-                                        color: Color(0xFF2563EB),
-                                        size: 13,
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        '${pothole.location.latitude.toStringAsFixed(5)}, ${pothole.location.longitude.toStringAsFixed(5)}',
-                                        style: TextStyle(
-                                          color: isDark
-                                              ? Colors.white
-                                              : const Color(0xFF0F172A),
-                                          fontFamily: 'monospace',
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 11.5,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Icon(
-                                        Icons.copy_rounded,
-                                        size: 11.5,
-                                        color: isDark
-                                            ? const Color(0xFF94A3B8)
-                                            : const Color(0xFF64748B),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'DPWH Action: ${pothole.correctiveMeasure}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Actions: Get Directions & Full Report
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 42,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2563EB),
-                              foregroundColor: Colors.white,
-                              elevation: 2,
-                              shadowColor: const Color(
-                                0xFF2563EB,
-                              ).withValues(alpha: 0.4),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                            ),
-                            icon: const Icon(Icons.near_me_rounded, size: 17),
-                            label: const Text(
-                              'Get Directions',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _destination = pothole.location;
-                                _isRoutePlanningMode = false;
-                                _searchController.text =
-                                    'Hazard (${pothole.location.latitude.toStringAsFixed(4)}, ${pothole.location.longitude.toStringAsFixed(4)})';
-                              });
-                              _calculateRoute(pothole.location);
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: SizedBox(
-                          height: 42,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF0F172A),
-                              backgroundColor: isDark
-                                  ? const Color(0xFF334155)
-                                  : const Color(0xFFF8FAFC),
-                              side: BorderSide(
-                                color: isDark
-                                    ? const Color(0xFF475569)
-                                    : const Color(0xFFCBD5E1),
-                                width: 1.2,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                            ),
-                            icon: const Icon(
-                              Icons.assignment_rounded,
-                              size: 17,
-                              color: Color(0xFF2563EB),
-                            ),
-                            label: const Text(
-                              'Full Report',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            onPressed: () => _showPotholeDetails(pothole),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPotholeImageThumbnail(String imagePath, bool isDark) {
-    if (imagePath.startsWith('http') || imagePath.startsWith('blob:')) {
-      return GestureDetector(
-        onTap: () => _openImagePreview(imagePath),
-        child: Container(
-          width: 96,
-          height: 96,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.12),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Image.network(
-                  imagePath,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      _placeholderThumb(isDark),
-                ),
-              ),
-              Positioned(
-                bottom: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white24, width: 0.8),
-                  ),
-                  child: const Icon(
-                    Icons.zoom_in_rounded,
-                    color: Colors.white,
-                    size: 13,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return _placeholderThumb(isDark);
-  }
-
-  Widget _placeholderThumb(bool isDark) {
-    return Container(
-      width: 96,
-      height: 96,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-          width: 1.2,
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.no_photography_rounded,
-            color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8),
-            size: 28,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'No Image',
-            style: TextStyle(
-              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-              fontSize: 9.5,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _openImagePreview(String imageUrl) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          alignment: Alignment.topRight,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Image.network(imageUrl, fit: BoxFit.contain),
-            ),
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopRightMapProfileToggle({required bool isMapActive}) {
-    if (!kIsWeb) return const SizedBox.shrink();
-
-    final bool isDark = AppSettings.instance.isDarkMode;
-    final Color cardBg = AppDesign.surface(isDark);
-    final Color cardBorder = AppDesign.border(isDark);
-    const Color accentColor = Color(0xFF2563EB);
-    final Color subtextColor = AppDesign.textSecondary(isDark);
-
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: cardBorder, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // GIS Map Tab Segment
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: isMapActive ? null : () {},
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
+            if (_isRouting) ...[
+              const LinearProgressIndicator(minHeight: 2),
+              Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
+                  vertical: 6,
+                ),
+                child: Text(
+                  'Finding road routes and checking reported potholes...',
+                  style: TextStyle(fontSize: 12, color: subtextColor),
+                ),
+              ),
+            ],
+
+            if (_isPermissionDenied || _isLocationDisabled)
+              Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: isMapActive ? accentColor : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.map_rounded,
-                      color: isMapActive ? Colors.white : subtextColor,
+                    const Icon(
+                      Icons.location_off_rounded,
                       size: 16,
+                      color: Color(0xFFB45309),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Map',
-                      style: TextStyle(
-                        color: isMapActive ? Colors.white : subtextColor,
-                        fontSize: 12.5,
-                        fontWeight: isMapActive
-                            ? FontWeight.bold
-                            : FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // User Profile Tab Segment
-          if (widget.onOpenProfile != null || !isMapActive)
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: widget.onOpenProfile,
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: !isMapActive ? accentColor : Colors.transparent,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person_rounded,
-                        color: !isMapActive ? Colors.white : subtextColor,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Profile',
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _isPermissionDenied
+                            ? 'Location permission is blocked. Enter a starting point or tap the map.'
+                            : 'GPS is off. Enter a starting point or enable location.',
                         style: TextStyle(
-                          color: !isMapActive ? Colors.white : subtextColor,
-                          fontSize: 12.5,
-                          fontWeight: !isMapActive
-                              ? FontWeight.bold
-                              : FontWeight.w600,
+                          fontSize: 11.5,
+                          color: isDark
+                              ? const Color(0xFFFDE68A)
+                              : const Color(0xFF92400E),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Settings Button (Included in top right pill)
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                showDialog(
-                  context: context,
-                  barrierDismissible: true,
-                  builder: (ctx) => WebSettingsDialog(
-                    onSettingsChanged: () => setState(() {}),
-                  ),
-                );
-              },
-              borderRadius: BorderRadius.circular(20),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Icon(
-                  Icons.settings_rounded,
-                  color: subtextColor,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFloatingSearchBar({
-    required bool isDark,
-    required bool isCompactViewport,
-  }) {
-    final Color cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final Color cardBorder = isDark
-        ? const Color(0xFF334155)
-        : const Color(0xFFCBD5E1);
-    final Color textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final Color subtextColor = isDark
-        ? const Color(0xFF94A3B8)
-        : const Color(0xFF64748B);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: _searchFocusNode.hasFocus ? brandBlue : cardBorder,
-          width: _searchFocusNode.hasFocus ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.search_rounded,
-            color: _searchFocusNode.hasFocus ? brandBlue : subtextColor,
-            size: 20,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              style: TextStyle(
-                fontSize: 13.5,
-                color: textColor,
-                fontWeight: FontWeight.w500,
-              ),
-              decoration: InputDecoration(
-                hintText: isCompactViewport
-                    ? 'Search map...'
-                    : 'Search location, destination...',
-                hintStyle: TextStyle(
-                  color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
-                  fontSize: 13.0,
-                  fontWeight: FontWeight.normal,
-                ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-              onTap: () {
-                setState(() {
-                  _isSearchHistoryOpen = true;
-                });
-              },
-              onChanged: (val) {
-                setState(() {
-                  if (val.trim().isEmpty) {
-                    _isSearchHistoryOpen = true;
-                    _suggestions = [];
-                  } else {
-                    _isSearchHistoryOpen = false;
-                  }
-                });
-                _onSearchChanged(val);
-              },
-              onSubmitted: (val) {
-                if (val.isNotEmpty) _searchAndRoute();
-              },
-            ),
-          ),
-          if (_searchController.text.isNotEmpty)
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              icon: Icon(Icons.clear_rounded, size: 16, color: subtextColor),
-              onPressed: () {
-                setState(() {
-                  _searchController.clear();
-                  _suggestions = [];
-                  _routePoints = [];
-                  _alternativeRoutes = [];
-                  _destination = null;
-                  _isSearchHistoryOpen = true;
-                });
-              },
-            ),
-          if (_isRouting)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: brandBlue,
-                ),
-              ),
-            ),
-          Container(
-            height: 22,
-            width: 1,
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-          ),
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            tooltip: 'Collapse search bar',
-            icon: Icon(
-              Icons.chevron_left_rounded,
-              size: 22,
-              color: subtextColor,
-            ),
-            onPressed: () => setState(() => _isSidePanelCollapsed = true),
-          ),
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            tooltip: 'Directions / Plan Route',
-            icon: const Icon(
-              Icons.directions_rounded,
-              size: 22,
-              color: brandBlue,
-            ),
-            onPressed: () {
-              setState(() {
-                _isRoutePlanningMode = true;
-                _originController.text = 'Your location';
-                _customOrigin = null;
-                _isEditingOrigin = false;
-              });
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSuggestionsDropdown(bool isDark) {
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.14),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ListView.separated(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        itemCount: _suggestions.length,
-        separatorBuilder: (ctx, i) => Divider(
-          height: 1,
-          thickness: 0.8,
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-        ),
-        itemBuilder: (ctx, i) {
-          final s = _suggestions[i];
-          final name = (s['_name'] ?? s['display_name']).toString();
-          final shortAddr = (s['_short_addr'] ?? '').toString();
-          final bool isHighlighted = i == _highlightedSuggestionIndex;
-          final bool isBarangay = s['_is_barangay'] == true ||
-              name.toLowerCase().contains('barangay');
-          const Color brgyTeal = Color(0xFF0D9488);
-
-          return InkWell(
-            onTap: () => _selectSuggestion(s),
-            child: Container(
-              color: isHighlighted
-                  ? (isBarangay
-                      ? brgyTeal.withValues(alpha: 0.15)
-                      : const Color(0xFF2563EB).withValues(alpha: 0.10))
-                  : Colors.transparent,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: isHighlighted
-                          ? (isBarangay ? brgyTeal : const Color(0xFF2563EB))
-                          : (isBarangay
-                              ? brgyTeal.withValues(alpha: 0.14)
-                              : const Color(0xFF2563EB).withValues(alpha: 0.12)),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      isBarangay
-                          ? Icons.holiday_village_rounded
-                          : Icons.place_rounded,
-                      color: isHighlighted
-                          ? Colors.white
-                          : (isBarangay ? brgyTeal : const Color(0xFF2563EB)),
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                name,
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF0F172A),
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (isBarangay) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 1.5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: brgyTeal.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: brgyTeal.withValues(alpha: 0.35),
-                                    width: 0.8,
-                                  ),
-                                ),
-                                child: const Text(
-                                  'BARANGAY',
-                                  style: TextStyle(
-                                    fontSize: 9.0,
-                                    fontWeight: FontWeight.bold,
-                                    color: brgyTeal,
-                                    letterSpacing: 0.4,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        if (shortAddr.isNotEmpty && shortAddr != name)
-                          Text(
-                            shortAddr,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: isDark
-                                  ? const Color(0xFF94A3B8)
-                                  : const Color(0xFF64748B),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildSearchHistoryDropdown(bool isDark) {
-    final Color cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final Color cardBorder = isDark
-        ? const Color(0xFF334155)
-        : const Color(0xFFE2E8F0);
-    final Color textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final Color subtextColor = isDark
-        ? const Color(0xFF94A3B8)
-        : const Color(0xFF64748B);
-    const Color brandBlue = Color(0xFF2563EB);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cardBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.14),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header: Recent Searches & Clear All
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 10, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.history_rounded, size: 16, color: brandBlue),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Recent Searches',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
                       ),
                     ),
                   ],
                 ),
-                TextButton(
-                  onPressed: _clearSearchHistory,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    'Clear all',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: brandBlue,
-                    ),
+              ),
+
+            if (_routeErrorMessage != null)
+              Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.45),
                   ),
                 ),
-              ],
-            ),
-          ),
-
-          Divider(
-            height: 1,
-            thickness: 0.8,
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-          ),
-
-          // Search History Items List
-          Flexible(
-            child: ListView.separated(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              itemCount: _searchHistory.length,
-              separatorBuilder: (ctx, i) => Divider(
-                height: 1,
-                thickness: 0.8,
-                color: isDark
-                    ? const Color(0xFF334155)
-                    : const Color(0xFFF1F5F9),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.error_outline_rounded,
+                      size: 16,
+                      color: Color(0xFFB91C1C),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _routeErrorMessage!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: isDark
+                              ? const Color(0xFFFCA5A5)
+                              : const Color(0xFF991B1B),
+                        ),
+                      ),
+                    ),
+                    if (_destination != null)
+                      TextButton(
+                        onPressed: () =>
+                            unawaited(_calculateRoute(_destination!)),
+                        child: const Text('Retry'),
+                      ),
+                  ],
+                ),
               ),
-              itemBuilder: (ctx, i) {
-                final h = _searchHistory[i];
-                final name = (h['name'] ?? '').toString();
-                final address = (h['address'] ?? '').toString();
-                final status = h['status']?.toString();
-                final bool isClosed =
-                    status?.toLowerCase().contains('closed') == true;
 
-                return Material(
-                  color: Colors.transparent,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => _selectHistoryItem(h),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+            Divider(height: 1, thickness: 1, color: cardBorder),
+
+            // ── Scrollable Body: Route Summary OR Suggestions OR History & Presets OR Turn-by-Turn Steps ──
+            Flexible(
+              child: SingleChildScrollView(
+                child: _suggestions.isNotEmpty
+                    ? _buildSuggestionsListInPlanner(isDark)
+                    : (_routePoints.isNotEmpty
+                          ? (_showTurnByTurnSheet && _routeSteps.isNotEmpty
+                                ? _buildTurnByTurnInPlanner(
+                                    isDark: isDark,
+                                    distStr: distStr,
+                                    durStr: totalEtaStr,
+                                  )
+                                : _buildRouteSummaryInPlanner(
+                                    isDark: isDark,
+                                    isClearAhead: isClearAhead,
+                                    distStr: distStr,
+                                    totalEtaStr: totalEtaStr,
+                                    activePotholeCount: activePotholeCount,
+                                  ))
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF0F172A)
-                                        : const Color(0xFFF1F5F9),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    Icons.schedule_rounded,
-                                    color: subtextColor,
-                                    size: 15,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        name,
-                                        style: TextStyle(
-                                          fontSize: 13.0,
-                                          fontWeight: FontWeight.w600,
-                                          color: textColor,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      if (address.isNotEmpty)
-                                        Text(
-                                          address,
-                                          style: TextStyle(
-                                            fontSize: 11.0,
-                                            color: subtextColor,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                if (status != null && status.isNotEmpty)
+                                if (_destination == null)
                                   Padding(
-                                    padding: const EdgeInsets.only(right: 4),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      12,
+                                      14,
+                                      4,
+                                    ),
                                     child: Text(
-                                      status,
+                                      'Enter a destination or tap the map to view route pothole counts.',
                                       style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: isClosed
-                                            ? const Color(0xFFEF4444)
-                                            : const Color(0xFF10B981),
+                                        fontSize: 12,
+                                        color: subtextColor,
                                       ),
                                     ),
                                   ),
+                                _buildHistoryAndPresetsInPlanner(isDark),
                               ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.close_rounded,
-                          size: 15,
-                          color: subtextColor,
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                        tooltip: 'Remove',
-                        onPressed: () => _removeFromSearchHistory(i),
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                  ),
-                );
-              },
+                            )),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
-}
 
-/// Paints a gradient vision cone matching Google Maps style.
-class VisionConePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-
-    final paint = Paint()
-      ..shader = RadialGradient(
-        center: Alignment.center,
-        colors: [
-          Colors.blue.withValues(alpha: 0.6),
-          Colors.blue.withValues(alpha: 0.0),
-        ],
-        stops: const [0.1, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
-
-    final path = Path();
-    path.moveTo(center.dx, center.dy);
-
-    // Draw an arc representing the field of view (approx 100 degrees)
-    // Canvas 0 radians is Right (East). North is -pi/2 (-1.5708).
-    // We want the cone centered on North.
-    const sweepAngle = 1.8; // radians (approx 103 degrees)
-    const startAngle = -1.5708 - (sweepAngle / 2); // Center it on North
-
-    path.arcTo(
-      Rect.fromCircle(center: center, radius: radius),
-      startAngle,
-      sweepAngle,
-      false,
-    );
-    path.close();
-
-    canvas.drawPath(path, paint);
+  void _applyMapState(VoidCallback fn) {
+    if (mounted) setState(fn);
   }
 
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  @visibleForTesting
+  Future<void> debugApplyRoutesForTest({
+    required List<List<LatLng>> routes,
+    required List<double> durations,
+    required List<double> distances,
+    required LatLng destination,
+    List<List<RouteStep>>? stepsByRoute,
+    LatLng? customOrigin,
+    String? originLabel,
+    String? destinationLabel,
+    bool showP2pPill = false,
+  }) async {
+    _customOrigin = customOrigin;
+    if (originLabel != null) {
+      _originController.text = originLabel;
+    }
+    _destination = destination;
+    if (destinationLabel != null) {
+      _searchController.text = destinationLabel;
+    }
+    _isRoutePlanningMode = true;
+    _isP2pPillVisible = showP2pPill;
+    if (showP2pPill) {
+      _p2pName = destinationLabel ?? 'Destination';
+    }
+    await _processRoutes(
+      routes,
+      durations,
+      distances,
+      destination,
+      stepsByRoute: stepsByRoute,
+      fitCamera: false,
+    );
+  }
+
+  @visibleForTesting
+  RouteComparisonResult? get debugRouteComparison => _routeComparison;
+
+  @visibleForTesting
+  RouteHazardSummary? get debugActiveRouteSummary => _currentActiveRouteSummary;
+
+  @visibleForTesting
+  int get debugP2pHazardCount => _p2pHazardCount;
 }

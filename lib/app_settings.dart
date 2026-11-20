@@ -5,22 +5,32 @@ class AppSettings {
   AppSettings._();
 
   /// Shared Theme Mode Notifier (ThemeMode.system, ThemeMode.dark, or ThemeMode.light)
-  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
+    ThemeMode.system,
+  );
 
   /// Shared Pothole Marker Layer Visibility Notifier
   final ValueNotifier<bool> showPotholesNotifier = ValueNotifier<bool>(true);
 
+  /// Legacy test preference. Live maps no longer inject built-in sample reports.
+  final ValueNotifier<bool> sampleStaMariaPotholesNotifier =
+      ValueNotifier<bool>(false);
+
   /// Admin Experimental: Manual Pothole Placement Notifier
-  final ValueNotifier<bool> manualPotholePlacementNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> manualPotholePlacementNotifier =
+      ValueNotifier<bool>(false);
 
   /// Developer Mode: Edit Current GPS Location Notifier
-  final ValueNotifier<bool> devEditLocationNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> devEditLocationNotifier = ValueNotifier<bool>(
+    false,
+  );
 
   /// Developer & Simulation Tools Master Mode Notifier
   final ValueNotifier<bool> devMockModeNotifier = ValueNotifier<bool>(false);
 
   /// High-Contrast Black & White (Monochrome) Display Notifier
-  final ValueNotifier<bool> highContrastMonochromeNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> highContrastMonochromeNotifier =
+      ValueNotifier<bool>(false);
 
   /// Active Navigation Route State Notifier
   final ValueNotifier<bool> isRouteActiveNotifier = ValueNotifier<bool>(false);
@@ -29,11 +39,15 @@ class AppSettings {
 
   bool get isDarkMode {
     if (themeModeNotifier.value == ThemeMode.system) {
-      return WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark;
+      return WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+          Brightness.dark;
     }
     return themeModeNotifier.value == ThemeMode.dark;
   }
+
   bool get showPotholes => showPotholesNotifier.value;
+  bool get sampleStaMariaPotholesEnabled =>
+      sampleStaMariaPotholesNotifier.value;
   bool get devMockModeEnabled => devMockModeNotifier.value;
   bool get isRouteActive => isRouteActiveNotifier.value;
 
@@ -59,6 +73,10 @@ class AppSettings {
     showPotholesNotifier.value = show;
   }
 
+  void toggleSampleStaMariaPotholes(bool enabled) {
+    sampleStaMariaPotholesNotifier.value = enabled;
+  }
+
   void toggleDevMockMode(bool enabled) {
     devMockModeNotifier.value = enabled;
     mobileDevMockLocationEnabled = enabled;
@@ -73,7 +91,9 @@ class AppSettings {
   }
 
   // ── Web Platform Settings ──────────────────────────────────────────────
-  final ValueNotifier<String> webMapStyleNotifier = ValueNotifier<String>('Google Maps');
+  final ValueNotifier<String> webMapStyleNotifier = ValueNotifier<String>(
+    'Google Maps',
+  );
   String get webMapStyle => webMapStyleNotifier.value;
   set webMapStyle(String value) => webMapStyleNotifier.value = value;
   double webConfidenceFilter = 0.20;
@@ -92,7 +112,7 @@ class AppSettings {
   }
 
   // ── Mobile Platform Settings ───────────────────────────────────────────
-  double mobileAiConfidenceThreshold = 0.20;
+  double mobileAiConfidenceThreshold = 0.25;
   double mobileProximityDistanceMeters = 22.0;
   bool mobileVoiceAlertsEnabled = true;
   bool mobileHighAccuracyGps = true;

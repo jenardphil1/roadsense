@@ -78,11 +78,11 @@ class ReportPriority {
   });
 
   String get bandLabel => switch (band) {
-        PriorityBand.critical => 'Critical',
-        PriorityBand.high => 'High',
-        PriorityBand.normal => 'Normal',
-        PriorityBand.low => 'Low',
-      };
+    PriorityBand.critical => 'Critical',
+    PriorityBand.high => 'High',
+    PriorityBand.normal => 'Normal',
+    PriorityBand.low => 'Low',
+  };
 }
 
 /// Internal flyweight so the neighbour scan never re-casts Firestore maps.
@@ -203,7 +203,8 @@ class ApprovalPriority {
 
       final lat = (data['latitude'] as num?)?.toDouble();
       final lon = (data['longitude'] as num?)?.toDouble();
-      if (lat == null || lon == null || !lat.isFinite || !lon.isFinite) continue;
+      if (lat == null || lon == null || !lat.isFinite || !lon.isFinite)
+        continue;
 
       if (status == 'pending') pending.add(doc);
 
@@ -224,16 +225,26 @@ class ApprovalPriority {
       final uid = data['reporterUid'] as String? ?? '';
 
       // --- 1. DPWH Defect Classification & Harm Assessment ---
-      final rawDpwh = (data['primaryDpwhCode'] as String? ?? '').toUpperCase().trim();
+      final rawDpwh = (data['primaryDpwhCode'] as String? ?? '')
+          .toUpperCase()
+          .trim();
       final rawLabel = (data['primaryDefect'] as String? ?? '');
-      final defectClass = rawDpwh.isNotEmpty
-          ? DpwhStandards.classifyByCode(rawDpwh)
-          : DpwhStandards.classify(rawLabel.isNotEmpty ? rawLabel : data['overallSeverity'] as String?);
+      final defectClass =
+          DpwhStandards.classForReport(data) ??
+          (rawDpwh.isNotEmpty
+              ? DpwhStandards.classifyByCode(rawDpwh)
+              : DpwhStandards.classify(
+                  rawLabel.isNotEmpty
+                      ? rawLabel
+                      : data['overallSeverity'] as String?,
+                ));
 
       final String dpwhCode = defectClass.code;
-      final String responseTime = data['responseTime'] as String? ?? defectClass.responseTime;
+      final String responseTime =
+          data['responseTime'] as String? ?? defectClass.responseTime;
       final severity =
-          (data['overallSeverity'] as String? ?? defectClass.severity).toLowerCase();
+          (data['overallSeverity'] as String? ?? defectClass.severity)
+              .toLowerCase();
 
       // DPWH Statutory SLA Hours:
       final double dpwhSlaHours = switch (dpwhCode) {
@@ -263,14 +274,19 @@ class ApprovalPriority {
         _ => 0.6,
       };
 
-      final count =
-          ((data['potholeCount'] as num?)?.toInt() ?? 1).clamp(1, 100);
+      final count = ((data['potholeCount'] as num?)?.toInt() ?? 1).clamp(
+        1,
+        100,
+      );
       final scale = count <= 1
           ? 0.0
           : (math.log(count) / math.log(6)).clamp(0.0, 1.0);
 
       // DPWH Harm: 50% statutory defect hazard + 30% reported severity + 20% count scale
-      final harm = (0.50 * dpwhWeight + 0.30 * sevW + 0.20 * scale).clamp(0.20, 1.0);
+      final harm = (0.50 * dpwhWeight + 0.30 * sevW + 0.20 * scale).clamp(
+        0.20,
+        1.0,
+      );
 
       // --- 2. Credibility & Evidence Verification ---
       final confs = <double>[];
@@ -286,7 +302,7 @@ class ApprovalPriority {
       final modelConf = confs.isEmpty
           ? 0.5 // legacy docs carry no detections
           : 0.5 * confs.reduce(math.max) +
-              0.5 * (confs.reduce((a, b) => a + b) / confs.length);
+                0.5 * (confs.reduce((a, b) => a + b) / confs.length);
 
       final a = approved[uid] ?? 0;
       final r = rejected[uid] ?? 0;
@@ -335,8 +351,9 @@ class ApprovalPriority {
       } else if (ts is String) {
         created = DateTime.tryParse(ts);
       }
-      final waiting =
-          created == null ? Duration.zero : clock.difference(created);
+      final waiting = created == null
+          ? Duration.zero
+          : clock.difference(created);
       final waitH = math.max(0.0, waiting.inMinutes / 60.0);
 
       final bool isSlaBreached = waitH > dpwhSlaHours;
@@ -354,20 +371,25 @@ class ApprovalPriority {
       // --- 5. DPWH Hard Overrides ---
       // Rule A: High severity Code 01/02 with >= 2 independent witnesses is an immediate hazard.
       final isCorroboratedHazard =
-          (severity == 'high' || dpwhCode == 'CODE 01') && witnesses.length >= 2;
+          (severity == 'high' || dpwhCode == 'CODE 01') &&
+          witnesses.length >= 2;
 
       // Rule B: Any Code 01 (Pothole) that has breached its 72h SLA with photo proof.
       final isOverdueEmergencyPothole =
-          dpwhCode == 'CODE 01' && isSlaBreached && hasPhoto && modelConf >= 0.40;
+          dpwhCode == 'CODE 01' &&
+          isSlaBreached &&
+          hasPhoto &&
+          modelConf >= 0.40;
 
-      final bool forcedCritical = isCorroboratedHazard || isOverdueEmergencyPothole;
+      final bool forcedCritical =
+          isCorroboratedHazard || isOverdueEmergencyPothole;
       final band = (forcedCritical || score >= criticalAt)
           ? PriorityBand.critical
           : score >= highAt
-              ? PriorityBand.high
-              : score >= normalAt
-                  ? PriorityBand.normal
-                  : PriorityBand.low;
+          ? PriorityBand.high
+          : score >= normalAt
+          ? PriorityBand.normal
+          : PriorityBand.low;
 
       out[doc.id] = ReportPriority(
         id: doc.id,

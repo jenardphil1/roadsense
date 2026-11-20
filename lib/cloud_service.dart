@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:azblob/azblob.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier, debugPrint, kIsWeb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'dpwh_standards.dart';
+import 'email_verification_client.dart';
+import 'functions_client.dart';
+import 'upload_error.dart';
 
 /// Geographical Local Government Unit (LGU) location details
 class LguLocationInfo {
@@ -27,31 +31,143 @@ class LguLocationInfo {
       (city.isNotEmpty && !city.startsWith('Bulacan District'));
 
   Map<String, dynamic> toMap() => {
-        'barangay': barangay,
-        'city': city,
-        'province': province,
-        'formattedAddress': formattedAddress,
-      };
+    'barangay': barangay,
+    'city': city,
+    'province': province,
+    'formattedAddress': formattedAddress,
+  };
+}
+
+String detectImageMimeType(Uint8List bytes) {
+  if (bytes.length >= 4 &&
+      bytes[0] == 137 &&
+      bytes[1] == 80 &&
+      bytes[2] == 78 &&
+      bytes[3] == 71) {
+    return 'image/png';
+  }
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
+}
+
+/// Uploads report image bytes via an authenticated backend-issued short-lived
+/// Azure Blob Service SAS upload URL and returns the unsigned public HTTPS URL.
+Future<String> uploadReportImageWithSignedUrl({
+  required Uint8List bytes,
+  required String reportId,
+  required FirebaseFunctionsClient functionsClient,
+  http.Client? httpClient,
+}) async {
+  if (bytes.isEmpty) {
+    throw ReportUploadException(
+      category: ReportUploadErrorCategory.missingImage,
+      message: 'Captured photo data is empty or missing.',
+    );
+  }
+  final contentType = detectImageMimeType(bytes);
+  final Map<String, dynamic> ticket;
+  try {
+    ticket = await functionsClient.call(
+      'issueReportUploadUrl',
+      data: {
+        'reportId': reportId,
+        'contentType': contentType,
+        'contentLength': bytes.length,
+      },
+      fallbackErrorMessage: 'Unable to authorize photo upload',
+    );
+  } catch (e) {
+    throw classifyUploadError(e);
+  }
+
+  final rawUploadUrl = (ticket['uploadUrl'] as String?)?.trim() ?? '';
+  final rawPublicUrl = (ticket['publicUrl'] as String?)?.trim() ?? '';
+  final uploadUri = Uri.tryParse(rawUploadUrl);
+  final publicUri = Uri.tryParse(rawPublicUrl);
+  if (uploadUri == null ||
+      uploadUri.scheme != 'https' ||
+      publicUri == null ||
+      publicUri.scheme != 'https' ||
+      publicUri.hasQuery) {
+    throw ReportUploadException(
+      category: ReportUploadErrorCategory.server,
+      message: 'Upload service returned an invalid upload URL.',
+    );
+  }
+
+  final headers = <String, String>{
+    'x-ms-blob-type': 'BlockBlob',
+    'x-ms-version': '2022-11-02',
+    'Content-Type': contentType,
+  };
+  final serverHeaders = ticket['requiredHeaders'];
+  if (serverHeaders is Map) {
+    for (final entry in serverHeaders.entries) {
+      final k = entry.key.toString().trim();
+      final v = entry.value.toString().trim();
+      if (k.isNotEmpty && v.isNotEmpty) {
+        headers[k] = v;
+      }
+    }
+  }
+
+  final client = httpClient ?? http.Client();
+  final ownsClient = httpClient == null;
+  try {
+    final res = await client
+        .put(uploadUri, headers: headers, body: bytes)
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return rawPublicUrl;
+    }
+    if (res.statusCode == 401) {
+      throw ReportUploadException(
+        category: ReportUploadErrorCategory.authentication,
+        message: 'Upload authorization rejected. Sign in again and retry.',
+      );
+    }
+    if (res.statusCode == 403) {
+      throw ReportUploadException(
+        category: ReportUploadErrorCategory.permission,
+        message:
+            'Upload authorization expired or denied. Tap Retry to request a new link.',
+      );
+    }
+    throw ReportUploadException(
+      category: ReportUploadErrorCategory.server,
+      message: 'Photo storage returned HTTP ${res.statusCode}.',
+    );
+  } on ReportUploadException {
+    rethrow;
+  } catch (e) {
+    throw classifyUploadError(e);
+  } finally {
+    if (ownsClient) {
+      client.close();
+    }
+  }
 }
 
 class CloudService {
   static final CloudService instance = CloudService._init();
   CloudService._init();
 
-  static const String _defaultConnectionString =
-      'DefaultEndpointsProtocol=https;AccountName=potholestorage2026;AccountKey=jbph8cZNi2ZPIGhWPP6ovBTZhdSQVFzNFNEMXiK68NJAmLO1Q4W+rPjG+QsekmTzG8QGBIxLsZGU+ASt6OdutQ==;EndpointSuffix=core.windows.net';
-
-  static const String _connectionString = String.fromEnvironment(
-    'AZURE_STORAGE_CONNECTION_STRING',
-    defaultValue: _defaultConnectionString,
-  );
-  static const String _containerName = 'photos';
-
-  late final AzureStorage _azureStorage = AzureStorage.parse(_connectionString);
+  late final FirebaseFunctionsClient _functionsClient =
+      FirebaseFunctionsClient();
 
   // Firebase Auth & Firestore References
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
+  late final GoogleSignIn _googleSignIn = GoogleSignIn(
     serverClientId:
         '32297924997-iplvd6srs74rqufukbe8u6d24eu4ig9h.apps.googleusercontent.com',
   );
@@ -62,17 +178,29 @@ class CloudService {
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+  final ValueNotifier<bool> emailVerifiedNotifier = ValueNotifier<bool>(false);
 
-  /// Register a new user account with email/password
+  final EmailVerificationBackend _verificationBackend =
+      FirebaseEmailVerificationBackend();
+  EmailVerificationBackend get emailVerificationBackend => _verificationBackend;
+
+  EmailVerificationStatus? lastVerificationStatus;
+  String? lastVerificationSendError;
+
+  /// Register a new user account with email/password and send a Firebase email
+  /// verification link while allowing the user into the app immediately.
   Future<UserCredential> signUp({
     required String email,
     required String password,
     required String fullName,
   }) async {
+    lastVerificationStatus = null;
+    lastVerificationSendError = null;
     final cred = await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
+    emailVerifiedNotifier.value = false;
 
     if (cred.user != null) {
       await cred.user!.updateDisplayName(fullName);
@@ -84,183 +212,129 @@ class CloudService {
         role: 'user',
       );
       try {
-        await generateVerificationCode(cred.user!.uid);
-      } catch (_) {}
-      try {
-        await cred.user!.sendEmailVerification();
-        _lastVerificationEmailSent = DateTime.now();
+        lastVerificationStatus = await _verificationBackend.sendCode();
+      } on EmailVerificationException catch (e) {
+        lastVerificationSendError = e.message;
       } catch (e) {
-        print('Initial signUp sendEmailVerification error: $e');
+        lastVerificationSendError =
+            'Could not send the initial verification email right now. Tap Resend link to try again.';
       }
     }
     return cred;
   }
 
-  DateTime? _lastVerificationEmailSent;
+  /// Fetches the current server-side email verification status without sending
+  /// a new email (safe across app restarts).
+  Future<EmailVerificationStatus> getEmailVerificationStatus() =>
+      _verificationBackend.getStatus();
 
-  /// Requests a fresh verification email with rate-limit protection and
-  /// ensures a 6-digit verification code is generated in Firestore.
-  /// Returns a user-friendly status message.
-  Future<String> sendCustomEmailVerificationCode() async {
-    final user = _auth.currentUser;
-    if (user == null) return 'No user is currently signed in.';
-
-    // Generate or ensure a 6-digit code exists in Firestore for dual-mode verification
-    try {
-      await generateVerificationCode(user.uid);
-    } catch (e) {
-      print('generateVerificationCode error: $e');
-    }
-
-    // Rate-limit guard: don't call Firebase Auth again if sent within 45 seconds
-    if (_lastVerificationEmailSent != null) {
-      final diff = DateTime.now().difference(_lastVerificationEmailSent!).inSeconds;
-      if (diff < 45) {
-        return 'A verification email was already sent recently. Please check your inbox and Spam/Junk folder (${45 - diff}s cooldown).';
-      }
-    }
-
-    try {
-      await user.sendEmailVerification();
-      _lastVerificationEmailSent = DateTime.now();
-      return 'Verification email sent! Check your inbox and Spam folder.';
-    } on FirebaseAuthException catch (e) {
-      print('Firebase sendEmailVerification error: ${e.code} - ${e.message}');
-      if (e.code == 'too-many-requests') {
-        return 'Firebase rate limit: An email was recently requested. Please check your spam folder or wait a moment before trying again.';
-      }
-      return e.message ?? 'Failed to send verification email (${e.code}).';
-    } catch (e) {
-      print('Generic sendEmailVerification error: $e');
-      return 'Could not send verification email: $e';
-    }
+  /// Requests the backend to generate & email a new 6-digit verification code.
+  Future<EmailVerificationStatus> sendEmailVerificationCode() async {
+    final status = await _verificationBackend.sendCode();
+    lastVerificationStatus = status;
+    lastVerificationSendError = null;
+    return status;
   }
 
-  /// Checks if the current Firebase Auth user has verified via the email link
-  /// (i.e. user.emailVerified == true). Marks Firestore as verified too.
-  Future<bool> checkNativeEmailVerified() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    try {
-      await user.reload();
-      final freshUser = _auth.currentUser;
-      if (freshUser != null && freshUser.emailVerified) {
-        try {
-          await _usersCollection.doc(user.uid).set({
-            'isEmailVerified': true,
-            'isVerified': true,
-            'emailVerifiedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } catch (e) {
-          print('Could not mirror isEmailVerified to Firestore: $e');
-        }
-        return true;
-      }
-    } catch (e) {
-      print('checkNativeEmailVerified reload error: $e');
-    }
-    return false;
-  }
-
-  /// Verifies via either input 6-digit code or Firebase Auth's native email link.
+  /// Validates email verification, refreshes the ID token + FirebaseAuth user,
+  /// and notifies listeners on success.
   Future<bool> verifyEmailCode(String enteredCode) async {
+    lastVerifyError = null;
     final user = _auth.currentUser;
-    if (user == null) return false;
-    if (isGoogleAuthUser(user)) return true;
-
-    final trimmed = enteredCode.trim();
-
-    // 1. If 6-digit code was entered, verify against stored code in Firestore
-    if (trimmed.length == 6) {
-      final codeOk = await verifyUserWithCode(uid: user.uid, inputCode: trimmed);
-      if (codeOk) return true;
+    if (user == null) {
+      throw const EmailVerificationException(
+        code: 'unauthenticated',
+        reason: 'unauthenticated',
+        message: 'Sign in first to verify your email address.',
+      );
     }
+    if (isGoogleAuthUser(user)) {
+      emailVerifiedNotifier.value = true;
+      return true;
+    }
+    try {
+      final verified = await _verificationBackend.verifyCode(enteredCode);
+      if (verified) {
+        lastVerificationStatus = null;
+        emailVerifiedNotifier.value = true;
+      }
+      return verified;
+    } on EmailVerificationException catch (e) {
+      lastVerifyError = e.message;
+      rethrow;
+    }
+  }
 
-    // 2. Otherwise check if user verified via email link
-    return await checkNativeEmailVerified();
+  /// Securely updates the email address of a pending unverified account and
+  /// sends a fresh verification email to the corrected email.
+  Future<EmailVerificationStatus> updatePendingVerificationEmail(
+    String newEmail,
+  ) async {
+    final status = await _verificationBackend.updatePendingEmail(newEmail);
+    lastVerificationStatus = status;
+    lastVerificationSendError = null;
+    return status;
   }
 
   /// Human-readable reason the last [verifyEmailCode] call failed, if any.
   String? lastVerifyError;
 
-  /// Checks if current user's email is verified (either via Firestore code, admin role, or Firebase Auth)
+  /// Checks whether the signed-in user's email is verified in Firebase Auth
+  /// (never trusting client-writable Firestore flags).
   Future<bool> isEmailVerified() async {
     final user = _auth.currentUser;
-    if (user == null) return false;
-    if (isGoogleAuthUser(user)) return true;
-
-    // Check if user is admin / super_admin or already marked verified in Firestore
-    try {
-      final doc = await _usersCollection.doc(user.uid).get();
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data() as Map<String, dynamic>;
-        if (data['isEmailVerified'] == true || data['isVerified'] == true) {
-          return true;
-        }
-        final role = data['role'] as String?;
-        if (role == 'admin' || role == 'super_admin') {
-          return true; // Administrators are exempted from email verification lockouts
-        }
-      }
-    } catch (e) {
-      print('isEmailVerified Firestore check error: $e');
+    if (user == null) {
+      emailVerifiedNotifier.value = false;
+      return false;
+    }
+    if (isGoogleAuthUser(user)) {
+      emailVerifiedNotifier.value = true;
+      return true;
     }
 
-    // Check Firebase Auth native flag
     try {
       await user.reload();
-      final freshUser = _auth.currentUser;
-      if (freshUser != null && freshUser.emailVerified) {
-        try {
-          await _usersCollection.doc(user.uid).set({
-            'isEmailVerified': true,
-            'isVerified': true,
-            'emailVerifiedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } catch (_) {}
-        return true;
-      }
-    } catch (e) {
-      print('isEmailVerified Auth reload error: $e');
-    }
-
-    return false;
-  }
-
-  /// Send email verification link directly to current user's email inbox
-  Future<void> sendEmailVerification() async {
-    final user = _auth.currentUser;
-    if (user != null && !user.emailVerified) {
-      await user.sendEmailVerification();
-    }
-  }
-
-  /// Retrieves the active 6-digit verification code stored for the user
-  Future<String?> getActiveVerificationCode(String uid) async {
-    _requireCurrentUser(uid);
-    try {
-      final doc = await _usersCollection.doc(uid).get();
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data() as Map<String, dynamic>;
-        return data['verificationCode']?.toString();
-      }
     } catch (_) {}
-    return null;
+
+    final freshUser = _auth.currentUser;
+    if (freshUser == null) {
+      emailVerifiedNotifier.value = false;
+      return false;
+    }
+    if (freshUser.emailVerified) {
+      try {
+        await freshUser.getIdToken(true);
+      } catch (_) {}
+      emailVerifiedNotifier.value = true;
+      return true;
+    }
+    emailVerifiedNotifier.value = false;
+    return false;
   }
 
   /// Sign in with Email & Password
   Future<UserCredential> signIn({
     required String email,
     required String password,
+    bool rememberMe = true,
   }) async {
-    return await _auth.signInWithEmailAndPassword(
+    if (kIsWeb) {
+      await _auth.setPersistence(
+        rememberMe ? Persistence.LOCAL : Persistence.SESSION,
+      );
+    }
+    final cred = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
     );
+    final u = cred.user;
+    emailVerifiedNotifier.value =
+        u != null && (isGoogleAuthUser(u) || u.emailVerified);
+    return cred;
   }
 
   /// Sign in using Google Auth API with multi-platform mobile & web support
-  Future<UserCredential?> signInWithGoogle() async {
+  Future<UserCredential?> signInWithGoogle({bool rememberMe = true}) async {
     try {
       UserCredential? cred;
       final googleProvider = GoogleAuthProvider();
@@ -268,6 +342,9 @@ class CloudService {
       googleProvider.addScope('profile');
 
       if (kIsWeb) {
+        await _auth.setPersistence(
+          rememberMe ? Persistence.LOCAL : Persistence.SESSION,
+        );
         // On web (desktop & mobile browsers):
         try {
           cred = await _auth.signInWithPopup(googleProvider);
@@ -305,11 +382,15 @@ class CloudService {
               errStr.contains('DEVELOPER_ERROR') ||
               errStr.contains('12500') ||
               errStr.contains('sign_in_failed')) {
-            print('[Auth] Falling back to OAuth provider (browser / Custom Tabs)...');
+            print(
+              '[Auth] Falling back to OAuth provider (browser / Custom Tabs)...',
+            );
             try {
               cred = await _auth.signInWithProvider(googleProvider);
             } catch (fallbackError) {
-              print('[Auth] OAuth provider fallback also failed: $fallbackError');
+              print(
+                '[Auth] OAuth provider fallback also failed: $fallbackError',
+              );
               rethrow;
             }
           } else {
@@ -321,7 +402,8 @@ class CloudService {
       if (cred.user != null) {
         final doc = await _usersCollection.doc(cred.user!.uid).get();
         final String assignedRole = doc.exists
-            ? ((doc.data() as Map<String, dynamic>)['role'] as String? ?? 'user')
+            ? ((doc.data() as Map<String, dynamic>)['role'] as String? ??
+                  'user')
             : 'user';
 
         await _saveUserProfile(
@@ -331,6 +413,7 @@ class CloudService {
           photoUrl: cred.user!.photoURL ?? '',
           role: assignedRole,
         );
+        emailVerifiedNotifier.value = true;
       }
       return cred;
     } catch (e) {
@@ -377,7 +460,10 @@ class CloudService {
     required String lastName,
     required String phoneNumber,
   }) async {
-    _requireCurrentUser(uid);
+    final user = _requireSignedIn();
+    if (user.uid != uid) {
+      _deny('Users may only modify their own profile.');
+    }
     final fullName = '$firstName $lastName'.trim();
     if (_auth.currentUser != null && fullName.isNotEmpty) {
       await _auth.currentUser!.updateDisplayName(fullName);
@@ -393,64 +479,6 @@ class CloudService {
     }, SetOptions(merge: true));
   }
 
-  /// Generate or retrieve 6-digit verification code for user
-  Future<String> generateVerificationCode(String uid) async {
-    _requireCurrentUser(uid);
-    final doc = await _usersCollection.doc(uid).get();
-    if (doc.exists && doc.data() != null) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['verificationCode'] != null &&
-          data['verificationCode'].toString().isNotEmpty) {
-        return data['verificationCode'].toString();
-      }
-    }
-    // Generate new random 6-digit code
-    final code = (100000 + (DateTime.now().microsecondsSinceEpoch % 900000))
-        .toString();
-    await _usersCollection.doc(uid).set({
-      'verificationCode': code,
-      'codeCreatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    return code;
-  }
-
-  /// Verify user account with input 6-digit code
-  Future<bool> verifyUserWithCode({
-    required String uid,
-    required String inputCode,
-  }) async {
-    _requireCurrentUser(uid);
-    final doc = await _usersCollection.doc(uid).get();
-    if (doc.exists && doc.data() != null) {
-      final data = doc.data() as Map<String, dynamic>;
-      final validCode = data['verificationCode']?.toString() ?? '';
-      if (validCode.isNotEmpty && inputCode.trim() == validCode.trim()) {
-        await _usersCollection.doc(uid).set({
-          'isVerified': true,
-          'isEmailVerified': true,
-          'verifiedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Alias / convenience helper to verify 6-digit security code
-  Future<bool> verifyUserSecurityCode({
-    required String uid,
-    required String code,
-  }) async {
-    final success = await verifyUserWithCode(uid: uid, inputCode: code);
-    if (success) return true;
-    return await verifyEmailCode(code);
-  }
-
-  /// Resends a fresh 6-digit verification code email
-  Future<String> resendVerificationCode([String? uid]) async {
-    return await sendCustomEmailVerificationCode();
-  }
-
   /// Check if user account was created via Google Auth provider
   bool isGoogleAuthUser(User? user) {
     if (user == null) return false;
@@ -462,10 +490,13 @@ class CloudService {
 
   /// Sign out current user
   Future<void> signOut() async {
-    try {
-      await _googleSignIn.signOut();
-    } catch (_) {}
+    if (!kIsWeb) {
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+    }
     await _auth.signOut();
+    emailVerifiedNotifier.value = false;
   }
 
   /// Get current user role ('super_admin', 'admin', or 'user')
@@ -510,14 +541,16 @@ class CloudService {
     return user;
   }
 
-  void _requireCurrentUser(String uid) {
-    if (_requireSignedIn().uid != uid) {
-      _deny('Users may only modify their own profile.');
+  User _requireVerifiedUser() {
+    final user = _requireSignedIn();
+    if (!isGoogleAuthUser(user) && !user.emailVerified) {
+      _deny('Verify your email address before continuing.');
     }
+    return user;
   }
 
   Future<String> _requireRole(Set<String> allowedRoles) async {
-    final user = _requireSignedIn();
+    final user = _requireVerifiedUser();
     final role = await getUserRole(user.uid);
     if (!allowedRoles.contains(role)) {
       _deny('This action requires ${allowedRoles.join(' or ')} access.');
@@ -544,28 +577,63 @@ class CloudService {
     await _usersCollection.doc(uid).update({'role': newRole});
   }
 
-  /// Uploads a pothole image (as bytes) to Azure Blob Storage.
-  /// Use [uploadImageBytesToAzure] on mobile (reads file bytes before calling).
-  Future<String?> uploadImageBytesToAzure(Uint8List bytes) async {
-    try {
-      if (_connectionString.isEmpty) {
-        throw StateError(
-          'Azure upload is not configured. Use a backend-issued upload URL.',
-        );
-      }
-      final fileName = 'pothole_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      await _azureStorage.putBlob(
-        '/$_containerName/$fileName',
-        bodyBytes: bytes,
-        contentType: 'image/jpeg',
+  /// Uploads a report image via an authenticated backend-issued short-lived SAS
+  /// upload URL and returns the unsigned public blob URL, throwing a sanitized
+  /// [ReportUploadException] on failure.
+  Future<String> uploadReportImage(
+    Uint8List bytes, {
+    required String reportId,
+    FirebaseFunctionsClient? functionsClient,
+    http.Client? httpClient,
+  }) async {
+    final rawUser = _auth.currentUser;
+    if (rawUser == null) {
+      throw ReportUploadException(
+        category: ReportUploadErrorCategory.authentication,
+        message: 'Sign in first to upload road report photos.',
       );
+    }
+    if (!isGoogleAuthUser(rawUser) && !rawUser.emailVerified) {
+      await isEmailVerified();
+    }
+    final refreshedUser = _auth.currentUser;
+    if (refreshedUser == null) {
+      throw ReportUploadException(
+        category: ReportUploadErrorCategory.authentication,
+        message: 'Sign in first to upload road report photos.',
+      );
+    }
+    if (!isGoogleAuthUser(refreshedUser) && !refreshedUser.emailVerified) {
+      throw ReportUploadException(
+        category: ReportUploadErrorCategory.permission,
+        message:
+            'Verify your email address before uploading road report photos.',
+      );
+    }
 
-      final publicUrl =
-          'https://potholestorage2026.blob.core.windows.net/$_containerName/$fileName';
-      return publicUrl;
+    return uploadReportImageWithSignedUrl(
+      bytes: bytes,
+      reportId: reportId,
+      functionsClient: functionsClient ?? _functionsClient,
+      httpClient: httpClient,
+    );
+  }
+
+  /// Compatibility wrapper returning null on failure after logging sanitized error details.
+  Future<String?> uploadImageBytesToAzure(
+    Uint8List bytes, {
+    String? reportId,
+  }) async {
+    try {
+      return await uploadReportImage(
+        bytes,
+        reportId: reportId ?? 'rep_${DateTime.now().millisecondsSinceEpoch}',
+      );
     } catch (e) {
-      print('Azure Storage Upload Error: $e');
+      final classified = classifyUploadError(e);
+      debugPrint(
+        'Azure Storage Upload Error (${classified.category.name}): ${classified.message}',
+      );
       return null;
     }
   }
@@ -611,6 +679,7 @@ class CloudService {
   Future<DocumentReference> addPotholeToCloud({
     required LatLng location,
     required String imageUrl,
+    String? reportId,
     String overallSeverity = 'medium', // 'low', 'medium', 'high'
     int potholeCount = 1,
     List<Map<String, dynamic>>? detections,
@@ -622,12 +691,46 @@ class CloudService {
     String? city,
     String? province,
     String? formattedAddress,
+    String? note,
   }) async {
-    final user = _auth.currentUser;
-    final reporterUid = user?.uid ?? 'anonymous_dev';
-    final reporterEmail = user?.email ?? 'dev@roadsense.local';
-    final reporterName = user?.displayName ?? 'Developer Surveyor';
-    final reporterPhotoUrl = user?.photoURL ?? '';
+    final rawUser = _requireSignedIn();
+    if (!isGoogleAuthUser(rawUser) && !rawUser.emailVerified) {
+      await isEmailVerified();
+    }
+    final user = _requireVerifiedUser();
+    final reporterUid = user.uid;
+    final reporterEmail = user.email ?? '';
+    final reporterName = user.displayName ?? 'Surveyor';
+    final reporterPhotoUrl = user.photoURL ?? '';
+    final primaryClass = primaryDefect != null
+        ? DpwhStandards.classForReport({
+            'primaryDefect': primaryDefect,
+            'primaryDpwhCode': primaryDpwhCode,
+          })
+        : primaryDpwhCode == null
+        ? DpwhStandards.pothole
+        : primaryDpwhCode == 'CODE 12'
+        ? null
+        : DpwhStandards.tryClassify(primaryDpwhCode);
+    if (!DpwhStandards.allClasses.contains(primaryClass)) {
+      throw ArgumentError(
+        'Select one of the four supported defect classes; crack orientation must be specified.',
+      );
+    }
+    if (primaryDpwhCode != null && primaryDpwhCode != primaryClass!.code) {
+      throw ArgumentError('Defect class and DPWH code do not match.');
+    }
+    final canonicalDetections = <Map<String, dynamic>>[];
+    for (final detection in detections ?? <Map<String, dynamic>>[]) {
+      final cls = DpwhStandards.activeClassForDetection(detection);
+      if (cls == null) throw ArgumentError('Unsupported model detection.');
+      canonicalDetections.add({
+        ...detection,
+        'classId': cls.classId,
+        'className': cls.name,
+        'dpwhCode': cls.code,
+      });
+    }
 
     if (!location.latitude.isFinite ||
         !location.longitude.isFinite ||
@@ -650,7 +753,11 @@ class CloudService {
           imageUri.host.toLowerCase() !=
               'potholestorage2026.blob.core.windows.net' ||
           !imageUri.path.startsWith('/photos/')) {
-        throw ArgumentError.value(imageUrl, 'imageUrl', 'Trusted HTTPS URL required');
+        throw ArgumentError.value(
+          imageUrl,
+          'imageUrl',
+          'Trusted HTTPS URL required',
+        );
       }
     }
 
@@ -658,30 +765,47 @@ class CloudService {
     // approve them after checking the server-side auto-accept setting.
     const String initialStatus = 'pending';
 
-    return await _potholesCollection.add({
+    final ref = reportId == null
+        ? _potholesCollection.doc()
+        : _potholesCollection.doc(reportId);
+    if (reportId != null) {
+      final existing = await ref.get();
+      if (existing.exists) {
+        final data = existing.data() as Map<String, dynamic>;
+        if (data['reporterUid'] != user.uid) {
+          throw StateError('Report owner mismatch.');
+        }
+        return ref;
+      }
+    }
+    await ref.set({
       'latitude': location.latitude,
       'longitude': location.longitude,
       'imageUrl': imageUrl,
-      'status': initialStatus, // 'approved' if auto-accept is enabled, else 'pending'
+      'status':
+          initialStatus, // 'approved' if auto-accept is enabled, else 'pending'
       'overallSeverity': overallSeverity,
       'potholeCount': potholeCount,
-      'primaryDpwhCode': primaryDpwhCode ?? 'CODE 01',
-      'primaryDefect': primaryDefect ?? 'Pothole',
-      'responseTime': responseTime ?? '3 Days',
-      'correctiveMeasure': correctiveMeasure ??
-          'Bituminous premix (hot) or penetration patching; add base material if needed.',
-      'detections': detections ?? [],
+      if (canonicalDetections.isNotEmpty) 'modelId': DpwhStandards.modelId,
+      'primaryClassId': primaryClass!.classId,
+      'primaryDpwhCode': primaryClass.code,
+      'primaryDefect': primaryClass.name,
+      'responseTime': primaryClass.responseTime,
+      'correctiveMeasure': primaryClass.correctiveMeasure,
+      'detections': canonicalDetections,
       if (barangay != null && barangay.isNotEmpty) 'barangay': barangay,
       if (city != null && city.isNotEmpty) 'city': city,
       if (province != null && province.isNotEmpty) 'province': province,
       if (formattedAddress != null && formattedAddress.isNotEmpty)
         'formattedAddress': formattedAddress,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
       'reporterUid': reporterUid,
       'reporterEmail': reporterEmail,
       'reporterName': reporterName,
       'reporterPhotoUrl': reporterPhotoUrl,
       'timestamp': FieldValue.serverTimestamp(),
     });
+    return ref;
   }
 
   static final Map<String, LguLocationInfo> _lguCache = {};
@@ -703,10 +827,14 @@ class CloudService {
         'zoom': '18',
         'addressdetails': '1',
       });
-      final res = await http.get(
-        url,
-        headers: {'User-Agent': 'RoadSense-LGU-Audit/1.0 (roadsense.local)'},
-      ).timeout(const Duration(seconds: 4));
+      final res = await http
+          .get(
+            url,
+            headers: {
+              'User-Agent': 'RoadSense-LGU-Audit/1.0 (roadsense.local)',
+            },
+          )
+          .timeout(const Duration(seconds: 4));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -714,34 +842,38 @@ class CloudService {
 
         // In the Philippines:
         // Suburb, village, quarter, neighbourhood, or city_district maps to Barangay
-        String brgy = (addr['suburb'] ??
-                addr['village'] ??
-                addr['quarter'] ??
-                addr['neighbourhood'] ??
-                addr['city_district'] ??
-                '')
-            .toString()
-            .trim();
+        String brgy =
+            (addr['suburb'] ??
+                    addr['village'] ??
+                    addr['quarter'] ??
+                    addr['neighbourhood'] ??
+                    addr['city_district'] ??
+                    '')
+                .toString()
+                .trim();
 
         if (brgy.toLowerCase().startsWith('brgy.') ||
             brgy.toLowerCase().startsWith('brgy ')) {
           brgy = 'Barangay ${brgy.substring(5).trim()}';
-        } else if (brgy.isNotEmpty && !brgy.toLowerCase().startsWith('barangay')) {
+        } else if (brgy.isNotEmpty &&
+            !brgy.toLowerCase().startsWith('barangay')) {
           brgy = 'Barangay $brgy';
         }
 
         // City / Municipality:
-        String city = (addr['city'] ??
-                addr['town'] ??
-                addr['municipality'] ??
-                addr['county'] ??
-                '')
-            .toString()
-            .trim();
+        String city =
+            (addr['city'] ??
+                    addr['town'] ??
+                    addr['municipality'] ??
+                    addr['county'] ??
+                    '')
+                .toString()
+                .trim();
 
         // Province:
-        String province =
-            (addr['state'] ?? addr['province'] ?? 'Bulacan').toString().trim();
+        String province = (addr['state'] ?? addr['province'] ?? 'Bulacan')
+            .toString()
+            .trim();
 
         final formatted = (data['display_name'] ?? '').toString();
 
@@ -793,6 +925,108 @@ class CloudService {
         .snapshots();
   }
 
+  /// Returns true when a Firestore report payload is approved, unresolved,
+  /// publicly accessible, and falls inside `[minLon, maxLon]`.
+  static bool isEligibleCorridorReportData(
+    Map<String, dynamic> data, {
+    required double minLon,
+    required double maxLon,
+  }) {
+    final String status = (data['status'] as String? ?? '')
+        .trim()
+        .toLowerCase();
+    final bool isResolved =
+        data['resolved'] == true ||
+        data['isResolved'] == true ||
+        status == 'resolved' ||
+        status == 'fixed' ||
+        status == 'closed';
+    final bool isAccessible =
+        data['isAccessible'] != false && data['accessible'] != false;
+    if (status != 'approved' || isResolved || !isAccessible) return false;
+    final dynamic rawLon = data['longitude'];
+    final double? lng = rawLon is num
+        ? rawLon.toDouble()
+        : double.tryParse(rawLon?.toString() ?? '');
+    if (lng == null || !lng.isFinite) return false;
+    final double lowLon = minLon <= maxLon ? minLon : maxLon;
+    final double highLon = minLon <= maxLon ? maxLon : minLon;
+    return lng >= lowLon && lng <= highLon;
+  }
+
+  /// Fetches pages sequentially with cursor continuation so a latitude band
+  /// containing more than [pageSize] unapproved/resolved/off-corridor records
+  /// never truncates valid approved reports along a route corridor.
+  static Future<List<T>> paginateCorridorPages<T>({
+    required Future<List<T>> Function(T? cursor) fetchPage,
+    required Map<String, dynamic> Function(T item) dataOf,
+    required double minLon,
+    required double maxLon,
+    int pageSize = 400,
+    int maxPages = 25,
+  }) async {
+    final int safePageSize = pageSize.clamp(1, 1000);
+    final int safeMaxPages = maxPages.clamp(1, 200);
+    final List<T> collected = <T>[];
+    T? cursor;
+
+    for (int page = 0; page < safeMaxPages; page++) {
+      final List<T> docs = await fetchPage(cursor);
+      if (docs.isEmpty) break;
+      for (final doc in docs) {
+        if (isEligibleCorridorReportData(
+          dataOf(doc),
+          minLon: minLon,
+          maxLon: maxLon,
+        )) {
+          collected.add(doc);
+        }
+      }
+      if (docs.length < safePageSize) break;
+      cursor = docs.last;
+    }
+    return List<T>.unmodifiable(collected);
+  }
+
+  /// Queries approved, unresolved, accessible reports within a route corridor
+  /// bounding box using Firestore's single-field latitude range index plus
+  /// bounded cursor pagination over latitude slices.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  fetchApprovedReportsInCorridor({
+    required double minLat,
+    required double maxLat,
+    required double minLon,
+    required double maxLon,
+    int limit = 400,
+    int maxPages = 25,
+  }) async {
+    final double lowLat = minLat <= maxLat ? minLat : maxLat;
+    final double highLat = minLat <= maxLat ? maxLat : minLat;
+    final int pageSize = limit.clamp(1, 500);
+
+    return paginateCorridorPages<QueryDocumentSnapshot<Map<String, dynamic>>>(
+      pageSize: pageSize,
+      maxPages: maxPages,
+      fetchPage: (cursor) async {
+        Query query = _potholesCollection
+            .where('latitude', isGreaterThanOrEqualTo: lowLat)
+            .where('latitude', isLessThanOrEqualTo: highLat)
+            .orderBy('latitude')
+            .limit(pageSize);
+        if (cursor != null) {
+          query = query.startAfterDocument(cursor);
+        }
+        final snapshot = await query.get();
+        return snapshot.docs
+            .map((d) => d as QueryDocumentSnapshot<Map<String, dynamic>>)
+            .toList(growable: false);
+      },
+      dataOf: (doc) => doc.data(),
+      minLon: minLon,
+      maxLon: maxLon,
+    );
+  }
+
   /// Listens to ALL potholes (for Admin Dashboard and Map streams)
   Stream<QuerySnapshot> streamAllPotholes() {
     return _potholesCollection.snapshots();
@@ -804,16 +1038,34 @@ class CloudService {
   }
 
   /// Admin Action: Update status of a pothole ('approved', 'rejected', 'pending', or 'deleted')
-  Future<void> updatePotholeStatus(String docId, String newStatus) async {
+  Future<void> updatePotholeStatus(
+    String docId,
+    String newStatus, {
+    String? rejectionReason,
+  }) async {
     await _requireRole(const {'admin', 'super_admin'});
-    if (!const {'approved', 'rejected', 'pending', 'deleted'}.contains(newStatus)) {
+    if (!const {
+      'approved',
+      'rejected',
+      'pending',
+      'deleted',
+    }.contains(newStatus)) {
       throw ArgumentError.value(newStatus, 'newStatus', 'Unsupported status');
     }
-    await _potholesCollection.doc(docId).update({
+    final updates = <String, dynamic>{
       'status': newStatus,
       'moderatedAt': FieldValue.serverTimestamp(),
       'moderatedBy': _auth.currentUser!.uid,
-    });
+    };
+    if (newStatus == 'rejected') {
+      final cleanReason = (rejectionReason ?? '').trim();
+      if (cleanReason.isNotEmpty) {
+        updates['rejectionReason'] = cleanReason;
+      }
+    } else {
+      updates['rejectionReason'] = FieldValue.delete();
+    }
+    await _potholesCollection.doc(docId).update(updates);
   }
 
   /// Action: Edit an existing pothole report (severity, count, coordinates, notes)
@@ -829,10 +1081,7 @@ class CloudService {
     String? responseTime,
     String? correctiveMeasure,
   }) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      throw Exception('User must be signed in to edit a report.');
-    }
+    final user = _requireVerifiedUser();
     final docSnap = await _potholesCollection.doc(docId).get();
     if (!docSnap.exists) throw Exception('Report does not exist.');
 
@@ -841,6 +1090,24 @@ class CloudService {
     final bool isAdminUser = await isAdmin();
     if (!isReporter && !isAdminUser) {
       throw Exception('Access denied. You can only edit your own reports.');
+    }
+    if (!isAdminUser && data['status'] != 'pending') {
+      throw StateError('Only pending reports can be edited by their reporter.');
+    }
+    if (overallSeverity != null &&
+        !const {'low', 'medium', 'high'}.contains(overallSeverity)) {
+      throw ArgumentError.value(overallSeverity, 'overallSeverity');
+    }
+    if (potholeCount != null && (potholeCount < 1 || potholeCount > 100)) {
+      throw ArgumentError.value(potholeCount, 'potholeCount');
+    }
+    if (latitude != null &&
+        (!latitude.isFinite || latitude < -90 || latitude > 90)) {
+      throw ArgumentError.value(latitude, 'latitude');
+    }
+    if (longitude != null &&
+        (!longitude.isFinite || longitude < -180 || longitude > 180)) {
+      throw ArgumentError.value(longitude, 'longitude');
     }
 
     final updates = <String, dynamic>{
@@ -855,7 +1122,28 @@ class CloudService {
     if (primaryDpwhCode != null) updates['primaryDpwhCode'] = primaryDpwhCode;
     if (primaryDefect != null) updates['primaryDefect'] = primaryDefect;
     if (responseTime != null) updates['responseTime'] = responseTime;
-    if (correctiveMeasure != null) updates['correctiveMeasure'] = correctiveMeasure;
+    if (correctiveMeasure != null) {
+      updates['correctiveMeasure'] = correctiveMeasure;
+    }
+
+    if (primaryDefect != null || primaryDpwhCode != null) {
+      final cls = DpwhStandards.tryClassify(
+        primaryDefect ?? data['primaryDefect'] as String?,
+      );
+      if (!DpwhStandards.allClasses.contains(cls) ||
+          (primaryDpwhCode != null && primaryDpwhCode != cls!.code)) {
+        throw ArgumentError(
+          'Select a supported defect class with its matching DPWH code.',
+        );
+      }
+      updates.addAll({
+        'primaryClassId': cls!.classId,
+        'primaryDefect': cls.name,
+        'primaryDpwhCode': cls.code,
+        'responseTime': cls.responseTime,
+        'correctiveMeasure': cls.correctiveMeasure,
+      });
+    }
 
     await _potholesCollection.doc(docId).update(updates);
   }
@@ -874,22 +1162,56 @@ class CloudService {
     await docRef.set(updates, SetOptions(merge: true));
   }
 
-  /// Admin Action: Bulk approve multiple pending potholes
+  /// Admin Action: Bulk approve multiple pending potholes (chunked safely under Firestore batch limits)
   Future<int> bulkApprovePotholes(List<String> docIds) async {
     await _requireRole(const {'admin', 'super_admin'});
     if (docIds.isEmpty) return 0;
-    final batch = FirebaseFirestore.instance.batch();
-    for (final id in docIds) {
-      batch.update(_potholesCollection.doc(id), {
-        'status': 'approved',
-        'moderatedAt': FieldValue.serverTimestamp(),
-        'moderatedBy': _auth.currentUser!.uid,
-      });
+    const chunkSize = 450;
+    for (var i = 0; i < docIds.length; i += chunkSize) {
+      final batch = FirebaseFirestore.instance.batch();
+      final chunk = docIds.sublist(
+        i,
+        (i + chunkSize) > docIds.length ? docIds.length : i + chunkSize,
+      );
+      for (final id in chunk) {
+        batch.update(_potholesCollection.doc(id), {
+          'status': 'approved',
+          'moderatedAt': FieldValue.serverTimestamp(),
+          'moderatedBy': _auth.currentUser!.uid,
+          'rejectionReason': FieldValue.delete(),
+        });
+      }
+      await batch.commit();
     }
-    await batch.commit();
     return docIds.length;
   }
 
+  /// Admin Action: Bulk move reports to Trash (preserving prior status per entry)
+  Future<int> bulkSoftDeletePotholes(
+    List<({String docId, String previousStatus})> targets,
+  ) async {
+    await _requireRole(const {'admin', 'super_admin'});
+    if (targets.isEmpty) return 0;
+    const chunkSize = 450;
+    final actor = _auth.currentUser?.email ?? _auth.currentUser?.uid ?? 'admin';
+    for (var i = 0; i < targets.length; i += chunkSize) {
+      final batch = FirebaseFirestore.instance.batch();
+      final chunk = targets.sublist(
+        i,
+        (i + chunkSize) > targets.length ? targets.length : i + chunkSize,
+      );
+      for (final item in chunk) {
+        batch.update(_potholesCollection.doc(item.docId), {
+          'status': 'deleted',
+          'previousStatus': item.previousStatus,
+          'deletedAt': FieldValue.serverTimestamp(),
+          'deletedBy': actor,
+        });
+      }
+      await batch.commit();
+    }
+    return targets.length;
+  }
 
   /// Admin Action: Soft-delete a pothole (moves it to the Trash Bin)
   Future<void> softDeletePothole(
@@ -901,15 +1223,13 @@ class CloudService {
       'status': 'deleted',
       'previousStatus': previousStatus,
       'deletedAt': FieldValue.serverTimestamp(),
-      'deletedBy': _auth.currentUser?.email ?? _auth.currentUser?.uid ?? 'admin',
+      'deletedBy':
+          _auth.currentUser?.email ?? _auth.currentUser?.uid ?? 'admin',
     });
   }
 
   /// Admin Action: Restore a pothole from the Trash Bin
-  Future<void> restorePothole(
-    String docId, {
-    String? targetStatus,
-  }) async {
+  Future<void> restorePothole(String docId, {String? targetStatus}) async {
     await _requireRole(const {'admin', 'super_admin'});
     String statusToRestore = targetStatus ?? 'approved';
     if (targetStatus == null) {
@@ -922,7 +1242,8 @@ class CloudService {
     await _potholesCollection.doc(docId).update({
       'status': statusToRestore,
       'restoredAt': FieldValue.serverTimestamp(),
-      'restoredBy': _auth.currentUser?.email ?? _auth.currentUser?.uid ?? 'admin',
+      'restoredBy':
+          _auth.currentUser?.email ?? _auth.currentUser?.uid ?? 'admin',
     });
   }
 
@@ -944,10 +1265,7 @@ class CloudService {
 
   /// Action: Soft-delete a pending pothole submitted by user (or any pothole by admin) to Trash Bin
   Future<void> userSoftDeletePothole(String docId) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      throw Exception('User must be signed in.');
-    }
+    final user = _requireVerifiedUser();
     final docSnap = await _potholesCollection.doc(docId).get();
     if (!docSnap.exists) return;
     final data = docSnap.data() as Map<String, dynamic>? ?? {};
@@ -1042,7 +1360,7 @@ class CloudService {
         final prevStatus = data['previousStatus'] as String? ?? '';
 
         if (isAdminUser ||
-            (isReporter && (status == 'deleted' || prevStatus != 'approved'))) {
+            (isReporter && status == 'deleted' && prevStatus != 'approved')) {
           batch.delete(_potholesCollection.doc(id));
           count++;
         }

@@ -1,156 +1,277 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:latlong2/latlong.dart';
-import 'cloud_service.dart';
-import 'settings_dialog.dart';
-import 'app_settings.dart';
-import 'app_design.dart';
 
-/// Professional Enterprise Profile & Surveyor Dashboard Page
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
+
+import 'app_settings.dart';
+import 'cloud_service.dart';
+import 'dpwh_standards.dart';
+import 'email_verification_view.dart';
+import 'settings_dialog.dart';
+import 'web_components.dart';
+import 'web_design.dart';
+import 'web_report_query.dart';
+
+/// Public/user Surveyor workspace hosting both **My Reports** (history, status,
+/// search/filter, edit/trash/restore) and **Account & Security** (identity,
+/// personal details form with unsaved-changes guard, password reset, theme).
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onSwitchToMap;
-  final Function(LatLng location, String? docId, Map<String, dynamic>? data)? onLocateOnMap;
-  const ProfileScreen({super.key, this.onSwitchToMap, this.onLocateOnMap});
+  final Function(LatLng location, String? docId, Map<String, dynamic>? data)?
+  onLocateOnMap;
+  final bool embeddedInShell;
+  final WebShellRoute activeRoute;
+  final ValueChanged<WebShellRoute>? onNavigateRoute;
+  final ValueChanged<bool>? onUnsavedChangesChanged;
+  final VoidCallback? onOpenHelp;
+  final VoidCallback? onOpenSettings;
+
+  const ProfileScreen({
+    super.key,
+    this.onSwitchToMap,
+    this.onLocateOnMap,
+    this.embeddedInShell = false,
+    this.activeRoute = WebShellRoute.reports,
+    this.onNavigateRoute,
+    this.onUnsavedChangesChanged,
+    this.onOpenHelp,
+    this.onOpenSettings,
+  });
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const int _reportsPerPage = 20;
+
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _firstNameController;
-  late TextEditingController _lastNameController;
-  late TextEditingController _phoneController;
+  late final TextEditingController _firstNameController;
+  late final TextEditingController _lastNameController;
+  late final TextEditingController _phoneController;
+  final TextEditingController _reportSearch = TextEditingController();
+
+  String _savedFirstName = '';
+  String _savedLastName = '';
+  String _savedPhone = '';
+  bool _hasUnsavedChanges = false;
   bool _isSaving = false;
+  bool _isSendingPasswordReset = false;
+  String? _passwordResetMessage;
+  String? _passwordResetError;
+
+  late WebShellRoute _localRoute;
   bool _showTrashBin = false;
+  String _reportStatus = 'all';
+  String _selectedDefectClass = 'all';
+  WebReportSort _reportSort = WebReportSort.newest;
+  int _currentPage = 0;
+  int _streamRetryNonce = 0;
 
   @override
   void initState() {
     super.initState();
+    _localRoute = widget.activeRoute == WebShellRoute.account
+        ? WebShellRoute.account
+        : WebShellRoute.reports;
     final user = CloudService.instance.currentUser;
-    final nameParts = (user?.displayName ?? '').split(' ');
+    final nameParts = (user?.displayName ?? '').trim().isEmpty
+        ? <String>[]
+        : user!.displayName!.trim().split(RegExp(r'\s+'));
     final initialFirst = nameParts.isNotEmpty ? nameParts.first : '';
-    final initialLast = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+    final initialLast = nameParts.length > 1
+        ? nameParts.sublist(1).join(' ')
+        : '';
+    final initialPhone = user?.phoneNumber ?? '';
+
+    _savedFirstName = initialFirst;
+    _savedLastName = initialLast;
+    _savedPhone = initialPhone;
 
     _firstNameController = TextEditingController(text: initialFirst);
     _lastNameController = TextEditingController(text: initialLast);
-    _phoneController = TextEditingController(text: user?.phoneNumber ?? '');
+    _phoneController = TextEditingController(text: initialPhone);
 
-    // Fetch stored Firestore user profile fields
+    _firstNameController.addListener(_syncUnsavedFlag);
+    _lastNameController.addListener(_syncUnsavedFlag);
+    _phoneController.addListener(_syncUnsavedFlag);
+
     if (user != null) {
-      FirebaseFirestore.instance.collection('users').doc(user.uid).get().then((doc) {
-        if (doc.exists && doc.data() != null && mounted) {
-          final data = doc.data()!;
-          if (data['firstName'] != null && data['firstName'].toString().isNotEmpty) {
-            _firstNameController.text = data['firstName'];
-          }
-          if (data['lastName'] != null && data['lastName'].toString().isNotEmpty) {
-            _lastNameController.text = data['lastName'];
-          }
-          if (data['phoneNumber'] != null && data['phoneNumber'].toString().isNotEmpty) {
-            _phoneController.text = data['phoneNumber'];
-          }
+      FirebaseFirestore.instance.collection('users').doc(user.uid).get().then((
+        doc,
+      ) {
+        if (!doc.exists ||
+            doc.data() == null ||
+            !mounted ||
+            _hasUnsavedChanges) {
+          return;
         }
+        final data = doc.data()!;
+        final f = (data['firstName'] ?? '').toString().trim();
+        final l = (data['lastName'] ?? '').toString().trim();
+        final p = (data['phoneNumber'] ?? '').toString().trim();
+        if (f.isNotEmpty) {
+          _savedFirstName = f;
+          _firstNameController.text = f;
+        }
+        if (l.isNotEmpty) {
+          _savedLastName = l;
+          _lastNameController.text = l;
+        }
+        if (p.isNotEmpty) {
+          _savedPhone = p;
+          _phoneController.text = p;
+        }
+        _syncUnsavedFlag();
       });
     }
   }
 
   @override
+  void didUpdateWidget(covariant ProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeRoute != widget.activeRoute) {
+      _localRoute = widget.activeRoute == WebShellRoute.account
+          ? WebShellRoute.account
+          : WebShellRoute.reports;
+    }
+  }
+
+  @override
   void dispose() {
+    _reportSearch.dispose();
+    _firstNameController.removeListener(_syncUnsavedFlag);
+    _lastNameController.removeListener(_syncUnsavedFlag);
+    _phoneController.removeListener(_syncUnsavedFlag);
     _firstNameController.dispose();
     _lastNameController.dispose();
     _phoneController.dispose();
     super.dispose();
   }
 
+  void _syncUnsavedFlag() {
+    final dirty =
+        _firstNameController.text.trim() != _savedFirstName.trim() ||
+        _lastNameController.text.trim() != _savedLastName.trim() ||
+        _phoneController.text.trim() != _savedPhone.trim();
+    if (dirty != _hasUnsavedChanges) {
+      if (mounted) {
+        setState(() => _hasUnsavedChanges = dirty);
+      } else {
+        _hasUnsavedChanges = dirty;
+      }
+      widget.onUnsavedChangesChanged?.call(dirty);
+    }
+  }
+
+  void _resetUnsavedEdits() {
+    _firstNameController.text = _savedFirstName;
+    _lastNameController.text = _savedLastName;
+    _phoneController.text = _savedPhone;
+    _formKey.currentState?.validate();
+    _syncUnsavedFlag();
+  }
+
+  Future<void> _switchSection(WebShellRoute target) async {
+    if (widget.onNavigateRoute != null) {
+      widget.onNavigateRoute!(target);
+      return;
+    }
+    if (target == WebShellRoute.map) {
+      widget.onSwitchToMap?.call();
+      return;
+    }
+    setState(() => _localRoute = target);
+  }
+
   Future<void> _saveProfile() async {
     final user = CloudService.instance.currentUser;
     if (user == null) return;
-    final isDark = AppSettings.instance.isDarkMode;
-    final accentColor = AppDesign.accent(isDark);
+    if (!_formKey.currentState!.validate()) return;
+
+    final first = _firstNameController.text.trim();
+    final last = _lastNameController.text.trim();
+    final phone = _phoneController.text.trim();
 
     setState(() => _isSaving = true);
     try {
       await CloudService.instance.updateUserProfileDetails(
         uid: user.uid,
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
-        phoneNumber: _phoneController.text.trim(),
+        firstName: first,
+        lastName: last,
+        phoneNumber: phone,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Profile information updated successfully.'),
-            backgroundColor: accentColor,
-          ),
-        );
-      }
+      if (!mounted) return;
+      _savedFirstName = first;
+      _savedLastName = last;
+      _savedPhone = phone;
+      _syncUnsavedFlag();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile information updated successfully.'),
+        ),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update profile: $e'), backgroundColor: AppDesign.danger),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update profile: $e'),
+          backgroundColor: WebDesign.danger(
+            Theme.of(context).brightness == Brightness.dark,
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  Future<void> _confirmAndMoveToTrash(BuildContext context, String docId) async {
-    final isDark = AppSettings.instance.isDarkMode;
+  Future<void> _sendPasswordReset(String email) async {
+    if (email.trim().isEmpty) return;
+    setState(() {
+      _isSendingPasswordReset = true;
+      _passwordResetMessage = null;
+      _passwordResetError = null;
+    });
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim());
+      if (!mounted) return;
+      setState(() {
+        _isSendingPasswordReset = false;
+        _passwordResetMessage =
+            'Password reset instructions sent to ${email.trim()}. Check your inbox and spam folder.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSendingPasswordReset = false;
+        _passwordResetError =
+            'Could not send password reset email: ${e.toString().replaceFirst('Exception: ', '')}';
+      });
+    }
+  }
+
+  Future<void> _confirmAndMoveToTrash(
+    BuildContext context,
+    String docId,
+  ) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppDesign.surface(isDark),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF59E0B), size: 22),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Move to Trash?',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: AppDesign.textPrimary(isDark),
-              ),
-            ),
-          ],
-        ),
-        content: Text(
+        title: const Text('Move to Trash?'),
+        content: const Text(
           'Move this pending report to your Trash Bin? You can restore or permanently clean it up anytime.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppDesign.textSecondary(isDark),
-            height: 1.4,
-          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: AppDesign.textSecondary(isDark), fontWeight: FontWeight.w600),
-            ),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF59E0B),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text('Move to Trash', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Move to Trash'),
           ),
         ],
       ),
@@ -161,19 +282,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await CloudService.instance.userSoftDeletePothole(docId);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Report moved to Trash Bin.'),
-              backgroundColor: Color(0xFFF59E0B),
-            ),
+            const SnackBar(content: Text('Report moved to Trash Bin.')),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: AppDesign.danger,
-            ),
+            SnackBar(content: Text('Error moving report to trash: $e')),
           );
         }
       }
@@ -185,48 +300,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String docId,
     Map<String, dynamic> data,
   ) async {
-    final isDark = AppSettings.instance.isDarkMode;
-    String selectedSeverity =
-        (data['overallSeverity'] as String? ?? 'medium').toLowerCase();
-    int potholeCount = (data['potholeCount'] as num?)?.toInt() ?? 1;
-    final noteController =
-        TextEditingController(text: data['note'] as String? ?? '');
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    int potholeCount = ((data['potholeCount'] as num?)?.toInt() ?? 1).clamp(
+      1,
+      100,
+    );
 
-    await showDialog(
+    await showDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (dialogCtx, setDialogState) {
             return AlertDialog(
-              backgroundColor: AppDesign.surface(isDark),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2563EB).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.edit_note_rounded,
-                      color: Color(0xFF2563EB),
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Edit Report',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppDesign.textPrimary(isDark),
-                    ),
-                  ),
-                ],
-              ),
+              title: const Text('Edit Report'),
               content: SingleChildScrollView(
                 child: SizedBox(
                   width: 380,
@@ -234,109 +320,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Overall Severity',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppDesign.textPrimary(isDark),
-                        ),
-                      ),
                       const SizedBox(height: 6),
-                      DropdownButtonFormField<String>(
-                        value: selectedSeverity,
-                        dropdownColor: AppDesign.surface(isDark),
-                        decoration: InputDecoration(
-                          contentPadding: const EdgeInsets.symmetric(
+                      InputDecorator(
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.symmetric(
                             horizontal: 12,
-                            vertical: 8,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            vertical: 4,
                           ),
                         ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'low',
-                            child: Text('Low Severity'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'medium',
-                            child: Text('Medium Severity'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'high',
-                            child: Text('High Severity'),
-                          ),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() => selectedSeverity = val);
-                          }
-                        },
+                        child: DropdownButtonHideUnderline(
+                          child: const SizedBox.shrink(),
+                        ),
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        'Potholes Detected in Frame',
+                      const Text(
+                        'Road defects detected in image',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: AppDesign.textPrimary(isDark),
                         ),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
                           IconButton.outlined(
+                            tooltip: 'Decrease defect count',
                             icon: const Icon(Icons.remove, size: 16),
                             onPressed: potholeCount > 1
                                 ? () => setDialogState(() => potholeCount--)
                                 : null,
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Text(
                               '$potholeCount',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: AppDesign.textPrimary(isDark),
+                              style: WebDesign.tabular(
+                                TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: WebDesign.textPrimary(isDark),
+                                ),
                               ),
                             ),
                           ),
                           IconButton.outlined(
+                            tooltip: 'Increase defect count',
                             icon: const Icon(Icons.add, size: 16),
-                            onPressed: () =>
-                                setDialogState(() => potholeCount++),
+                            onPressed: potholeCount < 100
+                                ? () => setDialogState(() => potholeCount++)
+                                : null,
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        'Notes / Observations',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppDesign.textPrimary(isDark),
-                        ),
-                      ),
+
                       const SizedBox(height: 6),
-                      TextField(
-                        controller: noteController,
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          hintText: 'Add or update report notes...',
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -347,33 +385,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    foregroundColor: Colors.white,
-                  ),
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     try {
                       await CloudService.instance.editPothole(
                         docId,
-                        overallSeverity: selectedSeverity,
+
                         potholeCount: potholeCount,
-                        note: noteController.text.trim(),
                       );
-                      if (mounted) {
+                      if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Report updated successfully.'),
-                            backgroundColor: Color(0xFF10B981),
                           ),
                         );
                       }
                     } catch (e) {
-                      if (mounted) {
+                      if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text('Update failed: $e'),
-                            backgroundColor: const Color(0xFFEF4444),
+                            backgroundColor: WebDesign.danger(isDark),
                           ),
                         );
                       }
@@ -396,75 +428,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Report restored to active submissions.'),
-            backgroundColor: Color(0xFF10B981),
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to restore: $e'),
-            backgroundColor: AppDesign.danger,
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to restore: $e')));
       }
     }
   }
 
-  Future<void> _confirmAndPermanentDelete(BuildContext context, String docId) async {
-    final isDark = AppSettings.instance.isDarkMode;
+  Future<void> _confirmAndPermanentDelete(
+    BuildContext context,
+    String docId,
+  ) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppDesign.surface(isDark),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppDesign.danger.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.delete_forever_rounded, color: AppDesign.danger, size: 22),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Delete Forever?',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: AppDesign.textPrimary(isDark),
-              ),
-            ),
-          ],
-        ),
-        content: Text(
-          'Are you sure you want to permanently delete this report? This action CANNOT be undone.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppDesign.textSecondary(isDark),
-            height: 1.4,
-          ),
+        title: const Text('Delete Forever?'),
+        content: const Text(
+          'Are you sure you want to permanently delete this report? This action cannot be undone.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: AppDesign.textSecondary(isDark), fontWeight: FontWeight.w600),
-            ),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppDesign.danger,
+              backgroundColor: WebDesign.danger(isDark),
               foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Delete Forever', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete Forever'),
           ),
         ],
       ),
@@ -475,79 +474,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await CloudService.instance.permanentDeleteUserPothole(docId);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Report permanently deleted.'),
-              backgroundColor: Color(0xFF10B981),
-            ),
+            const SnackBar(content: Text('Report permanently deleted.')),
           );
         }
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to delete: $e'),
-              backgroundColor: AppDesign.danger,
-            ),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
         }
       }
     }
   }
 
-  Future<void> _confirmAndEmptyTrash(BuildContext context, List<String> docIds) async {
+  Future<void> _confirmAndEmptyTrash(
+    BuildContext context,
+    List<String> docIds,
+  ) async {
     if (docIds.isEmpty) return;
-    final isDark = AppSettings.instance.isDarkMode;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppDesign.surface(isDark),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppDesign.danger.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.delete_sweep_rounded, color: AppDesign.danger, size: 24),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Clean Up All in Trash?',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: AppDesign.textPrimary(isDark),
-              ),
-            ),
-          ],
-        ),
+        title: const Text('Clean Up All in Trash?'),
         content: Text(
-          'Are you sure you want to permanently delete all ${docIds.length} item(s) from your trash bin? This action CANNOT be undone.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppDesign.textSecondary(isDark),
-            height: 1.4,
-          ),
+          'Are you sure you want to permanently delete all ${docIds.length} item(s) from your trash bin? This action cannot be undone.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: AppDesign.textSecondary(isDark), fontWeight: FontWeight.w600),
-            ),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppDesign.danger,
+              backgroundColor: WebDesign.danger(isDark),
               foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Clean Up All', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Clean Up All'),
           ),
         ],
       ),
@@ -560,17 +524,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('$count trashed item(s) permanently cleaned up.'),
-              backgroundColor: const Color(0xFF10B981),
             ),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to clean up trash: $e'),
-              backgroundColor: AppDesign.danger,
-            ),
+            SnackBar(content: Text('Failed to clean up trash: $e')),
           );
         }
       }
@@ -578,208 +538,158 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showVerificationDialog(String uid) async {
-    final codeController = TextEditingController();
-    bool isSubmitting = false;
-    int cooldownSeconds = 0;
-    int sendAttempts = 0;
-    const maxAttempts = 3;
-    Timer? timer;
-
-    showDialog(
+    final user = CloudService.instance.currentUser;
+    await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final isDark = AppSettings.instance.isDarkMode;
-          final dialogBg = AppDesign.surface(isDark);
-          final dialogText = AppDesign.textPrimary(isDark);
-          final subtext = AppDesign.textSecondary(isDark);
-          final accentColor = AppDesign.accent(isDark);
-
-          void startCooldown() {
-            cooldownSeconds = 60;
-            timer?.cancel();
-            timer = Timer.periodic(const Duration(seconds: 1), (t) {
-              if (cooldownSeconds > 0) {
-                setDialogState(() => cooldownSeconds--);
-              } else {
-                t.cancel();
-              }
-            });
-          }
-
-          return AlertDialog(
-            backgroundColor: dialogBg,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: Row(
-              children: [
-                Icon(Icons.verified_user_rounded, color: accentColor, size: 22),
-                const SizedBox(width: 10),
-                Text('Account Security Verification', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: dialogText)),
-              ],
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: EmailVerificationView(
+              backend: CloudService.instance.emailVerificationBackend,
+              initialEmail: user?.email ?? '',
+              fetchStatusOnMount: true,
+              autoSendIfMissing: true,
+              isDark: Theme.of(context).brightness == Brightness.dark,
+              onVerified: () {
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                if (mounted) {
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Account verified successfully!'),
+                    ),
+                  );
+                }
+              },
+              onSignOut: () async {
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                await CloudService.instance.signOut();
+              },
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Enter the 6-digit security code sent to your registered email inbox:',
-                  style: TextStyle(fontSize: 13, color: subtext, height: 1.4),
-                ),
-                const SizedBox(height: 16),
-                // 6 Individual Digit Box PIN Code Input UI
-                Stack(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(6, (index) {
-                        final text = codeController.text;
-                        final digit = (index < text.length) ? text[index] : '';
-                        final isCurrent = (index == text.length) || (index == 5 && text.length == 6);
-                        final hasValue = digit.isNotEmpty;
-
-                        return Container(
-                          width: 42,
-                          height: 52,
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          decoration: BoxDecoration(
-                            color: isCurrent
-                                ? accentColor.withValues(alpha: 0.12)
-                                : AppDesign.bg(isDark),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isCurrent
-                                  ? accentColor
-                                  : (hasValue ? accentColor : AppDesign.border(isDark)),
-                              width: isCurrent ? 2.0 : 1.2,
-                            ),
-                            boxShadow: isCurrent
-                                ? [
-                                    BoxShadow(
-                                      color: accentColor.withValues(alpha: 0.25),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: Center(
-                            child: Text(
-                              digit,
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: dialogText,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    Positioned.fill(
-                      child: Opacity(
-                        opacity: 0.0,
-                        child: TextField(
-                          controller: codeController,
-                          keyboardType: TextInputType.number,
-                          maxLength: 6,
-                          autofocus: true,
-                          onChanged: (_) => setDialogState(() {}),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (cooldownSeconds > 0) ...[
-                  const SizedBox(height: 12),
-                  Center(
-                    child: Text(
-                      'Rate Limit: You can request another code in ${cooldownSeconds}s',
-                      style: TextStyle(fontSize: 11.5, color: accentColor, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: (isSubmitting || cooldownSeconds > 0)
-                    ? null
-                    : () async {
-                        if (sendAttempts >= maxAttempts) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Maximum code resend attempts reached for this session.')),
-                          );
-                          return;
-                        }
-                        sendAttempts++;
-                        try {
-                          await CloudService.instance.resendVerificationCode(uid);
-                          startCooldown();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('A fresh verification code has been dispatched to your email.')),
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Failed to resend code: $e')),
-                            );
-                          }
-                        }
-                      },
-                child: Text('Resend Code', style: TextStyle(color: subtext)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accentColor,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: isSubmitting
-                    ? null
-                    : () async {
-                        final code = codeController.text.trim();
-                        if (code.length != 6) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please enter the full 6-digit verification code.')),
-                          );
-                          return;
-                        }
-
-                        setDialogState(() => isSubmitting = true);
-                        try {
-                          final isSuccess = await CloudService.instance.verifyUserSecurityCode(uid: uid, code: code);
-                          if (context.mounted) {
-                            if (isSuccess) {
-                              Navigator.of(context).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Account verified successfully!')),
-                              );
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Invalid verification code. Please check and try again.')),
-                              );
-                            }
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Verification error: $e')),
-                            );
-                          }
-                        } finally {
-                          setDialogState(() => isSubmitting = false);
-                        }
-                      },
-                child: isSubmitting
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Verify Account'),
-              ),
-            ],
-          );
-        },
+          ),
+        ),
       ),
+    );
+  }
+
+  void _openFullPhotoPreview(String imageUrl) {
+    if (imageUrl.trim().isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black.withValues(alpha: 0.94),
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (c, child, prog) {
+                  if (prog == null) return child;
+                  return const SizedBox(
+                    width: 240,
+                    height: 180,
+                    child: Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                  );
+                },
+                errorBuilder: (c, e, st) => const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white70,
+                        size: 56,
+                      ),
+                      SizedBox(height: 10),
+                      Text(
+                        'Photo unavailable.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  tooltip: 'Close photo',
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  icon: const Icon(Icons.close_rounded, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  WebReportItem _docToWebReportItem(QueryDocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? const {};
+    final lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+    final dpwhCode = (data['primaryDpwhCode'] as String? ?? 'CODE 01').trim();
+    final defectClass =
+        DpwhStandards.classForReport(data) ??
+        DpwhStandards.classifyByCode(dpwhCode);
+    DateTime ts = DateTime.now();
+    final rawTs = data['timestamp'];
+    if (rawTs is Timestamp) {
+      ts = rawTs.toDate();
+    } else if (rawTs is int) {
+      ts = DateTime.fromMillisecondsSinceEpoch(rawTs);
+    }
+
+    return WebReportItem(
+      docId: doc.id,
+      location: LatLng(lat, lng),
+      imageUrl: (data['imageUrl'] as String? ?? '').trim(),
+      timestamp: ts,
+      status: (data['status'] as String? ?? 'pending').trim().toLowerCase(),
+      severity: (data['overallSeverity'] as String? ?? 'medium')
+          .trim()
+          .toLowerCase(),
+      potholeCount: (data['potholeCount'] as num?)?.toInt() ?? 1,
+      primaryDefect: DpwhStandards.reportDefectName(data),
+      primaryDpwhCode: dpwhCode,
+      responseTime:
+          (data['responseTime'] as String? ?? defectClass.responseTime).trim(),
+      correctiveMeasure:
+          (data['correctiveMeasure'] as String? ??
+                  defectClass.correctiveMeasure)
+              .trim(),
+      barangay: (data['barangay'] as String? ?? '').trim(),
+      city: (data['city'] as String? ?? '').trim(),
+      province: (data['province'] as String? ?? '').trim(),
+      formattedAddress: (data['formattedAddress'] as String? ?? '').trim(),
+      note: (data['note'] as String? ?? '').trim(),
+      rejectionReason: (data['rejectionReason'] as String? ?? '').trim(),
+      reporterUid: (data['reporterUid'] as String? ?? '').trim(),
+      detections:
+          (data['detections'] as List<dynamic>?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList(growable: false) ??
+          const [],
+      lastEditedAt: (data['lastEditedAt'] as Timestamp?)?.toDate(),
+      moderatedAt: (data['moderatedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -787,1273 +697,118 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final user = CloudService.instance.currentUser;
     if (user == null) {
-      return const Scaffold(body: Center(child: Text('Not signed in')));
+      return const Scaffold(
+        body: Center(
+          child: Text('Sign in to access your reports and account.'),
+        ),
+      );
     }
 
     final isGoogleAuth = CloudService.instance.isGoogleAuthUser(user);
+    final activeSection = widget.embeddedInShell
+        ? (widget.activeRoute == WebShellRoute.account
+              ? WebShellRoute.account
+              : WebShellRoute.reports)
+        : _localRoute;
 
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: AppSettings.instance.themeModeNotifier,
-      builder: (context, currentThemeMode, _) {
-        final isDark = AppSettings.instance.isDarkMode;
-        final Color bgColor = AppDesign.bg(isDark);
-        final Color cardBg = AppDesign.surface(isDark);
-        final Color cardBorder = AppDesign.border(isDark);
-        final Color inputBg = AppDesign.bg(isDark);
-        final Color textColor = AppDesign.textPrimary(isDark);
-        final Color subtextColor = AppDesign.textSecondary(isDark);
-        const Color accentColor = Color(0xFF2563EB); // Consistent Dark Royal Blue
+      builder: (context, _, _) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+        final width = MediaQuery.sizeOf(context).width;
+        final isCompact = width < 700;
 
         return Scaffold(
-          backgroundColor: bgColor,
-          appBar: PreferredSize(
-            preferredSize: const Size.fromHeight(72),
-            child: Container(
-              decoration: BoxDecoration(
-                color: cardBg,
-                border: Border(
-                  bottom: BorderSide(
-                    color: cardBorder,
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: LayoutBuilder(
-                builder: (context, headerCons) {
-                  return Stack(
-                    children: [
-                      Positioned(
-                        top: 16,
-                        right: headerCons.maxWidth < 420 ? 12 : 20,
-                        // TOP RIGHT NAVIGATION TAB SWITCHER
-                        child: Container(
-                        height: 48,
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: cardBg,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: cardBorder, width: 1.2),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08), blurRadius: 10, offset: const Offset(0, 3)),
-                          ],
+          backgroundColor: WebDesign.bg(isDark),
+          appBar: widget.embeddedInShell
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(WebDesign.headerHeight),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: WebDesign.surface(isDark),
+                      border: Border(
+                        bottom: BorderSide(color: WebDesign.border(isDark)),
+                      ),
+                    ),
+                    child: CenteredMaxWidth(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: WebDesign.space4,
                         ),
                         child: Row(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (kIsWeb) ...[
-                              // Map Tab
-                              Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: widget.onSwitchToMap,
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.map_rounded, color: subtextColor, size: 16),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          'Map',
-                                          style: TextStyle(color: subtextColor, fontSize: 12.5, fontWeight: FontWeight.w600),
-                                        ),
-                                      ],
-                                    ),
+                            Text(
+                              'RoadSense',
+                              style: theme.textTheme.titleMedium,
+                            ),
+                            const Spacer(),
+                            WebViewSwitcher(
+                              isMapActive: false,
+                              showLiveIndicator: false,
+                              onSelectMap: widget.onSwitchToMap,
+                              onOpenSettings: () {
+                                showDialog<void>(
+                                  context: context,
+                                  builder: (_) => WebSettingsDialog(
+                                    onSettingsChanged: () => setState(() {}),
                                   ),
-                                ),
-                              ),
-                              // Profile Tab (Active)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: accentColor,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Row(
-                                  children: [
-                                    Icon(Icons.person_rounded, color: Colors.white, size: 16),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Profile',
-                                      style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.bold),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            // Settings Button (Included in top right pill)
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () {
-                                  showDialog(
-                                    context: context,
-                                    barrierDismissible: true,
-                                    builder: (ctx) => WebSettingsDialog(
-                                      onSettingsChanged: () => setState(() {}),
-                                    ),
-                                  );
-                                },
-                                borderRadius: BorderRadius.circular(20),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: Icon(Icons.settings_rounded, color: subtextColor, size: 18),
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ],
                         ),
                       ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
+                    ),
+                  ),
+                ),
           body: StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .snapshots(),
             builder: (context, userDocSnapshot) {
-              final userData = userDocSnapshot.data?.data() as Map<String, dynamic>? ?? {};
-              final role = userData['role'] as String? ?? 'user';
-              final isVerified = isGoogleAuth || (userData['isVerified'] as bool? ?? false);
-
-              final bool isMobile = MediaQuery.of(context).size.width < 640;
+              final userData =
+                  userDocSnapshot.data?.data() as Map<String, dynamic>? ??
+                  const {};
+              final role = (userData['role'] as String? ?? 'user').trim();
+              final isVerified = isGoogleAuth || user.emailVerified;
 
               return SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 16 : 24,
-                  vertical: isMobile ? 16 : 28,
+                  horizontal: isCompact ? WebDesign.space3 : WebDesign.space6,
+                  vertical: isCompact ? WebDesign.space4 : WebDesign.space6,
                 ),
-                child: Center(
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 1080),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Professional Executive Header Card
-                        Container(
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: cardBorder),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06), blurRadius: 16, offset: const Offset(0, 4)),
-                            ],
-                          ),
-                          padding: EdgeInsets.all(isMobile ? 18 : 28),
-                          child: isMobile
-                              ? Column(
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: accentColor.withValues(alpha: 0.3),
-                                            blurRadius: 20,
-                                            spreadRadius: 2,
-                                          ),
-                                        ],
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 40,
-                                        backgroundColor: accentColor,
-                                        backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
-                                            ? NetworkImage(user.photoURL!)
-                                            : null,
-                                        child: user.photoURL == null || user.photoURL!.isEmpty
-                                            ? Text(
-                                                (user.displayName ?? user.email ?? 'U')[0].toUpperCase(),
-                                                style: const TextStyle(fontSize: 30, color: Colors.white, fontWeight: FontWeight.w900),
-                                              )
-                                            : null,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 14),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          user.displayName ?? 'Road Inspector',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        if (isVerified)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: AppDesign.accent(isDark),
-                                              borderRadius: BorderRadius.circular(20),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(Icons.verified_rounded, color: Colors.white, size: 13),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  isGoogleAuth ? 'GOOGLE VERIFIED' : 'VERIFIED ACCOUNT',
-                                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        else
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF991B1B),
-                                              borderRadius: BorderRadius.circular(20),
-                                            ),
-                                            child: const Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.warning_amber_rounded, color: Colors.white, size: 13),
-                                                SizedBox(width: 4),
-                                                Text(
-                                                  'UNVERIFIED',
-                                                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          user.email ?? '',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(color: subtextColor, fontSize: 13),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                          decoration: BoxDecoration(
-                                            color: inputBg,
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: cardBorder),
-                                          ),
-                                          child: Text(
-                                            'SYSTEM ROLE: ${_formatRoleLabel(role)}',
-                                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: accentColor),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => CloudService.instance.signOut(),
-                                        icon: const Icon(Icons.logout_rounded, size: 16),
-                                        label: const Text('Sign Out', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(0xFFEF4444),
-                                          side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Row(
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: accentColor.withValues(alpha: 0.3),
-                                            blurRadius: 20,
-                                            spreadRadius: 2,
-                                          ),
-                                        ],
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 44,
-                                        backgroundColor: accentColor,
-                                        backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
-                                            ? NetworkImage(user.photoURL!)
-                                            : null,
-                                        child: user.photoURL == null || user.photoURL!.isEmpty
-                                            ? Text(
-                                                (user.displayName ?? user.email ?? 'U')[0].toUpperCase(),
-                                                style: const TextStyle(fontSize: 34, color: Colors.white, fontWeight: FontWeight.w900),
-                                              )
-                                            : null,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 24),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                user.displayName ?? 'Road Inspector',
-                                                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              if (isVerified)
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                  decoration: BoxDecoration(
-                                                    color: AppDesign.accent(isDark),
-                                                    borderRadius: BorderRadius.circular(20),
-                                                    border: Border.all(color: AppDesign.accent(isDark)),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      const Icon(Icons.verified_rounded, color: Colors.white, size: 14),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        isGoogleAuth ? 'GOOGLE VERIFIED' : 'VERIFIED ACCOUNT',
-                                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                )
-                                              else
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                  decoration: BoxDecoration(
-                                                    color: const Color(0xFF991B1B),
-                                                    borderRadius: BorderRadius.circular(20),
-                                                    border: Border.all(color: const Color(0xFFFCA5A5)),
-                                                  ),
-                                                  child: const Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      Icon(Icons.warning_amber_rounded, color: Colors.white, size: 14),
-                                                      SizedBox(width: 4),
-                                                      Text(
-                                                        'UNVERIFIED',
-                                                        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            user.email ?? '',
-                                            style: TextStyle(color: subtextColor, fontSize: 14),
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                            decoration: BoxDecoration(
-                                              color: inputBg,
-                                              borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(color: cardBorder),
-                                            ),
-                                            child: Text(
-                                              'SYSTEM ROLE: ${_formatRoleLabel(role)}',
-                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    OutlinedButton.icon(
-                                      onPressed: () => CloudService.instance.signOut(),
-                                      icon: const Icon(Icons.logout_rounded, size: 16),
-                                      label: const Text('Sign Out', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: const Color(0xFFEF4444),
-                                        side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
-                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                child: CenteredMaxWidth(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildPageTopStrip(
+                        context: context,
+                        isDark: isDark,
+                        activeSection: activeSection,
+                      ),
+                      const SizedBox(height: WebDesign.space4),
+                      if (activeSection == WebShellRoute.account)
+                        _buildAccountView(
+                          context: context,
+                          isDark: isDark,
+                          isCompact: isCompact,
+                          user: user,
+                          role: role,
+                          isVerified: isVerified,
+                          isGoogleAuth: isGoogleAuth,
+                        )
+                      else
+                        _buildMyReportsView(
+                          context: context,
+                          isDark: isDark,
+                          isCompact: isCompact,
+                          width: width,
+                          uid: user.uid,
                         ),
-
-                        const SizedBox(height: 20),
-
-                        // Unverified Account Banner
-                        if (!isVerified)
-                          Container(
-                            decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFF1F2),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: isDark ? const Color(0xFF78350F) : const Color(0xFFFECDD3)),
-                            ),
-                            padding: EdgeInsets.all(isMobile ? 14 : 18),
-                            child: isMobile
-                                ? Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(8),
-                                            decoration: BoxDecoration(
-                                              color: isDark ? const Color(0xFF78350F) : const Color(0xFFFFE4E6),
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(Icons.shield_outlined, color: Color(0xFFF97316), size: 20),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              'Account Security Verification Required',
-                                              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFDBA74) : const Color(0xFF9F1239)),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Complete account verification to authorize survey logging and access full platform features.',
-                                        style: TextStyle(fontSize: 11.5, color: isDark ? const Color(0xFFFED7AA) : const Color(0xFFBE123C)),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFEA580C),
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(vertical: 12),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                          ),
-                                          icon: const Icon(Icons.verified_user_rounded, size: 16),
-                                          label: const Text('Verify Code'),
-                                          onPressed: () => _showVerificationDialog(user.uid),
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: isDark ? const Color(0xFF78350F) : const Color(0xFFFFE4E6),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.shield_outlined, color: Color(0xFFF97316), size: 22),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              'Account Security Verification Required',
-                                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFDBA74) : const Color(0xFF9F1239)),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Complete account verification to authorize survey logging and access full platform features.',
-                                              style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFFED7AA) : const Color(0xFFBE123C)),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFFEA580C),
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        ),
-                                        icon: const Icon(Icons.verified_user_rounded, size: 16),
-                                        label: const Text('Verify Code'),
-                                        onPressed: () => _showVerificationDialog(user.uid),
-                                      ),
-                                    ],
-                                  ),
-                          ),
-
-                        if (!isVerified) const SizedBox(height: 20),
-
-                        // Personal Details & Credentials Card
-                        Container(
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cardBorder),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06), blurRadius: 6, offset: const Offset(0, 2)),
-                            ],
-                          ),
-                          padding: EdgeInsets.all(isMobile ? 18 : 28),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(Icons.badge_rounded, color: accentColor, size: 22),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      'Personal Information & Credentials',
-                                      style: TextStyle(fontSize: isMobile ? 15.5 : 17, fontWeight: FontWeight.bold, color: textColor),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Manage your account details and contact information.',
-                                  style: TextStyle(color: subtextColor, fontSize: isMobile ? 12 : 13),
-                                ),
-                                const SizedBox(height: 20),
-
-                                // First Name & Last Name
-                                if (isMobile) ...[
-                                  TextFormField(
-                                    controller: _firstNameController,
-                                    style: TextStyle(fontSize: 14, color: textColor, fontWeight: FontWeight.w500),
-                                    decoration: _inputDecoration('First Name', Icons.person_outline, isDark: isDark),
-                                    validator: (v) => (v == null || v.isEmpty) ? 'Enter first name' : null,
-                                  ),
-                                  const SizedBox(height: 14),
-                                  TextFormField(
-                                    controller: _lastNameController,
-                                    style: TextStyle(fontSize: 14, color: textColor, fontWeight: FontWeight.w500),
-                                    decoration: _inputDecoration('Last Name', Icons.person_outline, isDark: isDark),
-                                    validator: (v) => (v == null || v.isEmpty) ? 'Enter last name' : null,
-                                  ),
-                                ] else
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _firstNameController,
-                                          style: TextStyle(fontSize: 14.5, color: textColor, fontWeight: FontWeight.w500),
-                                          decoration: _inputDecoration('First Name', Icons.person_outline, isDark: isDark),
-                                          validator: (v) => (v == null || v.isEmpty) ? 'Enter first name' : null,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _lastNameController,
-                                          style: TextStyle(fontSize: 14.5, color: textColor, fontWeight: FontWeight.w500),
-                                          decoration: _inputDecoration('Last Name', Icons.person_outline, isDark: isDark),
-                                          validator: (v) => (v == null || v.isEmpty) ? 'Enter last name' : null,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-
-                                const SizedBox(height: 14),
-
-                                // Email & Phone Number
-                                if (isMobile) ...[
-                                  TextFormField(
-                                    initialValue: user.email,
-                                    readOnly: true,
-                                    style: TextStyle(fontSize: 14, color: textColor, fontWeight: FontWeight.w500),
-                                    decoration: _inputDecoration(
-                                      'Email Address (Primary)',
-                                      Icons.email_outlined,
-                                      suffixIcon: isVerified ? Icon(Icons.check_circle_rounded, color: accentColor, size: 20) : null,
-                                      isDark: isDark,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 14),
-                                  TextFormField(
-                                    controller: _phoneController,
-                                    keyboardType: TextInputType.phone,
-                                    style: TextStyle(fontSize: 14, color: textColor, fontWeight: FontWeight.w500),
-                                    decoration: _inputDecoration('Phone Number', Icons.phone_outlined, isDark: isDark),
-                                  ),
-                                ] else
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: TextFormField(
-                                          initialValue: user.email,
-                                          readOnly: true,
-                                          style: TextStyle(fontSize: 14.5, color: textColor, fontWeight: FontWeight.w500),
-                                          decoration: _inputDecoration(
-                                            'Email Address (Primary)',
-                                            Icons.email_outlined,
-                                            suffixIcon: isVerified ? Icon(Icons.check_circle_rounded, color: accentColor, size: 20) : null,
-                                            isDark: isDark,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: TextFormField(
-                                          controller: _phoneController,
-                                          keyboardType: TextInputType.phone,
-                                          style: TextStyle(fontSize: 14.5, color: textColor, fontWeight: FontWeight.w500),
-                                          decoration: _inputDecoration('Phone Number', Icons.phone_outlined, isDark: isDark),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-
-                                const SizedBox(height: 20),
-
-                                // Save Changes Action Button
-                                SizedBox(
-                                  width: isMobile ? double.infinity : null,
-                                  child: Align(
-                                    alignment: isMobile ? Alignment.center : Alignment.centerRight,
-                                    child: ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: accentColor,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                                        minimumSize: isMobile ? const Size(double.infinity, 46) : null,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                      ),
-                                      icon: _isSaving
-                                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                          : const Icon(Icons.save_rounded, size: 18),
-                                      label: Text(_isSaving ? 'Saving Changes...' : 'Save Profile Details'),
-                                      onPressed: _isSaving
-                                          ? null
-                                          : () {
-                                              if (_formKey.currentState!.validate()) {
-                                                _saveProfile();
-                                              }
-                                            },
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // Surveyor Telemetry & Report Stream
-                        StreamBuilder<QuerySnapshot>(
-                          stream: CloudService.instance.streamUserPotholes(user.uid),
-                          builder: (context, snapshot) {
-                            final allDocs = snapshot.data?.docs ?? [];
-                            final activeDocs = allDocs.where((d) {
-                              final data = d.data() as Map<String, dynamic>;
-                              return data['status'] != 'deleted';
-                            }).toList();
-
-                            final trashedDocs = allDocs.where((d) {
-                              final data = d.data() as Map<String, dynamic>;
-                              return data['status'] == 'deleted';
-                            }).toList();
-
-                            final totalCount = activeDocs.length;
-                            int approvedCount = 0;
-                            int pendingCount = 0;
-
-                            for (final doc in activeDocs) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              final st = data['status'] as String? ?? 'pending';
-                              if (st == 'approved') {
-                                approvedCount++;
-                              } else if (st == 'pending') {
-                                pendingCount++;
-                              }
-                            }
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // 1. Surveyor Overview Cards (3 Cards)
-                                LayoutBuilder(
-                                  builder: (ctx, constraints) {
-                                    final isNarrow = constraints.maxWidth < 650;
-                                    return GridView.count(
-                                      crossAxisCount: isNarrow ? 1 : 3,
-                                      shrinkWrap: true,
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      crossAxisSpacing: 14,
-                                      mainAxisSpacing: 14,
-                                      childAspectRatio: isNarrow ? 2.6 : 2.0,
-                                      children: [
-                                        _buildSurveyorMetricCard(
-                                          title: 'Surveys Logged',
-                                          value: '$totalCount',
-                                          subtitle: 'Active road reports',
-                                          icon: Icons.analytics_rounded,
-                                          color: const Color(0xFF2563EB),
-                                          isDark: isDark,
-                                        ),
-                                        _buildSurveyorMetricCard(
-                                          title: 'Approved Live',
-                                          value: '$approvedCount',
-                                          subtitle: 'Verified hazards',
-                                          icon: Icons.check_circle_rounded,
-                                          color: const Color(0xFF10B981),
-                                          isDark: isDark,
-                                        ),
-                                        _buildSurveyorMetricCard(
-                                          title: 'Pending Review',
-                                          value: '$pendingCount',
-                                          subtitle: 'Awaiting inspection',
-                                          icon: Icons.schedule_rounded,
-                                          color: const Color(0xFFF59E0B),
-                                          isDark: isDark,
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                ),
-
-                                const SizedBox(height: 24),
-
-                                // 2. Section Header & Tabs Selector
-                                Row(
-                                  children: [
-                                    Icon(
-                                      _showTrashBin ? Icons.delete_sweep_rounded : Icons.assignment_rounded,
-                                      color: _showTrashBin ? AppDesign.danger : accentColor,
-                                      size: 22,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      _showTrashBin
-                                          ? 'Trash Bin (${trashedDocs.length})'
-                                          : 'My Inspection & Hazard Reports (${activeDocs.length})',
-                                      style: TextStyle(
-                                        fontSize: isMobile ? 15.5 : 17,
-                                        fontWeight: FontWeight.bold,
-                                        color: textColor,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Tabs: Active Submissions vs Trash Bin
-                                Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: cardBg,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: cardBorder),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: InkWell(
-                                          onTap: () => setState(() => _showTrashBin = false),
-                                          borderRadius: BorderRadius.circular(8),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(vertical: 8),
-                                            decoration: BoxDecoration(
-                                              color: !_showTrashBin ? accentColor : Colors.transparent,
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                'Active Submissions (${activeDocs.length})',
-                                                style: TextStyle(
-                                                  fontSize: 12.5,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: !_showTrashBin ? Colors.white : subtextColor,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: InkWell(
-                                          onTap: () => setState(() => _showTrashBin = true),
-                                          borderRadius: BorderRadius.circular(8),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(vertical: 8),
-                                            decoration: BoxDecoration(
-                                              color: _showTrashBin ? AppDesign.danger : Colors.transparent,
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Row(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Icon(
-                                                  Icons.delete_outline_rounded,
-                                                  size: 15,
-                                                  color: _showTrashBin ? Colors.white : subtextColor,
-                                                ),
-                                                const SizedBox(width: 5),
-                                                Text(
-                                                  'Trash Bin (${trashedDocs.length})',
-                                                  style: TextStyle(
-                                                    fontSize: 12.5,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: _showTrashBin ? Colors.white : subtextColor,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                if (snapshot.hasError)
-                                  Center(child: Text('Error loading reports: ${snapshot.error}', style: TextStyle(color: subtextColor)))
-                                else if (snapshot.connectionState == ConnectionState.waiting)
-                                  Center(child: CircularProgressIndicator(color: accentColor))
-                                else if (_showTrashBin) ...[
-                                  // TAB: Trash Bin View
-                                  if (trashedDocs.isEmpty)
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: cardBg,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: cardBorder),
-                                      ),
-                                      padding: EdgeInsets.all(isMobile ? 24 : 40),
-                                      child: Center(
-                                        child: Column(
-                                          children: [
-                                            Icon(Icons.auto_delete_outlined, size: isMobile ? 36 : 48, color: subtextColor),
-                                            const SizedBox(height: 12),
-                                            Text(
-                                              'Trash Bin is Empty',
-                                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textColor),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              'Deleted pending reports will be stored here before permanent cleanup.',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(fontSize: 12, color: subtextColor),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    )
-                                  else ...[
-                                    // Clean Up All in Trash Button Bar
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                      decoration: BoxDecoration(
-                                        color: AppDesign.danger.withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: AppDesign.danger.withValues(alpha: 0.3)),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              '${trashedDocs.length} item(s) in Trash Bin',
-                                              style: TextStyle(
-                                                fontSize: 12.5,
-                                                fontWeight: FontWeight.bold,
-                                                color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C),
-                                              ),
-                                            ),
-                                          ),
-                                          ElevatedButton.icon(
-                                            onPressed: () => _confirmAndEmptyTrash(
-                                              context,
-                                              trashedDocs.map((d) => d.id).toList(),
-                                            ),
-                                            icon: const Icon(Icons.delete_sweep_rounded, size: 16),
-                                            label: const Text(
-                                              'Clean Up All',
-                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                            ),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: AppDesign.danger,
-                                              foregroundColor: Colors.white,
-                                              elevation: 0,
-                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-
-                                    // Grid of Trashed Items
-                                    GridView.builder(
-                                      shrinkWrap: true,
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: isMobile ? 1 : 3,
-                                        mainAxisExtent: 280,
-                                        crossAxisSpacing: 16,
-                                        mainAxisSpacing: 16,
-                                      ),
-                                      itemCount: trashedDocs.length,
-                                      itemBuilder: (context, index) {
-                                        final data = trashedDocs[index].data() as Map<String, dynamic>;
-                                        final imageUrl = data['imageUrl'] as String? ?? '';
-                                        final lat = (data['latitude'] as num).toDouble();
-                                        final lng = (data['longitude'] as num).toDouble();
-
-                                        return Container(
-                                          decoration: BoxDecoration(
-                                            color: cardBg,
-                                            borderRadius: BorderRadius.circular(14),
-                                            border: Border.all(color: AppDesign.danger.withValues(alpha: 0.35)),
-                                            boxShadow: [
-                                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08), blurRadius: 6, offset: const Offset(0, 2)),
-                                            ],
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Expanded(
-                                                child: imageUrl.startsWith('http')
-                                                    ? Image.network(
-                                                        imageUrl,
-                                                        width: double.infinity,
-                                                        fit: BoxFit.cover,
-                                                        errorBuilder: (ctx, e, st) => Container(
-                                                          color: AppDesign.surface(isDark),
-                                                          child: Center(
-                                                            child: Icon(Icons.broken_image_rounded, color: subtextColor, size: 28),
-                                                          ),
-                                                        ),
-                                                      )
-                                                    : Container(
-                                                        color: AppDesign.surface(isDark),
-                                                        child: Center(
-                                                          child: Icon(Icons.image_not_supported_rounded, color: subtextColor, size: 28),
-                                                        ),
-                                                      ),
-                                              ),
-                                              Padding(
-                                                padding: const EdgeInsets.all(12),
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: Column(
-                                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                                            children: [
-                                                              Text(
-                                                                '${lat.toStringAsFixed(4)}° N, ${lng.toStringAsFixed(4)}° E',
-                                                                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: textColor),
-                                                              ),
-                                                              const SizedBox(height: 2),
-                                                              Text(
-                                                                'Trashed Hazard Report',
-                                                                style: TextStyle(fontSize: 11, color: subtextColor),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                        Container(
-                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                                          decoration: BoxDecoration(
-                                                            color: isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2),
-                                                            borderRadius: BorderRadius.circular(6),
-                                                          ),
-                                                          child: Text(
-                                                            'TRASHED',
-                                                            style: TextStyle(
-                                                              color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C),
-                                                              fontSize: 9,
-                                                              fontWeight: FontWeight.bold,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    const SizedBox(height: 10),
-                                                    Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: SizedBox(
-                                                            height: 34,
-                                                            child: ElevatedButton.icon(
-                                                              style: ElevatedButton.styleFrom(
-                                                                backgroundColor: const Color(0xFF00796B),
-                                                                foregroundColor: Colors.white,
-                                                                elevation: 0,
-                                                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                                shape: RoundedRectangleBorder(
-                                                                  borderRadius: BorderRadius.circular(8),
-                                                                ),
-                                                              ),
-                                                              icon: const Icon(Icons.restore_from_trash_rounded, size: 15),
-                                                              label: const Text(
-                                                                'Restore',
-                                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                                              ),
-                                                              onPressed: () => _restoreReport(context, trashedDocs[index].id),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 8),
-                                                        SizedBox(
-                                                          height: 34,
-                                                          child: OutlinedButton.icon(
-                                                            style: OutlinedButton.styleFrom(
-                                                              side: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
-                                                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                              shape: RoundedRectangleBorder(
-                                                                borderRadius: BorderRadius.circular(8),
-                                                              ),
-                                                            ),
-                                                            icon: const Icon(Icons.delete_forever_rounded, size: 15, color: Color(0xFFEF4444)),
-                                                            label: const Text(
-                                                              'Delete',
-                                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
-                                                            ),
-                                                            onPressed: () => _confirmAndPermanentDelete(context, trashedDocs[index].id),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ] else ...[
-                                  // TAB: Active Submissions View
-                                  if (activeDocs.isEmpty)
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: cardBg,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: cardBorder),
-                                      ),
-                                      padding: EdgeInsets.all(isMobile ? 24 : 40),
-                                      child: Center(
-                                        child: Column(
-                                          children: [
-                                            Icon(Icons.task_rounded, size: isMobile ? 36 : 48, color: subtextColor),
-                                            const SizedBox(height: 12),
-                                            Text(
-                                              'No Active Inspection Reports',
-                                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textColor),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              'Submissions logged from your mobile device scanner will be displayed here.',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(fontSize: 12, color: subtextColor),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    )
-                                  else
-                                    GridView.builder(
-                                      shrinkWrap: true,
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: isMobile ? 1 : 3,
-                                        mainAxisExtent: 280,
-                                        crossAxisSpacing: 16,
-                                        mainAxisSpacing: 16,
-                                      ),
-                                      itemCount: activeDocs.length,
-                                      itemBuilder: (context, index) {
-                                        final data = activeDocs[index].data() as Map<String, dynamic>;
-                                        final imageUrl = data['imageUrl'] as String? ?? '';
-                                        final lat = (data['latitude'] as num).toDouble();
-                                        final lng = (data['longitude'] as num).toDouble();
-                                        final status = data['status'] as String? ?? 'pending';
-
-                                        Color statusBg;
-                                        Color statusText;
-                                        String statusLabel;
-
-                                        if (status == 'approved') {
-                                          statusBg = isDark ? const Color(0xFF2563EB).withValues(alpha: 0.18) : const Color(0xFFDBEAFE);
-                                          statusText = isDark ? Colors.white : const Color(0xFF1D4ED8);
-                                          statusLabel = 'APPROVED LIVE';
-                                        } else if (status == 'rejected') {
-                                          statusBg = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2);
-                                          statusText = isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C);
-                                          statusLabel = 'REJECTED';
-                                        } else {
-                                          statusBg = isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7);
-                                          statusText = isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309);
-                                          statusLabel = 'PENDING REVIEW';
-                                        }
-
-                                        final bool isApproved = status == 'approved';
-
-                                        return Container(
-                                          decoration: BoxDecoration(
-                                            color: cardBg,
-                                            borderRadius: BorderRadius.circular(14),
-                                            border: Border.all(color: cardBorder),
-                                            boxShadow: [
-                                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08), blurRadius: 6, offset: const Offset(0, 2)),
-                                            ],
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Expanded(
-                                                child: imageUrl.startsWith('http')
-                                                    ? Image.network(
-                                                        imageUrl,
-                                                        width: double.infinity,
-                                                        fit: BoxFit.cover,
-                                                        errorBuilder: (ctx, e, st) => Container(
-                                                          color: AppDesign.surface(isDark),
-                                                          child: Center(
-                                                            child: Icon(Icons.broken_image_rounded, color: subtextColor, size: 28),
-                                                          ),
-                                                        ),
-                                                      )
-                                                    : Container(
-                                                        color: AppDesign.surface(isDark),
-                                                        child: Center(
-                                                          child: Icon(Icons.image_not_supported_rounded, color: subtextColor, size: 28),
-                                                        ),
-                                                      ),
-                                              ),
-                                              Padding(
-                                                padding: const EdgeInsets.all(12),
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: Column(
-                                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                                            children: [
-                                                              Text(
-                                                                '${lat.toStringAsFixed(4)}° N, ${lng.toStringAsFixed(4)}° E',
-                                                                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: textColor),
-                                                              ),
-                                                              const SizedBox(height: 2),
-                                                              Text(
-                                                                'Road Pothole Hazard',
-                                                                style: TextStyle(fontSize: 11, color: subtextColor),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                        Container(
-                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                                          decoration: BoxDecoration(
-                                                            color: statusBg,
-                                                            borderRadius: BorderRadius.circular(6),
-                                                          ),
-                                                          child: Text(
-                                                            statusLabel,
-                                                            style: TextStyle(color: statusText, fontSize: 9, fontWeight: FontWeight.bold),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    const SizedBox(height: 10),
-                                                    Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: SizedBox(
-                                                            height: 34,
-                                                            child: ElevatedButton.icon(
-                                                              style: ElevatedButton.styleFrom(
-                                                                backgroundColor: const Color(0xFF2563EB),
-                                                                foregroundColor: Colors.white,
-                                                                elevation: 0,
-                                                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                                shape: RoundedRectangleBorder(
-                                                                  borderRadius: BorderRadius.circular(8),
-                                                                ),
-                                                              ),
-                                                              icon: const Icon(Icons.explore_rounded, size: 15),
-                                                              label: const Text(
-                                                                'View on Map',
-                                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                                              ),
-                                                              onPressed: () {
-                                                                if (widget.onLocateOnMap != null) {
-                                                                  widget.onLocateOnMap!(LatLng(lat, lng), activeDocs[index].id, data);
-                                                                } else {
-                                                                  widget.onSwitchToMap?.call();
-                                                                }
-                                                              },
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 8),
-                                                        SizedBox(
-                                                          height: 34,
-                                                          child: OutlinedButton.icon(
-                                                            style: OutlinedButton.styleFrom(
-                                                              side: const BorderSide(color: Color(0xFF2563EB), width: 1.2),
-                                                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                              shape: RoundedRectangleBorder(
-                                                                borderRadius: BorderRadius.circular(8),
-                                                              ),
-                                                            ),
-                                                            icon: const Icon(Icons.edit_note_rounded, size: 15, color: Color(0xFF2563EB)),
-                                                            label: const Text(
-                                                              'Edit',
-                                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                                                            ),
-                                                            onPressed: () => _showEditReportDialog(context, activeDocs[index].id, data),
-                                                          ),
-                                                        ),
-                                                        // Only show Delete button if NOT approved (Pending or Rejected). Approved is protected for admins.
-                                                        if (!isApproved) ...[
-                                                          const SizedBox(width: 8),
-                                                          SizedBox(
-                                                            height: 34,
-                                                            child: OutlinedButton.icon(
-                                                              style: OutlinedButton.styleFrom(
-                                                                side: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
-                                                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                                shape: RoundedRectangleBorder(
-                                                                  borderRadius: BorderRadius.circular(8),
-                                                                ),
-                                                              ),
-                                                              icon: const Icon(Icons.delete_outline_rounded, size: 15, color: Color(0xFFEF4444)),
-                                                              label: const Text(
-                                                                'Delete',
-                                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
-                                                              ),
-                                                              onPressed: () => _confirmAndMoveToTrash(context, activeDocs[index].id),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                ],
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
               );
@@ -2064,100 +819,1512 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String label, IconData icon, {Widget? suffixIcon, bool isDark = false}) {
-    return AppDesign.inputDecoration(
-      label: label,
-      icon: icon,
+  Widget _buildPageTopStrip({
+    required BuildContext context,
+    required bool isDark,
+    required WebShellRoute activeSection,
+  }) {
+    final theme = Theme.of(context);
+    final isReports = activeSection == WebShellRoute.reports;
+    return Wrap(
+      spacing: WebDesign.space3,
+      runSpacing: WebDesign.space2,
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Eyebrow(
+              isReports
+                  ? 'SURVEY HISTORY & MODERATION'
+                  : 'IDENTITY, SECURITY & PREFERENCES',
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isReports ? 'My Road Reports' : 'Account & Security',
+              style: theme.textTheme.headlineMedium,
+            ),
+          ],
+        ),
+        Wrap(
+          spacing: WebDesign.space2,
+          runSpacing: WebDesign.space2,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => unawaited(
+                _switchSection(
+                  isReports ? WebShellRoute.account : WebShellRoute.reports,
+                ),
+              ),
+              icon: Icon(
+                isReports
+                    ? Icons.manage_accounts_outlined
+                    : Icons.assignment_outlined,
+                size: 16,
+              ),
+              label: Text(isReports ? 'Profile' : 'My Reports'),
+            ),
+            if (widget.onSwitchToMap != null)
+              ElevatedButton.icon(
+                onPressed: widget.onSwitchToMap,
+                icon: const Icon(Icons.map_outlined, size: 16),
+                label: const Text('Back to Map'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAccountView({
+    required BuildContext context,
+    required bool isDark,
+    required bool isCompact,
+    required User user,
+    required String role,
+    required bool isVerified,
+    required bool isGoogleAuth,
+  }) {
+    final theme = Theme.of(context);
+    final displayTitle =
+        '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'
+            .trim();
+    final effectiveName = displayTitle.isNotEmpty
+        ? displayTitle
+        : (user.displayName?.trim().isNotEmpty == true
+              ? user.displayName!.trim()
+              : (user.email ?? 'Road Surveyor'));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Identity overview card
+        WebCard(
+          padding: EdgeInsets.all(
+            isCompact ? WebDesign.space4 : WebDesign.space5,
+          ),
+          child: Wrap(
+            spacing: WebDesign.space4,
+            runSpacing: WebDesign.space4,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: WebDesign.brand(isDark),
+                    backgroundImage:
+                        user.photoURL != null && user.photoURL!.isNotEmpty
+                        ? NetworkImage(user.photoURL!)
+                        : null,
+                    child: user.photoURL == null || user.photoURL!.isEmpty
+                        ? Text(
+                            effectiveName.characters.first.toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 22,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: WebDesign.space4),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: WebDesign.space2,
+                          runSpacing: WebDesign.space1,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              effectiveName,
+                              style: theme.textTheme.titleLarge,
+                            ),
+                            _buildVerificationBadge(isVerified, isGoogleAuth),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user.email ?? '',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: WebDesign.textSecondary(isDark),
+                          ),
+                        ),
+                        const SizedBox(height: WebDesign.space2),
+                        StatusChip(
+                          label: _formatRoleLabel(role),
+                          tone: StatusTone.neutral,
+                          dense: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              OutlinedButton.icon(
+                onPressed: () => CloudService.instance.signOut(),
+                icon: const Icon(Icons.logout_rounded, size: 16),
+                label: const Text('Sign Out'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: WebDesign.danger(isDark),
+                  side: BorderSide(
+                    color: WebDesign.danger(isDark).withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        if (!isVerified) ...[
+          const SizedBox(height: WebDesign.space4),
+          Container(
+            padding: const EdgeInsets.all(WebDesign.space4),
+            decoration: BoxDecoration(
+              color: WebDesign.statusStyle(StatusTone.pending, isDark).bg,
+              borderRadius: BorderRadius.circular(WebDesign.radiusMd),
+              border: Border.all(
+                color: WebDesign.statusStyle(
+                  StatusTone.pending,
+                  isDark,
+                ).outline,
+              ),
+            ),
+            child: Wrap(
+              spacing: WebDesign.space3,
+              runSpacing: WebDesign.space3,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      color: WebDesign.statusStyle(
+                        StatusTone.pending,
+                        isDark,
+                      ).fg,
+                    ),
+                    const SizedBox(width: WebDesign.space3),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 620),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Email verification required to report',
+                            style: theme.textTheme.titleSmall,
+                          ),
+                          Text(
+                            'Verify your email via the link sent to your inbox before sending pothole reports.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => _showVerificationDialog(user.uid),
+                  icon: const Icon(Icons.mark_email_read_outlined, size: 16),
+                  label: const Text('Verify Email'),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: WebDesign.space4),
+
+        // Personal details form
+        WebCard(
+          padding: EdgeInsets.all(
+            isCompact ? WebDesign.space4 : WebDesign.space5,
+          ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionHeading(
+                  title: 'Personal Details',
+                  subtitle:
+                      'Keep your surveyor name and contact details current.',
+                  icon: Icons.badge_outlined,
+                ),
+                if (_hasUnsavedChanges) ...[
+                  const SizedBox(height: WebDesign.space3),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WebDesign.space3,
+                      vertical: WebDesign.space2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: WebDesign.statusStyle(
+                        StatusTone.pending,
+                        isDark,
+                      ).bg,
+                      borderRadius: BorderRadius.circular(WebDesign.radiusSm),
+                      border: Border.all(
+                        color: WebDesign.statusStyle(
+                          StatusTone.pending,
+                          isDark,
+                        ).outline,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.edit_notifications_outlined,
+                          size: 16,
+                          color: WebDesign.statusStyle(
+                            StatusTone.pending,
+                            isDark,
+                          ).fg,
+                        ),
+                        const SizedBox(width: WebDesign.space2),
+                        const Expanded(
+                          child: Text('You have unsaved profile changes.'),
+                        ),
+                        TextButton(
+                          onPressed: _isSaving ? null : _resetUnsavedEdits,
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: WebDesign.space4),
+                if (isCompact) ...[
+                  TextFormField(
+                    controller: _firstNameController,
+                    textInputAction: TextInputAction.next,
+                    decoration: _inputDecoration(
+                      'First Name',
+                      Icons.person_outline,
+                      isDark: isDark,
+                    ),
+                    validator: (v) {
+                      final trimmed = (v ?? '').trim();
+                      if (trimmed.isEmpty) return 'Enter first name';
+                      if (trimmed.length < 2) {
+                        return 'Use at least 2 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: WebDesign.space3),
+                  TextFormField(
+                    controller: _lastNameController,
+                    textInputAction: TextInputAction.next,
+                    decoration: _inputDecoration(
+                      'Last Name',
+                      Icons.person_outline,
+                      isDark: isDark,
+                    ),
+                    validator: (v) {
+                      final trimmed = (v ?? '').trim();
+                      if (trimmed.isEmpty) return 'Enter last name';
+                      if (trimmed.length < 2) {
+                        return 'Use at least 2 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                ] else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _firstNameController,
+                          textInputAction: TextInputAction.next,
+                          decoration: _inputDecoration(
+                            'First Name',
+                            Icons.person_outline,
+                            isDark: isDark,
+                          ),
+                          validator: (v) {
+                            final trimmed = (v ?? '').trim();
+                            if (trimmed.isEmpty) return 'Enter first name';
+                            if (trimmed.length < 2) {
+                              return 'Use at least 2 characters';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: WebDesign.space4),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _lastNameController,
+                          textInputAction: TextInputAction.next,
+                          decoration: _inputDecoration(
+                            'Last Name',
+                            Icons.person_outline,
+                            isDark: isDark,
+                          ),
+                          validator: (v) {
+                            final trimmed = (v ?? '').trim();
+                            if (trimmed.isEmpty) return 'Enter last name';
+                            if (trimmed.length < 2) {
+                              return 'Use at least 2 characters';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: WebDesign.space3),
+                if (isCompact) ...[
+                  TextFormField(
+                    initialValue: user.email ?? '',
+                    readOnly: true,
+                    decoration: _inputDecoration(
+                      'Email Address (Primary)',
+                      Icons.email_outlined,
+                      suffixIcon: isVerified
+                          ? Icon(
+                              Icons.check_circle_rounded,
+                              color: WebDesign.statusStyle(
+                                StatusTone.approved,
+                                isDark,
+                              ).fg,
+                              size: 18,
+                            )
+                          : null,
+                      isDark: isDark,
+                    ),
+                  ),
+                  const SizedBox(height: WebDesign.space3),
+                  TextFormField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    decoration: _inputDecoration(
+                      'Phone Number (Optional)',
+                      Icons.phone_outlined,
+                      isDark: isDark,
+                    ),
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.isEmpty) return null;
+                      if (!RegExp(r'^[0-9+\-\s()]{7,20}$').hasMatch(t)) {
+                        return 'Enter a valid phone number';
+                      }
+                      return null;
+                    },
+                  ),
+                ] else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          initialValue: user.email ?? '',
+                          readOnly: true,
+                          decoration: _inputDecoration(
+                            'Email Address (Primary)',
+                            Icons.email_outlined,
+                            suffixIcon: isVerified
+                                ? Icon(
+                                    Icons.check_circle_rounded,
+                                    color: WebDesign.statusStyle(
+                                      StatusTone.approved,
+                                      isDark,
+                                    ).fg,
+                                    size: 18,
+                                  )
+                                : null,
+                            isDark: isDark,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: WebDesign.space4),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _phoneController,
+                          keyboardType: TextInputType.phone,
+                          decoration: _inputDecoration(
+                            'Phone Number (Optional)',
+                            Icons.phone_outlined,
+                            isDark: isDark,
+                          ),
+                          validator: (v) {
+                            final t = (v ?? '').trim();
+                            if (t.isEmpty) return null;
+                            if (!RegExp(r'^[0-9+\-\s()]{7,20}$').hasMatch(t)) {
+                              return 'Enter a valid phone number';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: WebDesign.space4),
+                Wrap(
+                  spacing: WebDesign.space2,
+                  runSpacing: WebDesign.space2,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    if (_hasUnsavedChanges)
+                      OutlinedButton(
+                        onPressed: _isSaving ? null : _resetUnsavedEdits,
+                        child: const Text('Discard Changes'),
+                      ),
+                    ElevatedButton.icon(
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.save_rounded, size: 16),
+                      label: Text(
+                        _isSaving
+                            ? 'Saving Changes...'
+                            : 'Save Profile Details',
+                      ),
+                      onPressed: _isSaving ? null : _saveProfile,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: WebDesign.space4),
+
+        // Security + Preferences split row
+        LayoutBuilder(
+          builder: (context, cons) {
+            final twoCol = cons.maxWidth >= 820;
+            final securityCard = WebCard(
+              padding: EdgeInsets.all(
+                isCompact ? WebDesign.space4 : WebDesign.space5,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SectionHeading(
+                    title: 'Password & Data Governance',
+                    subtitle:
+                        'Authentication method and report lifecycle rules.',
+                    icon: Icons.security_rounded,
+                  ),
+                  const SizedBox(height: WebDesign.space3),
+                  if (isGoogleAuth)
+                    const Text(
+                      'Your account signs in through Google Authentication. Manage your password directly in your Google account security settings.',
+                    )
+                  else ...[
+                    Text(
+                      'Send a password reset link to ${user.email ?? 'your registered email'}.',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: WebDesign.space3),
+                    OutlinedButton.icon(
+                      onPressed: _isSendingPasswordReset
+                          ? null
+                          : () => _sendPasswordReset(user.email ?? ''),
+                      icon: _isSendingPasswordReset
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.lock_reset_rounded, size: 16),
+                      label: Text(
+                        _isSendingPasswordReset
+                            ? 'Sending link...'
+                            : 'Send Password Reset Email',
+                      ),
+                    ),
+                    if (_passwordResetMessage != null) ...[
+                      const SizedBox(height: WebDesign.space2),
+                      Text(
+                        _passwordResetMessage!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: WebDesign.statusStyle(
+                            StatusTone.approved,
+                            isDark,
+                          ).fg,
+                        ),
+                      ),
+                    ],
+                    if (_passwordResetError != null) ...[
+                      const SizedBox(height: WebDesign.space2),
+                      Text(
+                        _passwordResetError!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: WebDesign.danger(isDark),
+                        ),
+                      ),
+                    ],
+                  ],
+                  const Divider(height: WebDesign.space5),
+                  Text(
+                    '• Public visibility: Other users see verified hazards without your email address.\n'
+                    '• Editing & Trash: Pending submissions can be edited or trashed. Approved and rejected reports are archived for audit.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            );
+
+            final prefCard = WebCard(
+              padding: EdgeInsets.all(
+                isCompact ? WebDesign.space4 : WebDesign.space5,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SectionHeading(
+                    title: 'Display & Map Preferences',
+                    subtitle: 'Theme, basemap layers, and guidance.',
+                    icon: Icons.tune_rounded,
+                  ),
+                  const SizedBox(height: WebDesign.space3),
+                  const Eyebrow('APPEARANCE MODE'),
+                  const SizedBox(height: WebDesign.space2),
+                  SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode_outlined, size: 16),
+                        label: Text('Light'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode_outlined, size: 16),
+                        label: Text('Dark'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.settings_suggest_outlined, size: 16),
+                        label: Text('System'),
+                      ),
+                    ],
+                    selected: {AppSettings.instance.themeModeNotifier.value},
+                    onSelectionChanged: (sel) {
+                      final next = sel.first;
+                      if (next == ThemeMode.system) {
+                        AppSettings.instance.themeModeNotifier.value =
+                            ThemeMode.system;
+                      } else {
+                        AppSettings.instance.toggleTheme(
+                          next == ThemeMode.dark,
+                        );
+                      }
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: WebDesign.space4),
+                  Wrap(
+                    spacing: WebDesign.space2,
+                    runSpacing: WebDesign.space2,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed:
+                            widget.onOpenSettings ??
+                            () => showDialog<void>(
+                              context: context,
+                              builder: (_) => WebSettingsDialog(
+                                onSettingsChanged: () => setState(() {}),
+                              ),
+                            ),
+                        icon: const Icon(Icons.layers_outlined, size: 16),
+                        label: const Text('Map & Display Settings'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed:
+                            widget.onOpenHelp ??
+                            () => showDialog<void>(
+                              context: context,
+                              builder: (_) => const WebHelpDialog(),
+                            ),
+                        icon: const Icon(Icons.help_outline_rounded, size: 16),
+                        label: const Text('Web Guide'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+
+            if (twoCol) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: securityCard),
+                  const SizedBox(width: WebDesign.space4),
+                  Expanded(child: prefCard),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                securityCard,
+                const SizedBox(height: WebDesign.space4),
+                prefCard,
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMyReportsView({
+    required BuildContext context,
+    required bool isDark,
+    required bool isCompact,
+    required double width,
+    required String uid,
+  }) {
+    final theme = Theme.of(context);
+    return StreamBuilder<QuerySnapshot>(
+      key: ValueKey('user_reports_$_streamRetryNonce'),
+      stream: CloudService.instance.streamUserPotholes(uid),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return WebCard(
+            padding: const EdgeInsets.all(WebDesign.space5),
+            child: EmptyState(
+              icon: Icons.cloud_off_rounded,
+              title: 'Could not load your reports',
+              message:
+                  'We encountered an issue reading your submissions (${snapshot.error}).',
+              action: ElevatedButton.icon(
+                onPressed: () => setState(() => _streamRetryNonce++),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Retry'),
+              ),
+            ),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: WebDesign.space8),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final allDocs = snapshot.data?.docs ?? const [];
+        final Map<String, Map<String, dynamic>> rawDataById = {};
+        final List<WebReportItem> activeItems = [];
+        final List<WebReportItem> trashedItems = [];
+
+        for (final doc in allDocs) {
+          final data = doc.data() as Map<String, dynamic>? ?? const {};
+          rawDataById[doc.id] = data;
+          final item = _docToWebReportItem(doc);
+          if (item.normalizedStatus == 'deleted') {
+            trashedItems.add(item);
+          } else {
+            activeItems.add(item);
+          }
+        }
+
+        int approvedCount = 0;
+        int pendingCount = 0;
+        int rejectedCount = 0;
+        for (final item in activeItems) {
+          switch (item.normalizedStatus) {
+            case 'approved':
+              approvedCount++;
+            case 'rejected':
+              rejectedCount++;
+            default:
+              pendingCount++;
+          }
+        }
+
+        final filter = WebReportFilter(
+          defectClasses: _selectedDefectClass == 'all'
+              ? const {}
+              : {_selectedDefectClass},
+          statuses: _reportStatus == 'all' ? const {} : {_reportStatus},
+          sort: _reportSort,
+        );
+        final queryResult = WebReportQueryEngine.execute(
+          dataset: activeItems,
+          filter: filter,
+          query: _reportSearch.text,
+        );
+        final visibleItems = queryResult.items;
+        final totalPages = WebReportQueryEngine.totalPages(
+          visibleItems.length,
+          _reportsPerPage,
+        );
+        final safePage = _currentPage.clamp(0, totalPages - 1);
+        final pageStart = safePage * _reportsPerPage;
+        final pageEnd = (pageStart + _reportsPerPage).clamp(
+          0,
+          visibleItems.length,
+        );
+        final pageItems = visibleItems.sublist(pageStart, pageEnd);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            MetricGrid(
+              desktopColumns: 4,
+              spacing: WebDesign.space3,
+              children: [
+                MetricTile(
+                  label: 'Total Active Reports',
+                  value: '${activeItems.length}',
+                  icon: Icons.analytics_outlined,
+                  accent: WebDesign.brand(isDark),
+                  hint: 'Synced from cloud',
+                ),
+                MetricTile(
+                  label: 'Approved Live',
+                  value: '$approvedCount',
+                  icon: Icons.check_circle_outline_rounded,
+                  accent: WebDesign.statusStyle(StatusTone.approved, isDark).fg,
+                  hint: 'Visible on public map',
+                ),
+                MetricTile(
+                  label: 'Pending Review',
+                  value: '$pendingCount',
+                  icon: Icons.schedule_rounded,
+                  accent: WebDesign.statusStyle(StatusTone.pending, isDark).fg,
+                  hint: 'Editable while pending',
+                ),
+                MetricTile(
+                  label: 'Rejected',
+                  value: '$rejectedCount',
+                  icon: Icons.cancel_outlined,
+                  accent: WebDesign.danger(isDark),
+                  hint: 'Archived by moderators',
+                ),
+              ],
+            ),
+
+            const SizedBox(height: WebDesign.space4),
+
+            // Active vs Trash Bin switcher
+            WebCard(
+              padding: const EdgeInsets.all(WebDesign.space3),
+              child: Wrap(
+                spacing: WebDesign.space2,
+                runSpacing: WebDesign.space2,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SegmentedButton<bool>(
+                    segments: [
+                      ButtonSegment<bool>(
+                        value: false,
+                        icon: const Icon(Icons.assignment_outlined, size: 16),
+                        label: Text('Active (${activeItems.length})'),
+                      ),
+                      ButtonSegment<bool>(
+                        value: true,
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 16,
+                        ),
+                        label: Text('Trash Bin (${trashedItems.length})'),
+                      ),
+                    ],
+                    selected: {_showTrashBin},
+                    onSelectionChanged: (sel) => setState(() {
+                      _showTrashBin = sel.first;
+                      _currentPage = 0;
+                    }),
+                  ),
+                  Text(
+                    _showTrashBin
+                        ? 'Restore or permanently remove trashed pending reports.'
+                        : 'Pending reports remain editable until reviewed by a moderator.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: WebDesign.space4),
+
+            if (_showTrashBin)
+              _buildTrashSection(
+                context: context,
+                isDark: isDark,
+                width: width,
+                trashedItems: trashedItems,
+              )
+            else ...[
+              // Search + Status + 4-Class Defect + Sort toolbar
+              WebCard(
+                padding: const EdgeInsets.all(WebDesign.space4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _reportSearch,
+                            onChanged: (_) => setState(() => _currentPage = 0),
+                            decoration: InputDecoration(
+                              hintText:
+                                  'Search by report ID, defect class or barangay',
+                              prefixIcon: const Icon(
+                                Icons.search_rounded,
+                                size: 18,
+                              ),
+                              suffixIcon: _reportSearch.text.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      tooltip: 'Clear report search',
+                                      icon: const Icon(
+                                        Icons.close_rounded,
+                                        size: 16,
+                                      ),
+                                      onPressed: () => setState(() {
+                                        _reportSearch.clear();
+                                        _currentPage = 0;
+                                      }),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: WebDesign.space3),
+                    Wrap(
+                      spacing: WebDesign.space2,
+                      runSpacing: WebDesign.space2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Eyebrow('STATUS'),
+                        for (final st in [
+                          'all',
+                          'pending',
+                          'approved',
+                          'rejected',
+                        ])
+                          ChoiceChip(
+                            label: Text(
+                              st == 'all'
+                                  ? 'All'
+                                  : '${st[0].toUpperCase()}${st.substring(1)}',
+                            ),
+                            selected: _reportStatus == st,
+                            onSelected: (_) => setState(() {
+                              _reportStatus = st;
+                              _currentPage = 0;
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: WebDesign.space2),
+                    Wrap(
+                      spacing: WebDesign.space2,
+                      runSpacing: WebDesign.space2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Eyebrow('DEFECT'),
+                        ChoiceChip(
+                          label: const Text('All classes'),
+                          selected: _selectedDefectClass == 'all',
+                          onSelected: (_) => setState(() {
+                            _selectedDefectClass = 'all';
+                            _currentPage = 0;
+                          }),
+                        ),
+                        for (final cls in DpwhStandards.allClasses)
+                          ChoiceChip(
+                            avatar: Icon(
+                              WebDesign.defectIcon(cls),
+                              size: 15,
+                              color: cls.color,
+                            ),
+                            label: Text(cls.name),
+                            selected: _selectedDefectClass == cls.name,
+                            onSelected: (_) => setState(() {
+                              _selectedDefectClass = cls.name;
+                              _currentPage = 0;
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: WebDesign.space3),
+                    Wrap(
+                      spacing: WebDesign.space3,
+                      runSpacing: WebDesign.space2,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Wrap(
+                          spacing: WebDesign.space2,
+                          runSpacing: WebDesign.space1,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            const Eyebrow('SORT'),
+                            DropdownButton<WebReportSort>(
+                              value: _reportSort,
+                              isDense: true,
+                              underline: const SizedBox.shrink(),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: WebReportSort.newest,
+                                  child: Text('Newest first'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WebReportSort.oldest,
+                                  child: Text('Oldest first'),
+                                ),
+                              ],
+                              onChanged: (next) {
+                                if (next == null) return;
+                                setState(() {
+                                  _reportSort = next;
+                                  _currentPage = 0;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Showing ${visibleItems.length} of ${activeItems.length}',
+                              style: WebDesign.tabular(
+                                theme.textTheme.bodySmall,
+                              ),
+                            ),
+                            if (_reportSearch.text.isNotEmpty ||
+                                _reportStatus != 'all' ||
+                                _selectedDefectClass != 'all') ...[
+                              const SizedBox(width: WebDesign.space2),
+                              TextButton(
+                                onPressed: () => setState(() {
+                                  _reportSearch.clear();
+                                  _reportStatus = 'all';
+                                  _selectedDefectClass = 'all';
+                                  _currentPage = 0;
+                                }),
+                                child: const Text('Reset filters'),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: WebDesign.space4),
+
+              if (activeItems.isEmpty)
+                WebCard(
+                  padding: const EdgeInsets.all(WebDesign.space6),
+                  child: EmptyState(
+                    icon: Icons.add_road_rounded,
+                    title: 'No road reports yet',
+                    message:
+                        'Use the RoadSense mobile scanner to capture and upload road defects, then track and manage them here.',
+                    action: widget.onSwitchToMap != null
+                        ? OutlinedButton.icon(
+                            onPressed: widget.onSwitchToMap,
+                            icon: const Icon(Icons.map_outlined, size: 16),
+                            label: const Text('Explore Road Map'),
+                          )
+                        : null,
+                  ),
+                )
+              else if (visibleItems.isEmpty)
+                WebCard(
+                  padding: const EdgeInsets.all(WebDesign.space6),
+                  child: EmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: 'No matching reports',
+                    message:
+                        'No submitted reports matched your current search or filter settings.',
+                    action: OutlinedButton(
+                      onPressed: () => setState(() {
+                        _reportSearch.clear();
+                        _reportStatus = 'all';
+                        _selectedDefectClass = 'all';
+                        _currentPage = 0;
+                      }),
+                      child: const Text('Reset filters'),
+                    ),
+                  ),
+                )
+              else ...[
+                for (final item in pageItems) ...[
+                  _buildReportListCard(
+                    context: context,
+                    isDark: isDark,
+                    wide: width >= 920,
+                    item: item,
+                    rawData: rawDataById[item.docId] ?? const {},
+                  ),
+                  const SizedBox(height: WebDesign.space3),
+                ],
+                if (totalPages > 1)
+                  WebCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WebDesign.space4,
+                      vertical: WebDesign.space3,
+                    ),
+                    child: Wrap(
+                      spacing: WebDesign.space3,
+                      runSpacing: WebDesign.space2,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Page ${safePage + 1} of $totalPages · Showing ${pageStart + 1}–$pageEnd of ${visibleItems.length}',
+                          style: WebDesign.tabular(theme.textTheme.bodySmall),
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: safePage > 0
+                                  ? () => setState(
+                                      () => _currentPage = safePage - 1,
+                                    )
+                                  : null,
+                              icon: const Icon(
+                                Icons.chevron_left_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('Previous'),
+                            ),
+                            const SizedBox(width: WebDesign.space2),
+                            OutlinedButton.icon(
+                              onPressed: safePage + 1 < totalPages
+                                  ? () => setState(
+                                      () => _currentPage = safePage + 1,
+                                    )
+                                  : null,
+                              icon: const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('Next'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildReportListCard({
+    required BuildContext context,
+    required bool isDark,
+    required bool wide,
+    required WebReportItem item,
+    required Map<String, dynamic> rawData,
+  }) {
+    final theme = Theme.of(context);
+    final status = item.normalizedStatus;
+    final canModify = status == 'pending';
+    final statusTone = status == 'approved'
+        ? StatusTone.approved
+        : (status == 'rejected' ? StatusTone.rejected : StatusTone.pending);
+    final statusLabel = status == 'approved'
+        ? 'Approved Live'
+        : (status == 'rejected' ? 'Rejected' : 'Pending Review');
+    final conf = item.peakModelConfidence;
+
+    final thumb = InkWell(
+      onTap: item.imageUrl.isNotEmpty
+          ? () => _openFullPhotoPreview(item.imageUrl)
+          : null,
+      borderRadius: BorderRadius.circular(WebDesign.radiusSm),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(WebDesign.radiusSm),
+        child: Container(
+          width: wide ? 88 : 72,
+          height: wide ? 68 : 64,
+          color: WebDesign.sunken(isDark),
+          child: item.imageUrl.startsWith('http')
+              ? Image.network(
+                  item.imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (c, e, st) => Icon(
+                    Icons.broken_image_outlined,
+                    color: WebDesign.textMuted(isDark),
+                  ),
+                )
+              : Icon(
+                  Icons.photo_camera_outlined,
+                  color: WebDesign.textMuted(isDark),
+                ),
+        ),
+      ),
+    );
+
+    final metaColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: WebDesign.space2,
+          runSpacing: WebDesign.space1,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            WebDefectBadge(
+              defectName: item.primaryDefect,
+              dpwhCode: item.primaryDpwhCode,
+              dense: true,
+            ),
+
+            StatusChip(label: statusLabel, tone: statusTone, dense: true),
+            if (item.potholeCount > 1)
+              Text(
+                '${item.potholeCount} detections',
+                style: WebDesign.tabular(theme.textTheme.labelMedium),
+              ),
+            if (conf != null)
+              Text(
+                '${WebReportQueryEngine.formatConfidence(conf)} AI confidence',
+                style: WebDesign.tabular(theme.textTheme.bodySmall),
+              ),
+          ],
+        ),
+        const SizedBox(height: WebDesign.space2),
+        Text(item.locationLabel, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 2),
+        Text(
+          'ID #${item.shortId} · ${WebReportQueryEngine.formatTimestamp(item.timestamp)} · ${item.location.latitude.toStringAsFixed(5)}, ${item.location.longitude.toStringAsFixed(5)}',
+          style: WebDesign.tabular(theme.textTheme.bodySmall),
+        ),
+
+        if (status == 'rejected') ...[
+          const SizedBox(height: WebDesign.space1),
+          Text(
+            item.rejectionReason.isNotEmpty
+                ? 'Moderator note: ${item.rejectionReason}'
+                : 'Declined during review — no specific moderator note recorded.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: WebDesign.statusStyle(StatusTone.rejected, isDark).fg,
+            ),
+          ),
+        ] else if (status == 'approved') ...[
+          const SizedBox(height: WebDesign.space1),
+          Text(
+            'Response target: ${item.responseTime} · Locked after approval.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+
+    final actions = Wrap(
+      spacing: WebDesign.space2,
+      runSpacing: WebDesign.space2,
+      children: [
+        OutlinedButton.icon(
+          onPressed: widget.onLocateOnMap == null
+              ? null
+              : () => widget.onLocateOnMap!(item.location, item.docId, rawData),
+          icon: const Icon(Icons.place_outlined, size: 16),
+          label: const Text('Inspect on Map'),
+        ),
+        if (canModify) ...[
+          OutlinedButton.icon(
+            onPressed: () =>
+                _showEditReportDialog(context, item.docId, rawData),
+            icon: const Icon(Icons.edit_outlined, size: 16),
+            label: const Text('Edit'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _confirmAndMoveToTrash(context, item.docId),
+            icon: Icon(
+              Icons.delete_outline_rounded,
+              size: 16,
+              color: WebDesign.danger(isDark),
+            ),
+            label: Text(
+              'Trash',
+              style: TextStyle(color: WebDesign.danger(isDark)),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(
+                color: WebDesign.danger(isDark).withValues(alpha: 0.45),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+
+    return WebCard(
+      padding: const EdgeInsets.all(WebDesign.space4),
+      child: wide
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                thumb,
+                const SizedBox(width: WebDesign.space4),
+                Expanded(child: metaColumn),
+                const SizedBox(width: WebDesign.space4),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  child: actions,
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    thumb,
+                    const SizedBox(width: WebDesign.space3),
+                    Expanded(child: metaColumn),
+                  ],
+                ),
+                const SizedBox(height: WebDesign.space3),
+                actions,
+              ],
+            ),
+    );
+  }
+
+  Widget _buildTrashSection({
+    required BuildContext context,
+    required bool isDark,
+    required double width,
+    required List<WebReportItem> trashedItems,
+  }) {
+    if (trashedItems.isEmpty) {
+      return WebCard(
+        padding: const EdgeInsets.all(WebDesign.space6),
+        child: const EmptyState(
+          icon: Icons.auto_delete_outlined,
+          title: 'Trash Bin is Empty',
+          message:
+              'Deleted pending reports are held here so you can restore or permanently remove them.',
+        ),
+      );
+    }
+
+    final cols = width >= 1080 ? 3 : (width >= 700 ? 2 : 1);
+    final gap = WebDesign.space3;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        WebCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: WebDesign.space4,
+            vertical: WebDesign.space3,
+          ),
+          accentBorder: WebDesign.statusStyle(
+            StatusTone.rejected,
+            isDark,
+          ).outline,
+          child: Wrap(
+            spacing: WebDesign.space3,
+            runSpacing: WebDesign.space2,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '${trashedItems.length} item(s) in Trash Bin. Permanent deletion cannot be undone.',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: WebDesign.statusStyle(StatusTone.rejected, isDark).fg,
+                ),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: WebDesign.danger(isDark),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => _confirmAndEmptyTrash(
+                  context,
+                  trashedItems.map((e) => e.docId).toList(growable: false),
+                ),
+                icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                label: const Text('Clean Up All'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: WebDesign.space3),
+        LayoutBuilder(
+          builder: (ctx, cons) {
+            final itemWidth = cols == 1
+                ? cons.maxWidth
+                : (cons.maxWidth - (gap * (cols - 1))) / cols;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final item in trashedItems)
+                  SizedBox(
+                    width: itemWidth,
+                    child: WebCard(
+                      padding: const EdgeInsets.all(WebDesign.space3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                              WebDesign.radiusSm,
+                            ),
+                            child: Container(
+                              height: 120,
+                              width: double.infinity,
+                              color: WebDesign.sunken(isDark),
+                              child: item.imageUrl.startsWith('http')
+                                  ? Image.network(
+                                      item.imageUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, e, st) => Icon(
+                                        Icons.broken_image_outlined,
+                                        color: WebDesign.textMuted(isDark),
+                                      ),
+                                    )
+                                  : Icon(
+                                      Icons.image_not_supported_outlined,
+                                      color: WebDesign.textMuted(isDark),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: WebDesign.space3),
+                          Wrap(
+                            spacing: WebDesign.space2,
+                            runSpacing: WebDesign.space1,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              WebDefectBadge(
+                                defectName: item.primaryDefect,
+                                dpwhCode: item.primaryDpwhCode,
+                                dense: true,
+                              ),
+                              const StatusChip(
+                                label: 'Trashed',
+                                tone: StatusTone.rejected,
+                                dense: true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: WebDesign.space2),
+                          Text(
+                            item.locationLabel,
+                            style: Theme.of(context).textTheme.titleSmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            WebReportQueryEngine.formatTimestamp(
+                              item.timestamp,
+                            ),
+                            style: WebDesign.tabular(
+                              Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                          const SizedBox(height: WebDesign.space3),
+                          Wrap(
+                            spacing: WebDesign.space2,
+                            runSpacing: WebDesign.space2,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: () =>
+                                    _restoreReport(context, item.docId),
+                                icon: const Icon(
+                                  Icons.restore_from_trash_rounded,
+                                  size: 16,
+                                ),
+                                label: const Text('Restore'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () => _confirmAndPermanentDelete(
+                                  context,
+                                  item.docId,
+                                ),
+                                icon: Icon(
+                                  Icons.delete_forever_rounded,
+                                  size: 16,
+                                  color: WebDesign.danger(isDark),
+                                ),
+                                label: Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    color: WebDesign.danger(isDark),
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                    color: WebDesign.danger(
+                                      isDark,
+                                    ).withValues(alpha: 0.45),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    String label,
+    IconData icon, {
+    Widget? suffixIcon,
+    bool isDark = false,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 18),
       suffixIcon: suffixIcon,
-      isDark: isDark,
     );
   }
 
   String _formatRoleLabel(String role) {
-    if (role == 'super_admin') return 'SUPER ADMIN / EXECUTIVE';
-    if (role == 'admin') return 'GIS ADMINISTRATOR';
-    return 'ROAD SURVEYOR';
+    if (role == 'super_admin') return 'Super Admin';
+    if (role == 'admin') return 'GIS Administrator';
+    return 'Road Surveyor';
   }
 
-  Widget _buildSurveyorMetricCard({
-    required String title,
-    required String value,
-    required String subtitle,
-    required IconData icon,
-    required Color color,
-    required bool isDark,
-  }) {
-    final cardBg = AppDesign.surface(isDark);
-    final cardBorder = AppDesign.border(isDark);
-    final textColor = AppDesign.textPrimary(isDark);
-    final subtextColor = AppDesign.textSecondary(isDark);
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cardBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  title.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                    color: subtextColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, size: 15, color: color),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: 10.5,
-              color: subtextColor,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
+  Widget _buildVerificationBadge(bool isVerified, bool isGoogleAuth) {
+    return StatusChip(
+      label: isVerified
+          ? (isGoogleAuth ? 'Google Verified' : 'Verified Account')
+          : 'Unverified',
+      tone: isVerified ? StatusTone.approved : StatusTone.rejected,
     );
   }
 }
-

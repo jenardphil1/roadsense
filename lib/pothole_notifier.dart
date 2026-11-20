@@ -27,8 +27,7 @@ class PotholeNotifier {
   }
 
   Future<void> showPotholeAlert(String distanceText) async {
-    final AppLifecycleState? state =
-        WidgetsBinding.instance.lifecycleState;
+    final AppLifecycleState? state = WidgetsBinding.instance.lifecycleState;
     if (state != AppLifecycleState.paused &&
         state != AppLifecycleState.detached) {
       return;
@@ -52,7 +51,8 @@ class PotholeNotifier {
             importance: Importance.high,
             priority: Priority.high,
           ),
-          iOS: DarwinNotificationDetails(),        ),
+          iOS: DarwinNotificationDetails(),
+        ),
       );
       _lastShownAt = now;
     } catch (_) {}

@@ -11,6 +11,15 @@
             "program": "lib/main.dart"
         },
         {
+            "name": "RoadSense Mobile (Azure Local)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "args": [
+                "--dart-define-from-file=dart_defines.local.json"
+            ]
+        },
+        {
             "name": "RoadSense Web (Edge)",
             "request": "launch",
             "type": "dart",

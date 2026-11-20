@@ -52,3 +52,22 @@ DPWH_Thesis_and_App_Package/
 *.onnx
 *.torchscript
 
+# ML calibration / dataset artifacts
+*.npy
+
+# Local AI/agent state and third-party reference bundles (never commit)
+skills_/
+apps/
+.rs_ui_tools/
+
+# Scratch backups
+*.bak
+*.bak.*
+
+# Local secrets and build defines (never commit)
+.env
+.env.*
+dart_defines.local.json
+!.env.example
+!dart_defines.example.json
+

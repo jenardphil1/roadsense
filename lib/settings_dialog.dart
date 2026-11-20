@@ -1,7 +1,10 @@
-import 'dart:ui' show ImageFilter;
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'app_settings.dart';
 import 'app_design.dart';
+import 'mobile_components.dart';
+import 'onboarding_screen.dart';
+import 'web_design.dart';
 
 /// ─────────────────────────────────────────────────────────────────────────────
 /// WEB PLATFORM SETTINGS DIALOG
@@ -15,12 +18,7 @@ class WebSettingsDialog extends StatefulWidget {
   State<WebSettingsDialog> createState() => _WebSettingsDialogState();
 }
 
-enum _WebSettingsTab {
-  appearance,
-  gis,
-  devTools,
-  system,
-}
+enum _WebSettingsTab { appearance, gis, devTools, system }
 
 class _WebSettingsDialogState extends State<WebSettingsDialog> {
   final settings = AppSettings.instance;
@@ -35,45 +33,56 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
             ? (MediaQuery.platformBrightnessOf(context) == Brightness.dark)
             : (currentThemeMode == ThemeMode.dark);
 
-        final Color modalBg = isDark ? const Color(0xFF0F172A) : Colors.white;
-        final Color sidebarBg = isDark ? const Color(0xFF0B111E) : const Color(0xFFF8FAFC);
-        final Color cardBg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC);
-        final Color itemHoverBg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
-        final Color borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-        final Color textColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-        final Color subtextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-        final Color accentColor = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+        final Color modalBg = WebDesign.surface(isDark);
+        final Color sidebarBg = WebDesign.sunken(isDark);
+        final Color cardBg = WebDesign.surface(isDark);
+        final Color itemHoverBg = WebDesign.hover(isDark);
+        final Color borderColor = WebDesign.border(isDark);
+        final Color textColor = WebDesign.textPrimary(isDark);
+        final Color subtextColor = WebDesign.textSecondary(isDark);
+        final Color accentColor = WebDesign.brand(isDark);
 
-        final screenWidth = MediaQuery.of(context).size.width;
-        final isCompact = screenWidth < 700;
+        final viewport = MediaQuery.sizeOf(context);
+        final isCompact = viewport.width < 700;
+        final isNarrow = viewport.width < 480;
+        final maxDialogWidth = math.min(
+          780.0,
+          viewport.width - (isNarrow ? 24.0 : 40.0),
+        );
+        final maxDialogHeight = math.min(620.0, viewport.height * 0.88);
 
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: isNarrow ? 12 : 20,
+            vertical: isNarrow ? 16 : 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(WebDesign.radiusXl),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxDialogWidth,
+              maxHeight: maxDialogHeight,
+            ),
             child: Container(
-              width: 820,
-              height: 600,
+              width: maxDialogWidth,
+              height: maxDialogHeight,
               decoration: BoxDecoration(
                 color: modalBg,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: borderColor, width: 1.2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
-                    blurRadius: 36,
-                    offset: const Offset(0, 16),
-                  ),
-                ],
+                borderRadius: BorderRadius.circular(WebDesign.radiusXl),
+                border: Border.all(color: borderColor, width: 1.0),
+                boxShadow: WebDesign.shadowLg(isDark),
               ),
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
                   // ── TOP MODAL HEADER ───────────────────────────────────────
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isNarrow ? 16 : 24,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       color: modalBg,
                       border: Border(bottom: BorderSide(color: borderColor)),
@@ -83,21 +92,16 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [accentColor, accentColor.withValues(alpha: 0.8)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                            color: accentColor,
+                            borderRadius: BorderRadius.circular(
+                              WebDesign.radiusMd,
                             ),
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                color: accentColor.withValues(alpha: 0.3),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
                           ),
-                          child: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
+                          child: const Icon(
+                            Icons.tune_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -105,30 +109,25 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Web Platform Settings',
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  color: textColor,
-                                  letterSpacing: -0.2,
+                                'Preferences & Map Display',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                              if (!isNarrow)
+                                Text(
+                                  'Theme, map layers, and diagnostic controls',
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
-                              ),
-                              Text(
-                                'Customize your visual theme, GIS canvas & developer simulation tools',
-                                style: TextStyle(fontSize: 12, color: subtextColor),
-                              ),
                             ],
                           ),
                         ),
-                        Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () => Navigator.of(context).pop(),
-                            borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Icon(Icons.close_rounded, color: subtextColor, size: 20),
-                            ),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          tooltip: 'Close settings',
+                          icon: Icon(
+                            Icons.close_rounded,
+                            color: subtextColor,
+                            size: 20,
                           ),
                         ),
                       ],
@@ -145,12 +144,47 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                       ),
                       child: ListView(
                         scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                         children: [
-                          _buildCompactTab(Icons.palette_rounded, 'Appearance', _WebSettingsTab.appearance, isDark, accentColor, textColor, subtextColor),
-                          _buildCompactTab(Icons.map_rounded, 'GIS & Display', _WebSettingsTab.gis, isDark, accentColor, textColor, subtextColor),
-                          _buildCompactTab(Icons.construction_rounded, 'Dev Tools', _WebSettingsTab.devTools, isDark, accentColor, textColor, subtextColor),
-                          _buildCompactTab(Icons.info_outline_rounded, 'System', _WebSettingsTab.system, isDark, accentColor, textColor, subtextColor),
+                          _buildCompactTab(
+                            Icons.palette_rounded,
+                            'Appearance',
+                            _WebSettingsTab.appearance,
+                            isDark,
+                            accentColor,
+                            textColor,
+                            subtextColor,
+                          ),
+                          _buildCompactTab(
+                            Icons.map_rounded,
+                            'GIS & Display',
+                            _WebSettingsTab.gis,
+                            isDark,
+                            accentColor,
+                            textColor,
+                            subtextColor,
+                          ),
+                          _buildCompactTab(
+                            Icons.construction_rounded,
+                            'Dev Tools',
+                            _WebSettingsTab.devTools,
+                            isDark,
+                            accentColor,
+                            textColor,
+                            subtextColor,
+                          ),
+                          _buildCompactTab(
+                            Icons.info_outline_rounded,
+                            'System',
+                            _WebSettingsTab.system,
+                            isDark,
+                            accentColor,
+                            textColor,
+                            subtextColor,
+                          ),
                         ],
                       ),
                     ),
@@ -166,14 +200,22 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                             width: 220,
                             decoration: BoxDecoration(
                               color: sidebarBg,
-                              border: Border(right: BorderSide(color: borderColor)),
+                              border: Border(
+                                right: BorderSide(color: borderColor),
+                              ),
                             ),
-                            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 12,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Padding(
-                                  padding: const EdgeInsets.only(left: 10, bottom: 8),
+                                  padding: const EdgeInsets.only(
+                                    left: 10,
+                                    bottom: 8,
+                                  ),
                                   child: Text(
                                     'PREFERENCES',
                                     style: TextStyle(
@@ -184,14 +226,44 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                                     ),
                                   ),
                                 ),
-                                _buildSidebarItem(Icons.palette_rounded, 'Appearance', _WebSettingsTab.appearance, isDark, accentColor, textColor, subtextColor, itemHoverBg),
-                                _buildSidebarItem(Icons.map_rounded, 'GIS & Display', _WebSettingsTab.gis, isDark, accentColor, textColor, subtextColor, itemHoverBg),
-                                _buildSidebarItem(Icons.construction_rounded, 'Developer Tools', _WebSettingsTab.devTools, isDark, accentColor, textColor, subtextColor, itemHoverBg),
+                                _buildSidebarItem(
+                                  Icons.palette_rounded,
+                                  'Appearance',
+                                  _WebSettingsTab.appearance,
+                                  isDark,
+                                  accentColor,
+                                  textColor,
+                                  subtextColor,
+                                  itemHoverBg,
+                                ),
+                                _buildSidebarItem(
+                                  Icons.map_rounded,
+                                  'GIS & Display',
+                                  _WebSettingsTab.gis,
+                                  isDark,
+                                  accentColor,
+                                  textColor,
+                                  subtextColor,
+                                  itemHoverBg,
+                                ),
+                                _buildSidebarItem(
+                                  Icons.construction_rounded,
+                                  'Developer Tools',
+                                  _WebSettingsTab.devTools,
+                                  isDark,
+                                  accentColor,
+                                  textColor,
+                                  subtextColor,
+                                  itemHoverBg,
+                                ),
                                 const SizedBox(height: 12),
                                 Divider(color: borderColor, height: 1),
                                 const SizedBox(height: 12),
                                 Padding(
-                                  padding: const EdgeInsets.only(left: 10, bottom: 8),
+                                  padding: const EdgeInsets.only(
+                                    left: 10,
+                                    bottom: 8,
+                                  ),
                                   child: Text(
                                     'PLATFORM',
                                     style: TextStyle(
@@ -202,7 +274,16 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                                     ),
                                   ),
                                 ),
-                                _buildSidebarItem(Icons.info_outline_rounded, 'System & About', _WebSettingsTab.system, isDark, accentColor, textColor, subtextColor, itemHoverBg),
+                                _buildSidebarItem(
+                                  Icons.info_outline_rounded,
+                                  'System & About',
+                                  _WebSettingsTab.system,
+                                  isDark,
+                                  accentColor,
+                                  textColor,
+                                  subtextColor,
+                                  itemHoverBg,
+                                ),
                               ],
                             ),
                           ),
@@ -230,13 +311,19 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
 
                   // ── BOTTOM MODAL ACTIONS FOOTER ───────────────────────────
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isNarrow ? 12 : 24,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: sidebarBg,
                       border: Border(top: BorderSide(color: borderColor)),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
                         TextButton.icon(
                           onPressed: () {
@@ -245,16 +332,26 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                             setState(() {});
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: const Text('Settings reset to default values.'),
+                                content: const Text(
+                                  'Settings reset to default values.',
+                                ),
                                 backgroundColor: accentColor,
                                 duration: const Duration(seconds: 2),
                               ),
                             );
                           },
-                          icon: Icon(Icons.restart_alt_rounded, size: 16, color: subtextColor),
+                          icon: Icon(
+                            Icons.restart_alt_rounded,
+                            size: 16,
+                            color: subtextColor,
+                          ),
                           label: Text(
                             'Reset to Defaults',
-                            style: TextStyle(color: subtextColor, fontSize: 13, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              color: subtextColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                         ElevatedButton(
@@ -262,11 +359,22 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: accentColor,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
                             elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
-                          child: const Text('Done & Apply', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
+                          child: const Text(
+                            'Done & Apply',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -294,7 +402,9 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
-        color: isSelected ? accentColor.withValues(alpha: isDark ? 0.18 : 0.10) : Colors.transparent,
+        color: isSelected
+            ? accentColor.withValues(alpha: isDark ? 0.18 : 0.10)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           onTap: () => setState(() => _currentTab = tab),
@@ -305,7 +415,9 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: isSelected ? accentColor.withValues(alpha: 0.3) : Colors.transparent,
+                color: isSelected
+                    ? accentColor.withValues(alpha: 0.3)
+                    : Colors.transparent,
               ),
             ),
             child: Row(
@@ -321,8 +433,12 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                     title,
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                      color: isSelected ? (isDark ? Colors.white : accentColor) : textColor,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: isSelected
+                          ? (isDark ? Colors.white : accentColor)
+                          : textColor,
                     ),
                   ),
                 ),
@@ -356,7 +472,11 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: FilterChip(
-        avatar: Icon(icon, size: 14, color: isSelected ? Colors.white : subtextColor),
+        avatar: Icon(
+          icon,
+          size: 14,
+          color: isSelected ? Colors.white : subtextColor,
+        ),
         label: Text(title),
         labelStyle: TextStyle(
           fontSize: 12,
@@ -383,13 +503,41 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
   }) {
     switch (_currentTab) {
       case _WebSettingsTab.appearance:
-        return _buildAppearanceSection(isDark, cardBg, borderColor, textColor, subtextColor, accentColor);
+        return _buildAppearanceSection(
+          isDark,
+          cardBg,
+          borderColor,
+          textColor,
+          subtextColor,
+          accentColor,
+        );
       case _WebSettingsTab.gis:
-        return _buildGisSection(isDark, cardBg, borderColor, textColor, subtextColor, accentColor);
+        return _buildGisSection(
+          isDark,
+          cardBg,
+          borderColor,
+          textColor,
+          subtextColor,
+          accentColor,
+        );
       case _WebSettingsTab.devTools:
-        return _buildDevToolsSection(isDark, cardBg, borderColor, textColor, subtextColor, accentColor);
+        return _buildDevToolsSection(
+          isDark,
+          cardBg,
+          borderColor,
+          textColor,
+          subtextColor,
+          accentColor,
+        );
       case _WebSettingsTab.system:
-        return _buildSystemSection(isDark, cardBg, borderColor, textColor, subtextColor, accentColor);
+        return _buildSystemSection(
+          isDark,
+          cardBg,
+          borderColor,
+          textColor,
+          subtextColor,
+          accentColor,
+        );
     }
   }
 
@@ -405,7 +553,10 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildHeaderTitle('Appearance & Visual Theme', 'Choose how the RoadSense web console and map render on your monitor.'),
+        _buildHeaderTitle(
+          'Appearance & Visual Theme',
+          'Choose how the RoadSense web console and map render on your monitor.',
+        ),
         const SizedBox(height: 20),
 
         _buildSubhead('THEME MODE'),
@@ -419,7 +570,8 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                 icon: Icons.brightness_auto_rounded,
                 title: 'System Auto',
                 subtitle: 'Match OS preference',
-                isSelected: settings.themeModeNotifier.value == ThemeMode.system,
+                isSelected:
+                    settings.themeModeNotifier.value == ThemeMode.system,
                 isDark: isDark,
                 accentColor: accentColor,
                 borderColor: borderColor,
@@ -602,7 +754,10 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildHeaderTitle('GIS & Map Display', 'Configure map hazard overlays and surveyor markers.'),
+        _buildHeaderTitle(
+          'GIS & Map Display',
+          'Configure map hazard overlays and surveyor markers.',
+        ),
         const SizedBox(height: 20),
 
         ValueListenableBuilder<bool>(
@@ -612,7 +767,8 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
               icon: Icons.warning_amber_rounded,
               iconColor: const Color(0xFFEF4444),
               title: 'Hazard Pins Overlay',
-              description: 'Display detected pothole markers and surveyor inspection points on the active map.',
+              description:
+                  'Display detected pothole markers and surveyor inspection points on the active map.',
               value: showPotholes,
               onChanged: (val) {
                 settings.toggleShowPotholes(val);
@@ -643,10 +799,13 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildHeaderTitle('Developer & Testing Tools', 'Simulate field inspections, place custom test hazards, and adjust GPS coordinates.'),
+        _buildHeaderTitle(
+          'Developer & Testing Tools',
+          'Simulate field inspections, place custom test hazards, and adjust GPS coordinates.',
+        ),
         const SizedBox(height: 20),
 
-        // 1. Manual Pothole Placement Card with Action Button
+        // 1. Open custom marker editor Card with Action Button
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
@@ -665,16 +824,30 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                       color: const Color(0xFF10B981).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.add_location_alt_rounded, color: Color(0xFF10B981), size: 20),
+                    child: const Icon(
+                      Icons.add_location_alt_rounded,
+                      color: Color(0xFF10B981),
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Manual Pothole Placement', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
+                        Text(
+                          'Open custom marker editor',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                        ),
                         const SizedBox(height: 2),
-                        Text('Place custom GPS coordinate test markers anywhere on the map.', style: TextStyle(fontSize: 11.5, color: subtextColor)),
+                        Text(
+                          'Choose all four classes and coordinates. Saved only on this device/browser.',
+                          style: TextStyle(fontSize: 11.5, color: subtextColor),
+                        ),
                       ],
                     ),
                   ),
@@ -701,7 +874,7 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Directly launch placement mode on the live map canvas:',
+                      'Open the local editor using the current map center:',
                       style: TextStyle(fontSize: 11.5, color: subtextColor),
                     ),
                   ),
@@ -713,18 +886,36 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Manual Pothole Placement active. Click anywhere on the map to place a pin.'),
+                          content: Text(
+                            'Custom markers are saved locally. No report is submitted.',
+                          ),
                           backgroundColor: Color(0xFF10B981),
                           duration: Duration(seconds: 4),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.touch_app_rounded, size: 16, color: Colors.white),
-                    label: const Text('Place Pin on Map', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                    icon: const Icon(
+                      Icons.touch_app_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Open editor',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF10B981),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                 ],
@@ -754,16 +945,30 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                       color: const Color(0xFF6366F1).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.my_location_rounded, color: Color(0xFF6366F1), size: 20),
+                    child: const Icon(
+                      Icons.my_location_rounded,
+                      color: Color(0xFF6366F1),
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Manual GPS Location (Draggable Pin)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
+                        Text(
+                          'Manual GPS Location (Draggable Pin)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                        ),
                         const SizedBox(height: 2),
-                        Text('Override live GPS and drag current position pin for route testing.', style: TextStyle(fontSize: 11.5, color: subtextColor)),
+                        Text(
+                          'Override live GPS and drag current position pin for route testing.',
+                          style: TextStyle(fontSize: 11.5, color: subtextColor),
+                        ),
                       ],
                     ),
                   ),
@@ -802,18 +1007,36 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('GPS Location Editing active. Drag your location marker on the map.'),
+                          content: Text(
+                            'GPS Location Editing active. Drag your location marker on the map.',
+                          ),
                           backgroundColor: Color(0xFF6366F1),
                           duration: Duration(seconds: 4),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.edit_location_alt_rounded, size: 16, color: Colors.white),
-                    label: const Text('Edit GPS Location', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                    icon: const Icon(
+                      Icons.edit_location_alt_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Edit GPS Location',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF6366F1),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                 ],
@@ -824,6 +1047,9 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
 
         const SizedBox(height: 16),
 
+        // Developer controls are explicit; there is no built-in sample layer.
+        const SizedBox(height: 16),
+
         // 3. Master Mock Mode Switch
         ValueListenableBuilder<bool>(
           valueListenable: settings.devMockModeNotifier,
@@ -831,8 +1057,9 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
             return _buildToggleCard(
               icon: Icons.biotech_rounded,
               iconColor: const Color(0xFFEC4899),
-              title: 'Master Simulation & Mock Mode',
-              description: 'Enable developer mock telemetry and simulation route events on the web dashboard.',
+              title: 'Developer options',
+              description:
+                  'Show the Custom markers map button. Add or edit any of the four classes locally; nothing is submitted.',
               value: mockMode,
               onChanged: (val) {
                 settings.toggleDevMockMode(val);
@@ -863,7 +1090,10 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildHeaderTitle('System & Diagnostics', 'Platform telemetry and service connectivity.'),
+        _buildHeaderTitle(
+          'System & Diagnostics',
+          'Platform telemetry and service connectivity.',
+        ),
         const SizedBox(height: 20),
 
         Container(
@@ -874,10 +1104,43 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
           ),
           child: Column(
             children: [
-              _buildDiagnosticRow(Icons.layers_rounded, 'Platform Core', 'RoadSense AI Web Console v2.4.0 (Enterprise)', const Color(0xFF0284C7), textColor, subtextColor, borderColor),
-              _buildDiagnosticRow(Icons.cloud_done_rounded, 'Database Backend', 'Google Cloud Firestore Real-Time (Connected)', const Color(0xFF10B981), textColor, subtextColor, borderColor),
-              _buildDiagnosticRow(Icons.map_rounded, 'Cartography Engine', 'Geoapify & OpenStreetMap Vector Engine', const Color(0xFF10B981), textColor, subtextColor, borderColor),
-              _buildDiagnosticRow(Icons.alt_route_rounded, 'Avoidance Routing', 'OpenRouteService Safety Dispatch (Active)', const Color(0xFF10B981), textColor, subtextColor, borderColor, isLast: true),
+              _buildDiagnosticRow(
+                Icons.layers_rounded,
+                'Platform Core',
+                'RoadSense AI Web Console v2.4.0 (Enterprise)',
+                const Color(0xFF0284C7),
+                textColor,
+                subtextColor,
+                borderColor,
+              ),
+              _buildDiagnosticRow(
+                Icons.cloud_done_rounded,
+                'Database Backend',
+                'Google Cloud Firestore Real-Time (Connected)',
+                const Color(0xFF10B981),
+                textColor,
+                subtextColor,
+                borderColor,
+              ),
+              _buildDiagnosticRow(
+                Icons.map_rounded,
+                'Cartography Engine',
+                'Geoapify & OpenStreetMap Vector Engine',
+                const Color(0xFF10B981),
+                textColor,
+                subtextColor,
+                borderColor,
+              ),
+              _buildDiagnosticRow(
+                Icons.alt_route_rounded,
+                'Avoidance Routing',
+                'OpenRouteService Safety Dispatch (Active)',
+                const Color(0xFF10B981),
+                textColor,
+                subtextColor,
+                borderColor,
+                isLast: true,
+              ),
             ],
           ),
         ),
@@ -893,14 +1156,28 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 22),
+              const Icon(
+                Icons.verified_rounded,
+                color: Color(0xFF10B981),
+                size: 22,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Enterprise Security & Privacy Enforced', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor)),
-                    Text('All geospatial coordinates and surveyor reports are encrypted in transit via TLS 1.3.', style: TextStyle(fontSize: 11.5, color: subtextColor)),
+                    Text(
+                      'Enterprise Security & Privacy Enforced',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                    Text(
+                      'All geospatial coordinates and surveyor reports are encrypted in transit via TLS 1.3.',
+                      style: TextStyle(fontSize: 11.5, color: subtextColor),
+                    ),
                   ],
                 ),
               ),
@@ -916,9 +1193,15 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 4),
-        Text(subtitle, style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B))),
+        Text(
+          subtitle,
+          style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+        ),
       ],
     );
   }
@@ -926,7 +1209,12 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
   Widget _buildSubhead(String title) {
     return Text(
       title,
-      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8), letterSpacing: 0.8),
+      style: const TextStyle(
+        fontSize: 10.5,
+        fontWeight: FontWeight.w800,
+        color: Color(0xFF94A3B8),
+        letterSpacing: 0.8,
+      ),
     );
   }
 
@@ -966,9 +1254,17 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(icon, size: 22, color: isSelected ? accentColor : subtextColor),
+                  Icon(
+                    icon,
+                    size: 22,
+                    color: isSelected ? accentColor : subtextColor,
+                  ),
                   if (isSelected)
-                    Icon(Icons.check_circle_rounded, size: 16, color: accentColor),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 16,
+                      color: accentColor,
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -977,13 +1273,19 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
-                  color: isSelected ? (isDark ? Colors.white : accentColor) : textColor,
+                  color: isSelected
+                      ? (isDark ? Colors.white : accentColor)
+                      : textColor,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: TextStyle(fontSize: 11, color: subtextColor, height: 1.3),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: subtextColor,
+                  height: 1.3,
+                ),
               ),
             ],
           ),
@@ -1028,9 +1330,23 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: textColor)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(description, style: TextStyle(fontSize: 11.5, color: subtextColor, height: 1.35)),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: subtextColor,
+                    height: 1.35,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1064,17 +1380,31 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
         children: [
           Icon(icon, size: 18, color: subtextColor),
           const SizedBox(width: 12),
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
           const Spacer(),
           Container(
             width: 8,
             height: 8,
-            decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 8),
           Text(
             status,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: subtextColor),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: subtextColor,
+            ),
           ),
         ],
       ),
@@ -1088,7 +1418,13 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
 /// ─────────────────────────────────────────────────────────────────────────────
 class MobileSettingsSheet extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
-  const MobileSettingsSheet({super.key, this.onSettingsChanged});
+  final VoidCallback? onReplayTour;
+
+  const MobileSettingsSheet({
+    super.key,
+    this.onSettingsChanged,
+    this.onReplayTour,
+  });
 
   @override
   State<MobileSettingsSheet> createState() => _MobileSettingsSheetState();
@@ -1112,254 +1448,515 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
         final borderColor = AppDesign.border(isDark);
         final accentColor = AppDesign.accent(isDark);
 
-        return Container(
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Drag Handle
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: subtextColor.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
+        return SafeArea(
+          top: false,
+          child: Container(
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Drag Handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: subtextColor.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-              // Title
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
+                // Title
+                Row(
+                  children: [
+                    const RoadSenseLogo(size: 32),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'RoadSense Settings',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                            ),
+                          ),
+                          Text(
+                            'Appearance & Map Layers',
+                            style: TextStyle(fontSize: 12, color: subtextColor),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Icon(Icons.tune_rounded, color: accentColor, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                    IconButton(
+                      constraints: const BoxConstraints(
+                        minWidth: 48,
+                        minHeight: 48,
+                      ),
+                      tooltip: 'Close settings',
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: subtextColor,
+                        size: 22,
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(color: borderColor, height: 1),
+                const SizedBox(height: 14),
+
+                Flexible(
+                  child: SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'RoadSense Settings',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                        // SECTION 1: THEME & DISPLAY
+                        _buildSectionHeader(
+                          'APPEARANCE & DISPLAY',
+                          Icons.dark_mode_rounded,
+                          accentColor,
                         ),
-                        Text(
-                          'Appearance & Map Layers',
-                          style: TextStyle(fontSize: 12, color: subtextColor),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    isDark
+                                        ? Icons.dark_mode_rounded
+                                        : Icons.light_mode_rounded,
+                                    color: isDark
+                                        ? AppDesign.accent(isDark)
+                                        : AppDesign.warning,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Theme Mode',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        Text(
+                                          isDark
+                                              ? 'Dark Theme (Midnight mode)'
+                                              : 'Light Theme (Daylight mode)',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: subtextColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Switch(
+                                    value: isDark,
+                                    activeTrackColor: accentColor,
+                                    onChanged: (val) {
+                                      settings.toggleTheme(val);
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.contrast_rounded,
+                                    color: accentColor,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'High-Contrast Black & White',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Monochrome display for sunlight visibility & anti-glare',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: subtextColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable:
+                                        settings.highContrastMonochromeNotifier,
+                                    builder: (context, isBw, _) {
+                                      return Switch(
+                                        value: isBw,
+                                        activeTrackColor: accentColor,
+                                        onChanged: (val) {
+                                          settings.toggleHighContrastMonochrome(
+                                            val,
+                                          );
+                                          widget.onSettingsChanged?.call();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Color(0xFFEF4444),
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Road Defect Markers Layer',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Show or hide reported defect pins on map view',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: subtextColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable:
+                                        settings.showPotholesNotifier,
+                                    builder: (context, showPotholes, _) {
+                                      return Switch(
+                                        value: showPotholes,
+                                        activeTrackColor: accentColor,
+                                        onChanged: (val) {
+                                          settings.toggleShowPotholes(val);
+                                          widget.onSettingsChanged?.call();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // SECTION 2: DEVELOPER & SIMULATION TOOLS
+                        _buildSectionHeader(
+                          'DEVELOPER & SIMULATION TOOLS',
+                          Icons.science_rounded,
+                          accentColor,
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: accentColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  Icons.developer_mode_rounded,
+                                  color: accentColor,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Developer options',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Show the Custom markers map button for local class and coordinate editing. Turn off to hide test markers.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: subtextColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              ValueListenableBuilder<bool>(
+                                valueListenable: settings.devMockModeNotifier,
+                                builder: (context, isDevMock, _) {
+                                  return Switch(
+                                    value: isDevMock,
+                                    activeTrackColor: accentColor,
+                                    onChanged: (val) {
+                                      settings.toggleDevMockMode(val);
+                                      widget.onSettingsChanged?.call();
+                                    },
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // SECTION 3: HELP & APP TOUR
+                        _buildSectionHeader(
+                          'HELP & APP TOUR',
+                          Icons.help_outline_rounded,
+                          accentColor,
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  Navigator.of(context).pop();
+                                  if (widget.onReplayTour != null) {
+                                    widget.onReplayTour!.call();
+                                  } else {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (ctx) => OnboardingScreen(
+                                          isReviewMode: true,
+                                          onComplete: () =>
+                                              Navigator.of(ctx).pop(),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 56,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: accentColor.withValues(
+                                              alpha: 0.14,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.explore_rounded,
+                                            color: accentColor,
+                                            size: 22,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Help & app tour',
+                                                style: TextStyle(
+                                                  fontSize: 14.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: textColor,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Replay interactive spotlight walkthrough for Map, Scanner & Review',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: subtextColor,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.arrow_forward_ios_rounded,
+                                          color: subtextColor,
+                                          size: 14,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Divider(color: borderColor, height: 8),
+                              InkWell(
+                                onTap: () {
+                                  Navigator.of(context).pop();
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (ctx) => OnboardingScreen(
+                                        isReviewMode: true,
+                                        onComplete: () =>
+                                            Navigator.of(ctx).pop(),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 52,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: AppDesign.success.withValues(
+                                              alpha: 0.15,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.menu_book_rounded,
+                                            color: AppDesign.success,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Defect Guide & SLAs',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: textColor,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Review DPWH classes (pothole, alligator, longitudinal & transverse cracks)',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: subtextColor,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.arrow_forward_ios_rounded,
+                                          color: subtextColor,
+                                          size: 14,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: Icon(Icons.close_rounded, color: subtextColor, size: 22),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
                     onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Divider(color: borderColor, height: 1),
-              const SizedBox(height: 14),
-
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // SECTION 1: THEME & DISPLAY
-                      _buildSectionHeader('APPEARANCE & DISPLAY', Icons.dark_mode_rounded, accentColor),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: cardColor,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: borderColor),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-                                  color: isDark ? AppDesign.accent(isDark) : AppDesign.warning,
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Theme Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textColor)),
-                                      Text(isDark ? 'Dark Theme (Midnight mode)' : 'Light Theme (Daylight mode)', style: TextStyle(fontSize: 12, color: subtextColor)),
-                                    ],
-                                  ),
-                                ),
-                                Switch(
-                                  value: isDark,
-                                  activeTrackColor: accentColor,
-                                  onChanged: (val) {
-                                    settings.toggleTheme(val);
-                                  },
-                                ),
-                              ],
-                            ),
-                            Divider(color: borderColor, height: 20),
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.contrast_rounded,
-                                  color: accentColor,
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'High-Contrast Black & White',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: textColor,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Monochrome display for sunlight visibility & anti-glare',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: subtextColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                ValueListenableBuilder<bool>(
-                                  valueListenable:
-                                      settings.highContrastMonochromeNotifier,
-                                  builder: (context, isBw, _) {
-                                    return Switch(
-                                      value: isBw,
-                                      activeTrackColor: accentColor,
-                                      onChanged: (val) {
-                                        settings.toggleHighContrastMonochrome(val);
-                                        widget.onSettingsChanged?.call();
-                                      },
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                            Divider(color: borderColor, height: 20),
-                            Row(
-                              children: [
-                                const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 22),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Pothole Markers Layer', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textColor)),
-                                      Text('Show or hide pothole markers on map view', style: TextStyle(fontSize: 12, color: subtextColor)),
-                                    ],
-                                  ),
-                                ),
-                                ValueListenableBuilder<bool>(
-                                  valueListenable: settings.showPotholesNotifier,
-                                  builder: (context, showPotholes, _) {
-                                    return Switch(
-                                      value: showPotholes,
-                                      activeTrackColor: accentColor,
-                                      onChanged: (val) {
-                                        settings.toggleShowPotholes(val);
-                                        widget.onSettingsChanged?.call();
-                                      },
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                    style: AppDesign.primaryButtonStyle(isDark: isDark),
+                    child: const Text(
+                      'Done',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 16),
-                      // SECTION 2: DEVELOPER & SIMULATION TOOLS
-                      _buildSectionHeader('DEVELOPER & SIMULATION TOOLS', Icons.science_rounded, accentColor),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: cardColor,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: borderColor),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: accentColor.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(Icons.developer_mode_rounded, color: accentColor, size: 22),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Developer Mock Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textColor)),
-                                  const SizedBox(height: 2),
-                                  Text('Show right-side map buttons for custom GPS location & custom marker placement', style: TextStyle(fontSize: 12, color: subtextColor)),
-                                ],
-                              ),
-                            ),
-                            ValueListenableBuilder<bool>(
-                              valueListenable: settings.devMockModeNotifier,
-                              builder: (context, isDevMock, _) {
-                                return Switch(
-                                  value: isDevMock,
-                                  activeTrackColor: accentColor,
-                                  onChanged: (val) {
-                                    settings.toggleDevMockMode(val);
-                                    widget.onSettingsChanged?.call();
-                                  },
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                height: 44,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Done', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

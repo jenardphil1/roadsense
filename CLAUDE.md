@@ -49,3 +49,7 @@ Claude has direct access to the following skills configured in `.claude/skills/`
 
 ### Token & Code Efficiency (Honey Suite):
 - **`honey`**, **`honey-chat`**, **`honey-review`**, **`honey-memory`**, **`honey-superpowers`**, **`honey-loop`**, **`honey-ccr`**, **`honey-px`**, **`honey-eco`**, **`honey-debt`**, **`honey-compress`**, **`honey-gain`**, **`honey-hive`**.
+
+## Complete skills catalog
+
+See [AGENTS.md](AGENTS.md) for all project and machine-installed skills and the instructions for selecting and loading them.

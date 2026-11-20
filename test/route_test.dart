@@ -145,15 +145,20 @@ void main() {
         pointB,
       ];
 
-      final bool isUsingCustomOrigin = true;
       final userGpsPos = const LatLng(14.810, 120.980); // Far away GPS position
 
-      final routeForChecks = isUsingCustomOrigin
-          ? activeRoute
-          : [userGpsPos, ...activeRoute];
+      List<LatLng> buildRouteForOrigin({required bool isUsingCustomOrigin}) {
+        return isUsingCustomOrigin
+            ? activeRoute
+            : [userGpsPos, ...activeRoute];
+      }
+
+      final routeForChecks = buildRouteForOrigin(isUsingCustomOrigin: true);
+      final defaultGpsRoute = buildRouteForOrigin(isUsingCustomOrigin: false);
 
       expect(routeForChecks.first, equals(pointA));
       expect(routeForChecks.first, isNot(equals(userGpsPos)));
+      expect(defaultGpsRoute.first, equals(userGpsPos));
     },
   );
 }

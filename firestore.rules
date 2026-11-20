@@ -6,6 +6,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function emailVerified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
     function userDoc(uid) {
       return get(/databases/$(database)/documents/users/$(uid));
     }
@@ -18,15 +22,24 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return role() in ['admin', 'super_admin'];
+      return emailVerified() && role() in ['admin', 'super_admin'];
     }
 
     function isSuperAdmin() {
-      return role() == 'super_admin';
+      return emailVerified() && role() == 'super_admin';
     }
 
     function validRole(value) {
       return value in ['user', 'admin', 'super_admin'];
+    }
+
+    function supportedReportClass(data) {
+      let name = data.get('primaryDefect', 'Pothole');
+      let code = data.get('primaryDpwhCode', 'CODE 01');
+      return (name == 'Pothole' && code == 'CODE 01' && data.get('primaryClassId', 0) == 0)
+        || (name == 'Alligator crack' && code == 'CODE 02' && data.get('primaryClassId', 1) == 1)
+        || (name == 'Longitudinal crack' && code == 'CODE 12' && data.get('primaryClassId', 3) == 3)
+        || (name == 'Transverse crack' && code == 'CODE 12' && data.get('primaryClassId', 4) == 4);
     }
 
     function validPotholeCreate() {
@@ -34,9 +47,15 @@ service cloud.firestore {
           'latitude', 'longitude', 'imageUrl', 'status', 'overallSeverity',
           'potholeCount', 'detections', 'reporterUid', 'reporterEmail',
           'reporterName', 'reporterPhotoUrl', 'timestamp', 'autoApproved',
-          'approvedAt'
+          'approvedAt', 'primaryDpwhCode', 'primaryDefect', 'responseTime',
+          'correctiveMeasure', 'barangay', 'city', 'province', 'formattedAddress',
+          'primaryClassId', 'modelId', 'note'
         ])
+        && (!request.resource.data.keys().hasAny(['note'])
+          || (request.resource.data.note is string && request.resource.data.note.size() <= 1000))
         && request.resource.data.reporterUid == request.auth.uid
+        && supportedReportClass(request.resource.data)
+        && request.resource.data.get('modelId', 'dpwh-package6') == 'dpwh-package6'
         && request.resource.data.reporterEmail == request.auth.token.email
         && request.resource.data.latitude is number
         && request.resource.data.latitude >= -90
@@ -45,9 +64,9 @@ service cloud.firestore {
         && request.resource.data.longitude >= -180
         && request.resource.data.longitude <= 180
         && request.resource.data.imageUrl is string
-        && request.resource.data.imageUrl.matches(
+        && (request.resource.data.imageUrl == '' || request.resource.data.imageUrl.matches(
           'https://potholestorage2026[.]blob[.]core[.]windows[.]net/photos/.*'
-        )
+        ))
         && request.resource.data.overallSeverity in ['low', 'medium', 'high']
         && request.resource.data.potholeCount is int
         && request.resource.data.potholeCount >= 1
@@ -62,47 +81,101 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
-        && request.resource.data.role == 'user';
-      allow update: if isSuperAdmin()
-        && validRole(request.resource.data.role)
+        && request.resource.data.role == 'user'
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'firstName', 'lastName',
+          'photoUrl', 'role', 'lastLogin'
+        ])
+        && (
+          request.auth.token.email == null
+          || request.resource.data.email == request.auth.token.email
+        );
+      allow update: if (emailVerified() && isSuperAdmin() && validRole(request.resource.data.role))
         || (signedIn()
           && request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'displayName', 'firstName', 'lastName', 'phoneNumber', 'photoUrl',
-            'lastLogin', 'updatedAt', 'isEmailVerified', 'isVerified',
-            'emailVerifiedAt', 'verifiedAt', 'verificationCode', 'codeCreatedAt'
+            'lastLogin', 'updatedAt'
           ]));
       allow delete: if false;
     }
 
     match /potholes/{potholeId} {
-      allow read: if true;
-      allow create: if signedIn() && validPotholeCreate();
+      // Signed-in users can view the map and road reports; submitting or modifying
+      // hazard reports requires email verification.
+      allow read: if signedIn();
+      allow create: if emailVerified() && validPotholeCreate();
       allow update: if isAdmin()
-        || (signedIn()
+        || (emailVerified()
             && resource.data.reporterUid == request.auth.uid
-            && resource.data.status != 'approved'
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'overallSeverity', 'potholeCount', 'latitude', 'longitude', 'note',
+              'primaryDpwhCode', 'primaryDefect', 'responseTime', 'correctiveMeasure',
+              'lastEditedAt', 'lastEditedBy', 'primaryClassId', 'modelId'
+            ])
+            && request.resource.data.overallSeverity in ['low', 'medium', 'high']
+            && request.resource.data.potholeCount is int
+            && request.resource.data.potholeCount >= 1
+            && request.resource.data.potholeCount <= 100
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'primaryClassId', 'primaryDefect', 'primaryDpwhCode', 'modelId'
+              ]) || supportedReportClass(request.resource.data))
+            && request.resource.data.latitude is number
+            && request.resource.data.latitude >= -90
+            && request.resource.data.latitude <= 90
+            && request.resource.data.longitude is number
+            && request.resource.data.longitude >= -180
+            && request.resource.data.longitude <= 180)
+        || (emailVerified()
+            && resource.data.reporterUid == request.auth.uid
+            && (resource.data.status == 'pending'
+              || (resource.data.status == 'deleted'
+                && resource.data.get('previousStatus', 'pending') == 'pending'))
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'status', 'previousStatus', 'deletedAt', 'deletedBy', 'restoredAt', 'restoredBy'
             ])
             && request.resource.data.status in ['deleted', 'pending']);
       allow delete: if isAdmin()
-        || (signedIn()
+        || (emailVerified()
             && resource.data.reporterUid == request.auth.uid
-            && resource.data.status != 'approved');
+            && (resource.data.status == 'pending'
+              || (resource.data.status == 'deleted'
+                && resource.data.get('previousStatus', 'pending') == 'pending')));
     }
 
     match /settings/system {
-      allow read: if signedIn();
-      allow write: if isAdmin()
+      allow read: if emailVerified();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'autoAcceptPotholes', 'updatedAt', 'updatedBy'
+        ]);
+      allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'autoAcceptPotholes', 'updatedAt', 'updatedBy'
         ]);
     }
 
-    // Verification codes and outbound email must be handled by trusted backend
-    // code (Admin SDK bypasses rules), never by an untrusted mobile/web client.
+    // Verification hashes, rate-limit counters, and outbound email must only be
+    // touched by trusted Cloud Functions via Admin SDK (which bypasses rules).
+    match /emailVerifications/{uid} {
+      allow read, write: if false;
+    }
+
+    match /emailVerificationIpLimits/{ipHash} {
+      allow read, write: if false;
+    }
+
+    match /_emulatorMailSink/{messageId} {
+      allow read, write: if false;
+    }
+
     match /mail/{messageId} {
+      allow read, write: if false;
+    }
+
+    match /uploadUrlLimits/{uid} {
       allow read, write: if false;
     }
 

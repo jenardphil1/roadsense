@@ -3,16 +3,30 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'cloud_service.dart';
 import 'app_settings.dart';
+import 'app_design.dart';
+import 'mobile_components.dart';
+import 'email_verification_client.dart';
+import 'email_verification_view.dart';
 
 /// State-of-the-Art Enterprise Auth Portal for RoadSense GIS & Hazard Platform
 class AuthScreen extends StatefulWidget {
   final VoidCallback onAuthSuccess;
+  final User? pendingVerificationUser;
+  final String? initialPendingVerificationEmail;
+  final EmailVerificationBackend? verificationBackend;
 
-  const AuthScreen({super.key, required this.onAuthSuccess});
+  const AuthScreen({
+    super.key,
+    required this.onAuthSuccess,
+    this.pendingVerificationUser,
+    this.initialPendingVerificationEmail,
+    this.verificationBackend,
+  });
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -24,6 +38,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _rememberMe = true;
+  bool _isMapExploreMode = false;
+  bool _showVerificationView = false;
+  EmailVerificationStatus? _verificationInitialStatus;
+  String? _verificationInitialError;
+  String? _verificationInitialInfo;
+  bool _verificationFetchStatusOnMount = true;
+  bool _verificationAutoSendIfMissing = false;
   String? _errorTitle;
   String? _errorMessage;
   String? _successMessage;
@@ -58,18 +79,48 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       parent: _entranceController,
       curve: const Interval(0.0, 0.85, curve: Curves.easeOutCubic),
     );
-    _entranceSlide = Tween<Offset>(
-      begin: const Offset(0.0, 0.06),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _entranceController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _entranceSlide =
+        Tween<Offset>(begin: const Offset(0.0, 0.06), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
     _entranceController.forward();
+    if (widget.pendingVerificationUser != null ||
+        widget.initialPendingVerificationEmail != null) {
+      _showVerificationView = true;
+      _verificationFetchStatusOnMount = true;
+      _verificationAutoSendIfMissing = false;
+    }
     if (kIsWeb) {
       _checkRedirectResult();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant AuthScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isLoading) return;
+    if (widget.pendingVerificationUser != null &&
+        (oldWidget.pendingVerificationUser?.uid !=
+                widget.pendingVerificationUser?.uid ||
+            !_showVerificationView)) {
+      setState(() {
+        _isMapExploreMode = false;
+        _showVerificationView = true;
+        _verificationInitialStatus = null;
+        _verificationInitialError = null;
+        _verificationInitialInfo = null;
+        _verificationFetchStatusOnMount = true;
+        _verificationAutoSendIfMissing = false;
+      });
+    } else if (widget.pendingVerificationUser == null &&
+        oldWidget.pendingVerificationUser != null &&
+        _showVerificationView) {
+      setState(() {
+        _showVerificationView = false;
+      });
     }
   }
 
@@ -87,6 +138,16 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       } else {
         _modeController.reverse();
       }
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _radarController.stop();
+    } else if (!_radarController.isAnimating) {
+      _radarController.repeat();
     }
   }
 
@@ -123,31 +184,41 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           mapController: _authMapController,
           options: MapOptions(
             initialCenter: const LatLng(14.9152, 120.8229),
-            initialZoom: 15.5,
-            interactionOptions:
-                const InteractionOptions(flags: InteractiveFlag.none),
+            initialZoom: 14.5,
+            minZoom: 5,
+            maxZoom: 19,
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+            ),
           ),
           children: [
             TileLayer(
-              urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.pothole_scanner',
               tileDisplay: const TileDisplay.fadeIn(
                 duration: Duration(milliseconds: 150),
               ),
             ),
+            const MarkerLayer(markers: []),
           ],
         ),
-        // Legibility scrim over the map
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.30),
-                Colors.black.withValues(alpha: 0.38),
-              ],
+        // Legibility scrim over the map (IgnorePointer ensures touches reach map)
+        IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: isDark
+                    ? [
+                        Colors.black.withValues(alpha: 0.35),
+                        Colors.black.withValues(alpha: 0.50),
+                      ]
+                    : [
+                        Colors.black.withValues(alpha: 0.18),
+                        Colors.black.withValues(alpha: 0.32),
+                      ],
+              ),
             ),
           ),
         ),
@@ -155,532 +226,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Email Verification Dialog ────────────────────────────────────────────────
-
-  /// Shows the email verification dialog (dual-mode: 6-digit code or email link).
-  /// Automatically sends the verification email first when logging in.
-  /// Returns true when successfully verified.
-  Future<bool> _showEmailVerificationDialog({bool isNewSignUp = false}) async {
-    int cooldownSeconds = 0;
-    int sendAttempts = isNewSignUp ? 1 : 0;
-    const maxAttempts = 5;
-    bool isSubmitting = false;
-    String? dialogError;
-    String? dialogInfo;
-    Timer? timer;
-    final codeController = TextEditingController();
-
-    void startCooldown(StateSetter setDialogState, [int seconds = 60]) {
-      cooldownSeconds = seconds;
-      timer?.cancel();
-      timer = Timer.periodic(const Duration(seconds: 1), (t) {
-        if (cooldownSeconds <= 0) {
-          t.cancel();
-          setDialogState(() {});
-        } else {
-          setDialogState(() => cooldownSeconds--);
-        }
-      });
-    }
-
-    // Only send if this isn't immediately after signUp (signUp already sent it)
-    if (!isNewSignUp) {
-      try {
-        final res = await CloudService.instance.sendCustomEmailVerificationCode();
-        sendAttempts = 1;
-        dialogInfo = res;
-      } catch (e) {
-        dialogError = 'Failed to trigger verification email: $e';
-      }
-    } else {
-      dialogInfo = 'Verification email sent! Check your inbox and Spam folder.';
-    }
-
-    if (!mounted) return false;
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            // Start cooldown after first send
-            if (sendAttempts >= 1 && cooldownSeconds == 0 && timer == null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                startCooldown(setDialogState, 45);
-              });
-            }
-
-            final currentUser = FirebaseAuth.instance.currentUser;
-            final userEmail = _emailController.text.trim().isNotEmpty
-                ? _emailController.text.trim()
-                : (currentUser?.email ?? 'your email');
-
-            Future<void> verifyViaCode() async {
-              final code = codeController.text.trim();
-              if (code.length != 6) {
-                setDialogState(() {
-                  dialogError = 'Please enter a valid 6-digit verification code.';
-                  dialogInfo = null;
-                });
-                return;
-              }
-              setDialogState(() {
-                isSubmitting = true;
-                dialogError = null;
-                dialogInfo = null;
-              });
-
-              final uid = currentUser?.uid ?? '';
-              final ok = await CloudService.instance.verifyUserSecurityCode(
-                uid: uid,
-                code: code,
-              );
-              setDialogState(() => isSubmitting = false);
-              if (ok) {
-                timer?.cancel();
-                if (ctx.mounted) Navigator.of(ctx).pop(true);
-              } else {
-                setDialogState(() => dialogError =
-                    'Invalid 6-digit code. Please check your email or tap Resend.');
-              }
-            }
-
-            Future<void> verifyViaLink() async {
-              setDialogState(() {
-                isSubmitting = true;
-                dialogError = null;
-                dialogInfo = null;
-              });
-              final ok = await CloudService.instance.checkNativeEmailVerified();
-              setDialogState(() => isSubmitting = false);
-              if (ok) {
-                timer?.cancel();
-                if (ctx.mounted) Navigator.of(ctx).pop(true);
-              } else {
-                setDialogState(() => dialogError =
-                    'Not verified yet. Click the "Verify email" link inside the email we sent you, then tap this button again.');
-              }
-            }
-
-            Future<void> resendCode() async {
-              if (sendAttempts >= maxAttempts || cooldownSeconds > 0) return;
-              setDialogState(() {
-                isSubmitting = true;
-                dialogError = null;
-                dialogInfo = null;
-              });
-              sendAttempts++;
-              try {
-                final res = await CloudService.instance.sendCustomEmailVerificationCode();
-                startCooldown(setDialogState, 60);
-                setDialogState(() {
-                  dialogInfo = res;
-                  isSubmitting = false;
-                });
-              } catch (e) {
-                setDialogState(() {
-                  dialogError = 'Failed to resend code. Please try again.';
-                  isSubmitting = false;
-                });
-              }
-            }
-
-            Future<void> revealFallbackCode() async {
-              if (currentUser == null) return;
-              final code = await CloudService.instance.getActiveVerificationCode(currentUser.uid);
-              if (code != null && code.isNotEmpty) {
-                setDialogState(() {
-                  codeController.text = code;
-                  dialogInfo = 'Loaded active 6-digit security code: $code';
-                  dialogError = null;
-                });
-              } else {
-                setDialogState(() {
-                  dialogError = 'No active security code found in database. Tap Resend to generate one.';
-                });
-              }
-            }
-
-            final isDark = AppSettings.instance.isDarkMode;
-            final dialogBg = isDark ? const Color(0xFF131D2E) : Colors.white;
-            final boxFill = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-            final boxBorder = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-            final boxText = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-            final focusColor = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
-
-            return Dialog(
-              backgroundColor: dialogBg,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: BorderSide(color: isDark ? const Color(0xFF1E293B) : Colors.transparent),
-              ),
-              clipBehavior: Clip.antiAlias,
-              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Header
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0F172A),
-                        ),
-                        child: Column(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: const Color(0xFF0284C7), width: 1.5),
-                              ),
-                              child: const Icon(
-                                Icons.verified_user_rounded,
-                                color: Color(0xFF38BDF8),
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Verify Your Account',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'A verification link & security code were sent to:\n$userEmail',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Color(0xFF94A3B8),
-                                fontSize: 12.5,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Body
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Spam Folder Alert Tip
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
-                                  width: 1,
-                                ),
-                              ),
-                              child: const Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 17),
-                                  SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Check your Spam / Junk folder if you do not see the email in your inbox within a minute.',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFFB45309),
-                                        fontWeight: FontWeight.w500,
-                                        height: 1.35,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            // Option A: 6-Digit Code
-                            Text(
-                              'Option 1: Enter 6-Digit Code',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: boxText,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    controller: codeController,
-                                    maxLength: 6,
-                                    keyboardType: TextInputType.number,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 6,
-                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                    ),
-                                    decoration: InputDecoration(
-                                      counterText: '',
-                                      hintText: '• • • • • •',
-                                      hintStyle: TextStyle(
-                                        fontSize: 16,
-                                        letterSpacing: 4,
-                                        color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8),
-                                      ),
-                                      filled: true,
-                                      fillColor: boxFill,
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                        borderSide: BorderSide(color: boxBorder),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                        borderSide: BorderSide(color: focusColor, width: 1.5),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0D9488),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  onPressed: isSubmitting ? null : () => verifyViaCode(),
-                                  child: isSubmitting
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                        )
-                                      : const Text(
-                                          'Verify Code',
-                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                                        ),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 14),
-
-                            // Divider with OR
-                            Row(
-                              children: [
-                                Expanded(child: Divider(color: boxBorder, height: 1)),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                  child: Text(
-                                    'OR',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-                                    ),
-                                  ),
-                                ),
-                                Expanded(child: Divider(color: boxBorder, height: 1)),
-                              ],
-                            ),
-
-                            const SizedBox(height: 14),
-
-                            // Option B: Verify via Email Link Button
-                            Text(
-                              'Option 2: Click the link inside the email',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: boxText,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0284C7),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 13),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: isSubmitting ? null : () => verifyViaLink(),
-                                icon: isSubmitting
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                      )
-                                    : const Icon(Icons.mark_email_read_rounded, size: 16),
-                                label: Text(
-                                  isSubmitting ? 'Checking…' : "I've Verified via Email Link ✓",
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(height: 14),
-
-                            // Info / Success Message
-                            if (dialogInfo != null)
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                margin: const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF0D9488).withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.35)),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF0D9488), size: 16),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        dialogInfo!,
-                                        style: const TextStyle(fontSize: 12, color: Color(0xFF0F766E), fontWeight: FontWeight.w500),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                            // Error Message
-                            if (dialogError != null)
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                margin: const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFDC2626).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.35)),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 16),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        dialogError!,
-                                        style: const TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.w500),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                            // Resend Email Button
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
-                                  side: BorderSide(
-                                    color: (sendAttempts >= maxAttempts || cooldownSeconds > 0)
-                                        ? (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1))
-                                        : focusColor,
-                                  ),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: (isSubmitting || cooldownSeconds > 0 || sendAttempts >= maxAttempts)
-                                    ? null
-                                    : () => resendCode(),
-                                icon: Icon(
-                                  Icons.send_rounded,
-                                  size: 14,
-                                  color: (sendAttempts >= maxAttempts || cooldownSeconds > 0)
-                                      ? const Color(0xFF94A3B8)
-                                      : focusColor,
-                                ),
-                                label: Text(
-                                  cooldownSeconds > 0
-                                      ? 'Resend Email (${cooldownSeconds}s)'
-                                      : sendAttempts >= maxAttempts
-                                          ? 'Resend Limit Reached'
-                                          : 'Resend Verification Email',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: (sendAttempts >= maxAttempts || cooldownSeconds > 0)
-                                        ? const Color(0xFF94A3B8)
-                                        : focusColor,
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(height: 8),
-
-                            // Fallback: Instant Code Retrieval if email delivery fails
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                TextButton.icon(
-                                  onPressed: isSubmitting ? null : () => revealFallbackCode(),
-                                  icon: const Icon(Icons.key_rounded, size: 14),
-                                  label: const Text(
-                                    'Cannot receive email? (View Code)',
-                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
-                                  ),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: const Color(0xFF0D9488),
-                                    padding: EdgeInsets.zero,
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    timer?.cancel();
-                                    Navigator.of(ctx).pop(false);
-                                  },
-                                  child: Text(
-                                    'Cancel & Sign Out',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    timer?.cancel();
-    return result ?? false;
-  }
+  // ── Password Reset Dialog ────────────────────────────────────────────────────
 
   /// Displays the password reset dialog and triggers Firebase password reset email.
   Future<void> _showForgotPasswordDialog() async {
-    final resetEmailController =
-        TextEditingController(text: _emailController.text.trim());
+    final resetEmailController = TextEditingController(
+      text: _emailController.text.trim(),
+    );
     bool isSending = false;
     String? dialogMsg;
     bool isError = false;
@@ -689,36 +241,44 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          final isDark = Theme.of(ctx).brightness == Brightness.dark ||
+          final isDark =
+              Theme.of(ctx).brightness == Brightness.dark ||
               AppSettings.instance.isDarkMode;
           final dialogBg = isDark ? const Color(0xFF131D2E) : Colors.white;
-          final textColor =
-              isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-          final subColor =
-              isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+          final textColor = isDark
+              ? const Color(0xFFF8FAFC)
+              : const Color(0xFF0F172A);
+          final subColor = isDark
+              ? const Color(0xFF94A3B8)
+              : const Color(0xFF64748B);
 
           return AlertDialog(
             backgroundColor: dialogBg,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             title: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                    color: AppDesign.brandWash(isDark),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.lock_reset_rounded,
-                      color: Color(0xFF0284C7), size: 20),
+                  child: Icon(
+                    Icons.lock_reset_rounded,
+                    color: AppDesign.accent(isDark),
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Text(
                   'Reset Password',
                   style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      color: textColor),
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
                 ),
               ],
             ),
@@ -730,16 +290,22 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 children: [
                   Text(
                     'Enter your registered email address to receive password recovery instructions.',
-                    style: TextStyle(fontSize: 13, color: subColor, height: 1.45),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: subColor,
+                      height: 1.45,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: resetEmailController,
                     keyboardType: TextInputType.emailAddress,
                     style: TextStyle(color: textColor, fontSize: 14),
-                    decoration: _inputDecoration('Email Address',
-                        Icons.email_outlined,
-                        isDark: isDark),
+                    decoration: _inputDecoration(
+                      'Email Address',
+                      Icons.email_outlined,
+                      isDark: isDark,
+                    ),
                   ),
                   if (dialogMsg != null) ...[
                     const SizedBox(height: 12),
@@ -763,12 +329,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 child: Text('Cancel', style: TextStyle(color: subColor)),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
+                style: AppDesign.primaryButtonStyle(isDark: isDark),
                 onPressed: isSending
                     ? null
                     : () async {
@@ -785,8 +346,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                           dialogMsg = null;
                         });
                         try {
-                          await FirebaseAuth.instance
-                              .sendPasswordResetEmail(email: email);
+                          await FirebaseAuth.instance.sendPasswordResetEmail(
+                            email: email,
+                          );
                           setDialogState(() {
                             isSending = false;
                             dialogMsg =
@@ -809,7 +371,10 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : const Text('Send Reset Link'),
               ),
             ],
@@ -832,71 +397,27 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
     try {
       if (_isSignUp) {
-        // 1. Create Firebase Auth account
-        final fullName = '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'.trim();
+        // 1. Create Firebase Auth account and send verification link, then let
+        //    the user enter the site immediately (verification is required when
+        //    submitting pothole reports).
+        final fullName =
+            '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'
+                .trim();
         await CloudService.instance.signUp(
           email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
+          password: _passwordController.text,
           fullName: fullName.isEmpty ? 'RoadSense User' : fullName,
         );
         if (!mounted) return;
         setState(() => _isLoading = false);
-
-        // 2. Show verification dialog (isNewSignUp: true avoids double-triggering Firebase rate limits)
-        final verified = await _showEmailVerificationDialog(isNewSignUp: true);
-        if (!mounted) return;
-        if (verified) {
-          widget.onAuthSuccess();
-        } else {
-          // User cancelled — sign them out so they can't proceed without verifying
-          await CloudService.instance.signOut();
-          if (mounted) {
-            setState(() {
-              _successMessage = null;
-              _errorTitle = 'Email Not Verified';
-              _errorMessage = 'Your account was created but email verification is required. Sign in to complete verification.';
-              _isSignUp = false;
-            });
-          }
-        }
-        return;
       } else {
         // Sign In
         await CloudService.instance.signIn(
+          rememberMe: _rememberMe,
           email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
+          password: _passwordController.text,
         );
         if (!mounted) return;
-
-        // Check if the user is Google-authenticated (skip code for Google)
-        final currentUser = FirebaseAuth.instance.currentUser;
-        final isGoogle = currentUser != null &&
-            currentUser.providerData.any((p) => p.providerId == 'google.com');
-
-        if (!isGoogle) {
-          // Check email verification
-          final isVerified = await CloudService.instance.isEmailVerified();
-          if (!mounted) return;
-          if (!isVerified) {
-            setState(() => _isLoading = false);
-            // Show verification dialog (isNewSignUp: false requests a fresh code / email)
-            final verified = await _showEmailVerificationDialog(isNewSignUp: false);
-            if (!mounted) return;
-            if (verified) {
-              widget.onAuthSuccess();
-            } else {
-              // Sign out — not verified
-              await CloudService.instance.signOut();
-              if (mounted) {
-                setState(() {
-                  _errorTitle = 'Email Not Verified';
-                  _errorMessage = 'Please verify your email address to access RoadSense. Sign in again and complete the verification step.';
-                });
-              }
-            }
-            return;
-          }
-        }
       }
       widget.onAuthSuccess();
     } on FirebaseAuthException catch (e) {
@@ -906,12 +427,25 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           await showDialog(
             context: context,
             builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               title: const Row(
                 children: [
-                  Icon(Icons.mark_email_read_rounded, color: Color(0xFFDC2626), size: 24),
+                  Icon(
+                    Icons.mark_email_read_rounded,
+                    color: Color(0xFFDC2626),
+                    size: 24,
+                  ),
                   SizedBox(width: 10),
-                  Text('Email Already Registered', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  Text(
+                    'Email Already Registered',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
                 ],
               ),
               content: Column(
@@ -920,12 +454,19 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 children: [
                   const Text(
                     'An official RoadSense account is already registered under this email address:',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF475569), height: 1.4),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF475569),
+                      height: 1.4,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFEF2F2),
                       borderRadius: BorderRadius.circular(8),
@@ -933,7 +474,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                     ),
                     child: Text(
                       registeredEmail,
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF991B1B), fontSize: 13),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF991B1B),
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -946,19 +491,27 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Color(0xFF64748B)),
+                  ),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0284C7),
+                    backgroundColor: AppDesign.brand,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   onPressed: () {
                     Navigator.of(ctx).pop();
                     _switchAuthMode(false);
                   },
-                  child: const Text('Switch to Sign In', style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Switch to Sign In',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ],
             ),
@@ -967,19 +520,27 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         }
 
         String title = 'Incorrect Email or Password';
-        String message = 'The email address or password you entered is incorrect. Please check your credentials and try again.';
+        String message =
+            'The email address or password you entered is incorrect. Please check your credentials and try again.';
         if (e.code == 'operation-not-allowed') {
           title = 'Authentication Disabled';
-          message = 'Email/Password authentication is disabled in Firebase Console.';
-        } else if (e.code == 'invalid-credential' || e.code == 'wrong-password' || e.code == 'user-not-found' || e.code == 'invalid-email') {
+          message =
+              'Email/Password authentication is disabled in Firebase Console.';
+        } else if (e.code == 'invalid-credential' ||
+            e.code == 'wrong-password' ||
+            e.code == 'user-not-found' ||
+            e.code == 'invalid-email') {
           title = 'Incorrect Email or Password';
-          message = 'The email address or password you entered is incorrect. Please check your credentials and try again.';
+          message =
+              'The email address or password you entered is incorrect. Please check your credentials and try again.';
         } else if (e.code == 'weak-password') {
           title = 'Password Security Standard';
           message = 'Password must be at least 8 characters long.';
         } else {
           title = 'Authentication Error';
-          message = e.message ?? 'An error occurred during authentication. Please try again.';
+          message =
+              e.message ??
+              'An error occurred during authentication. Please try again.';
         }
         setState(() {
           _errorTitle = title;
@@ -990,7 +551,10 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       if (mounted) {
         setState(() {
           _errorTitle = 'Incorrect Email or Password';
-          _errorMessage = e.toString().replaceAll(RegExp(r'\[.*?\]'), '').trim();
+          _errorMessage = e
+              .toString()
+              .replaceAll(RegExp(r'\[.*?\]'), '')
+              .trim();
         });
       }
     } finally {
@@ -1017,7 +581,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       _successMessage = null;
     });
     try {
-      final cred = await CloudService.instance.signInWithGoogle();
+      final cred = await CloudService.instance.signInWithGoogle(
+        rememberMe: _rememberMe,
+      );
       if (cred != null) {
         widget.onAuthSuccess();
       }
@@ -1026,18 +592,22 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         String title = 'Google Sign-In Notice';
         String message = 'Unable to complete Google Sign-In. Please try again.';
         if (e is FirebaseAuthException) {
-          if (e.code == 'invalid-app-credential' || e.message?.contains('invalid_app_ID') == true) {
+          if (e.code == 'invalid-app-credential' ||
+              e.message?.contains('invalid_app_ID') == true) {
             title = 'Google Auth Setup Notice';
-            message = 'Native Android Google Sign-In requires linking your app SHA-1 fingerprint in Firebase Console. You can also sign in directly using Email & Password below.';
+            message =
+                'Native Android Google Sign-In requires linking your app SHA-1 fingerprint in Firebase Console. You can also sign in directly using Email & Password below.';
           } else {
             title = 'Google Auth (${e.code})';
             message = e.message ?? message;
           }
         } else {
           final errStr = e.toString().replaceAll(RegExp(r'\[.*?\]'), '').trim();
-          if (errStr.contains('ApiException: 10') || errStr.contains('DEVELOPER_ERROR')) {
+          if (errStr.contains('ApiException: 10') ||
+              errStr.contains('DEVELOPER_ERROR')) {
             title = 'Google Auth Setup Notice';
-            message = 'Add your SHA-1 fingerprint (0B:75:69:C4:D4:1E:7E:E8:BE:C1:83:15:D8:2C:16:91:31:DA:AC:5B) in Firebase Console, or sign in using Email & Password.';
+            message =
+                'Add your SHA-1 fingerprint (0B:75:69:C4:D4:1E:7E:E8:BE:C1:83:15:D8:2C:16:91:31:DA:AC:5B) in Firebase Console, or sign in using Email & Password.';
           } else if (errStr.isNotEmpty) {
             message = errStr;
           }
@@ -1056,11 +626,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isDesktop = size.width >= 900;
-    final isDark = Theme.of(context).brightness == Brightness.dark || AppSettings.instance.isDarkMode;
+    final isDark =
+        Theme.of(context).brightness == Brightness.dark ||
+        AppSettings.instance.isDarkMode;
 
-    final scaffoldBg = isDark ? const Color(0xFF0B111E) : const Color(0xFFF8FAFC);
+    final scaffoldBg = isDark
+        ? const Color(0xFF0B111E)
+        : const Color(0xFFF8FAFC);
     final cardBg = isDark ? const Color(0xFF131D2E) : Colors.white;
-    final cardBorder = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+    final cardBorder = isDark
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFE2E8F0);
 
     return Scaffold(
       backgroundColor: scaffoldBg,
@@ -1069,17 +645,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               child: Row(
                 children: [
                   // LEFT: Live interactive map pane
-                  Expanded(
-                    flex: 11,
-                    child: _buildSplitMapPane(isDark),
-                  ),
+                  Expanded(flex: 11, child: _buildSplitMapPane(isDark)),
                   // Divider
                   Container(width: 1, color: cardBorder),
                   // RIGHT: Registration / sign-in form
-                  Expanded(
-                    flex: 9,
-                    child: _buildAuthPane(isDark, cardBorder),
-                  ),
+                  Expanded(flex: 9, child: _buildAuthPane(isDark, cardBorder)),
                 ],
               ),
             )
@@ -1088,44 +658,193 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 // Live Map Background (mobile / narrow)
                 Positioned.fill(child: _buildMapBackground(isDark)),
 
-                SafeArea(
-                  child: Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 28,
+                // Floating Map Navigation Buttons (Zoom & Recenter)
+                Positioned(
+                  right: 16,
+                  bottom: _isMapExploreMode ? 84 : 20,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildAuthMapButton(
+                        icon: Icons.add_rounded,
+                        tooltip: 'Zoom in',
+                        isDark: isDark,
+                        onTap: () {
+                          try {
+                            final c = _authMapController.camera.center;
+                            final z = (_authMapController.camera.zoom + 1)
+                                .clamp(5.0, 19.0);
+                            _authMapController.move(c, z);
+                          } catch (_) {}
+                        },
                       ),
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 460),
-                        decoration: BoxDecoration(
-                          color: cardBg.withValues(alpha: isDark ? 0.90 : 0.94),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: cardBorder, width: 1.2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(
-                                alpha: isDark ? 0.35 : 0.08,
-                              ),
-                              blurRadius: 32,
-                              offset: const Offset(0, 10),
+                      const SizedBox(height: 8),
+                      _buildAuthMapButton(
+                        icon: Icons.remove_rounded,
+                        tooltip: 'Zoom out',
+                        isDark: isDark,
+                        onTap: () {
+                          try {
+                            final c = _authMapController.camera.center;
+                            final z = (_authMapController.camera.zoom - 1)
+                                .clamp(5.0, 19.0);
+                            _authMapController.move(c, z);
+                          } catch (_) {}
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildAuthMapButton(
+                        icon: Icons.my_location_rounded,
+                        tooltip: 'Recenter Sector Bulacan',
+                        isDark: isDark,
+                        onTap: () {
+                          try {
+                            _authMapController.move(
+                              const LatLng(14.9152, 120.8229),
+                              14.5,
+                            );
+                          } catch (_) {}
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Map Explore / Sign In Toggle Button (hidden while pending verification)
+                if (!_showVerificationView)
+                  Positioned(
+                    top: 16,
+                    right: 16,
+                    child: SafeArea(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () {
+                            setState(
+                              () => _isMapExploreMode = !_isMapExploreMode,
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
                             ),
-                          ],
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                            child: Padding(
-                              padding: const EdgeInsets.all(28),
-                              child: _buildAuthForm(isDark),
+                            decoration: BoxDecoration(
+                              color: cardBg.withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: cardBorder),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 10,
+                                  offset: Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _isMapExploreMode
+                                      ? Icons.login_rounded
+                                      : Icons.explore_rounded,
+                                  size: 16,
+                                  color: AppDesign.accent(isDark),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _isMapExploreMode
+                                      ? 'Show Sign In'
+                                      : 'Explore Map',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
+
+                // Auth Card (collapsible when exploring map, always shown for email verification)
+                if (!_isMapExploreMode || _showVerificationView)
+                  SafeArea(
+                    child: Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 28,
+                        ),
+                        child: Container(
+                          constraints: const BoxConstraints(maxWidth: 460),
+                          decoration: BoxDecoration(
+                            color: cardBg.withValues(
+                              alpha: isDark ? 0.90 : 0.94,
+                            ),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: cardBorder, width: 1.2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: isDark ? 0.35 : 0.08,
+                                ),
+                                blurRadius: 32,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(24),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                              child: Padding(
+                                padding: const EdgeInsets.all(28),
+                                child: _buildAuthForm(isDark),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  // Bottom pill to easily bring back the sign in form
+                  Positioned(
+                    left: 20,
+                    right: 80,
+                    bottom: 20,
+                    child: SafeArea(
+                      child: Center(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() => _isMapExploreMode = false);
+                          },
+                          icon: const Icon(Icons.login_rounded, size: 18),
+                          label: const Text('Back to Sign In'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppDesign.brand,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            elevation: 6,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
     );
@@ -1140,10 +859,12 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     final chipBorder = isDark
         ? const Color(0xFF334155).withValues(alpha: 0.7)
         : const Color(0xFFE2E8F0);
-    final primaryText =
-        isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-    final secondaryText =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final primaryText = isDark
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF0F172A);
+    final secondaryText = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF64748B);
 
     return Stack(
       fit: StackFit.expand,
@@ -1161,61 +882,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           ),
           children: [
             TileLayer(
-              urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.pothole_scanner',
               tileDisplay: const TileDisplay.fadeIn(
                 duration: Duration(milliseconds: 150),
               ),
             ),
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: const LatLng(14.9152, 120.8229),
-                  width: 52,
-                  height: 52,
-                  child: _PulsingHazardWidget(
-                    color: const Color(0xFFEF4444),
-                    animation: _radarController,
-                    baseRadius: 13.0,
-                    icon: Icons.priority_high_rounded,
-                  ),
-                ),
-                Marker(
-                  point: const LatLng(14.9452, 120.8629),
-                  width: 52,
-                  height: 52,
-                  child: _PulsingHazardWidget(
-                    color: const Color(0xFFF59E0B),
-                    animation: _radarController,
-                    baseRadius: 11.0,
-                    icon: Icons.warning_amber_rounded,
-                  ),
-                ),
-                Marker(
-                  point: const LatLng(14.8852, 120.7829),
-                  width: 52,
-                  height: 52,
-                  child: _PulsingHazardWidget(
-                    color: const Color(0xFFEF4444),
-                    animation: _radarController,
-                    baseRadius: 12.0,
-                    icon: Icons.dangerous_rounded,
-                  ),
-                ),
-                Marker(
-                  point: const LatLng(14.9280, 120.8400),
-                  width: 52,
-                  height: 52,
-                  child: _PulsingHazardWidget(
-                    color: const Color(0xFF0284C7),
-                    animation: _radarController,
-                    baseRadius: 11.0,
-                    icon: Icons.navigation_rounded,
-                  ),
-                ),
-              ],
-            ),
+            const MarkerLayer(markers: []),
           ],
         ),
 
@@ -1253,68 +926,29 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: chipBg,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: chipBorder),
                   boxShadow: [
                     BoxShadow(
-                      color:
-                          Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.35 : 0.08,
+                      ),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
                   ],
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0369A1), Color(0xFF0284C7)],
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.radar_rounded,
-                          color: Colors.white, size: 16),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'ROADSENSE GIS',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
-                            color: primaryText,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Row(
-                          children: [
-                            _PulsingLiveDot(animation: _radarController),
-                            const SizedBox(width: 6),
-                            const Text(
-                              'LIVE SENSOR MESH ACTIVE',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
-                                color: Color(0xFF10B981),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
+                child: RoadSenseLogo(
+                  size: 28,
+                  showWordmark: true,
+                  subtitle: 'Live Mesh Active',
+                  isDarkOverride: isDark,
                 ),
               ),
             ),
@@ -1338,8 +972,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   border: Border.all(color: chipBorder),
                   boxShadow: [
                     BoxShadow(
-                      color:
-                          Colors.black.withValues(alpha: isDark ? 0.40 : 0.10),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.40 : 0.10,
+                      ),
                       blurRadius: 20,
                       offset: const Offset(0, 6),
                     ),
@@ -1349,13 +984,18 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.sensors_rounded,
-                                color: Color(0xFF0284C7), size: 16),
+                            Icon(
+                              Icons.sensors_rounded,
+                              color: AppDesign.accent(isDark),
+                              size: 16,
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               'SECTOR BULACAN',
@@ -1370,24 +1010,24 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0284C7)
-                                .withValues(alpha: 0.15),
+                            color: AppDesign.brandWash(isDark),
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: const Color(0xFF0284C7)
-                                  .withValues(alpha: 0.4),
+                              color: AppDesign.brandBorder(isDark),
                               width: 0.8,
                             ),
                           ),
-                          child: const Text(
+                          child: Text(
                             'DPWH STD',
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.6,
-                              color: Color(0xFF0284C7),
+                              color: AppDesign.accent(isDark),
                             ),
                           ),
                         ),
@@ -1396,14 +1036,26 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        _telemetryMetric('HAZARDS', '3 Active',
-                            const Color(0xFFEF4444), isDark),
+                        _telemetryMetric(
+                          'HAZARDS',
+                          'Sign in to view',
+                          const Color(0xFFEF4444),
+                          isDark,
+                        ),
                         const SizedBox(width: 8),
-                        _telemetryMetric('AI ENGINE', 'YOLOv8',
-                            const Color(0xFF0284C7), isDark),
+                        _telemetryMetric(
+                          'AI ENGINE',
+                          'YOLOv8',
+                          AppDesign.accent(isDark),
+                          isDark,
+                        ),
                         const SizedBox(width: 8),
-                        _telemetryMetric('LATENCY', '18 ms',
-                            const Color(0xFF10B981), isDark),
+                        _telemetryMetric(
+                          'LATENCY',
+                          '—',
+                          const Color(0xFF10B981),
+                          isDark,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -1421,12 +1073,116 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             ),
           ),
         ),
+        // Right-side floating zoom & recenter controls for desktop
+        Positioned(
+          right: 20,
+          bottom: 24,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildAuthMapButton(
+                icon: Icons.add_rounded,
+                tooltip: 'Zoom in',
+                isDark: isDark,
+                onTap: () {
+                  try {
+                    final c = _authMapController.camera.center;
+                    final z = (_authMapController.camera.zoom + 1).clamp(
+                      5.0,
+                      19.0,
+                    );
+                    _authMapController.move(c, z);
+                  } catch (_) {}
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildAuthMapButton(
+                icon: Icons.remove_rounded,
+                tooltip: 'Zoom out',
+                isDark: isDark,
+                onTap: () {
+                  try {
+                    final c = _authMapController.camera.center;
+                    final z = (_authMapController.camera.zoom - 1).clamp(
+                      5.0,
+                      19.0,
+                    );
+                    _authMapController.move(c, z);
+                  } catch (_) {}
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildAuthMapButton(
+                icon: Icons.my_location_rounded,
+                tooltip: 'Recenter Sector Bulacan',
+                isDark: isDark,
+                onTap: () {
+                  try {
+                    _authMapController.move(
+                      const LatLng(14.9152, 120.8229),
+                      14.5,
+                    );
+                  } catch (_) {}
+                },
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 
+  Widget _buildAuthMapButton({
+    required IconData icon,
+    required String tooltip,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    final btnBg = isDark
+        ? const Color(0xFF0F172A).withValues(alpha: 0.90)
+        : Colors.white.withValues(alpha: 0.92);
+    final btnBorder = isDark
+        ? const Color(0xFF334155)
+        : const Color(0xFFE2E8F0);
+    final iconColor = isDark
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF0F172A);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: btnBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: btnBorder),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 20, color: iconColor),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _telemetryMetric(
-      String label, String value, Color accent, bool isDark) {
+    String label,
+    String value,
+    Color accent,
+    bool isDark,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -1444,8 +1200,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               style: TextStyle(
                 fontSize: 8.5,
                 fontWeight: FontWeight.w700,
-                color:
-                    isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                color: isDark
+                    ? const Color(0xFF94A3B8)
+                    : const Color(0xFF64748B),
                 letterSpacing: 0.4,
               ),
             ),
@@ -1479,13 +1236,10 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 radius: 1.15,
                 colors: isDark
                     ? [
-                        const Color(0xFF0369A1).withValues(alpha: 0.16),
-                        const Color(0xFF0B111E),
+                        AppDesign.brand.withValues(alpha: 0.16),
+                        AppDesign.bg(true),
                       ]
-                    : [
-                        const Color(0xFFE0F2FE),
-                        const Color(0xFFF8FAFC),
-                      ],
+                    : [const Color(0xFFEFF6FF), AppDesign.bg(false)],
               ),
             ),
           ),
@@ -1506,9 +1260,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           right: 0,
           child: Container(
             height: 4,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF0369A1), Color(0xFF0284C7), Color(0xFF22D3EE)],
+                colors: [
+                  const Color(0xFF1D4ED8),
+                  AppDesign.brand,
+                  AppDesign.accent(isDark),
+                ],
               ),
             ),
           ),
@@ -1540,7 +1298,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
+                        color: Colors.black.withValues(
+                          alpha: isDark ? 0.45 : 0.08,
+                        ),
                         blurRadius: 36,
                         offset: const Offset(0, 14),
                       ),
@@ -1568,19 +1328,86 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildPendingVerificationCard(bool isDark) {
+    final activeUser =
+        widget.pendingVerificationUser ??
+        (Firebase.apps.isNotEmpty ? FirebaseAuth.instance.currentUser : null);
+    final initialEmail =
+        activeUser?.email ??
+        widget.initialPendingVerificationEmail ??
+        (_emailController.text.trim().isNotEmpty
+            ? _emailController.text.trim()
+            : 'your email');
+    final backend =
+        widget.verificationBackend ??
+        CloudService.instance.emailVerificationBackend;
+
+    return SingleChildScrollView(
+      physics: const ClampingScrollPhysics(),
+      child: EmailVerificationView(
+        backend: backend,
+        initialEmail: initialEmail,
+        initialStatus: _verificationInitialStatus,
+        initialError: _verificationInitialError,
+        initialInfo: _verificationInitialInfo,
+        fetchStatusOnMount: _verificationFetchStatusOnMount,
+        autoSendIfMissing: _verificationAutoSendIfMissing,
+        isDark: isDark,
+        onVerified: () {
+          if (!mounted) return;
+          setState(() => _showVerificationView = false);
+          widget.onAuthSuccess();
+        },
+        onSignOut: () async {
+          await backend.signOut();
+          if (!mounted) return;
+          setState(() {
+            _showVerificationView = false;
+            _isSignUp = false;
+            _errorTitle = null;
+            _errorMessage = null;
+            _successMessage =
+                'Signed out. Sign in again anytime to finish verifying your email.';
+          });
+        },
+      ),
+    );
+  }
+
   Widget _buildAuthForm(bool isDark) {
-    final titleColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-    final subtitleColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-  final switchBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9);
-  final inactiveTabTextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    if (_showVerificationView) {
+      return _buildPendingVerificationCard(isDark);
+    }
+    final titleColor = isDark
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF0F172A);
+    final subtitleColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF64748B);
+    final switchBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9);
+    final inactiveTabTextColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF64748B);
     final googleBtnBg = isDark ? const Color(0xFF0F172A) : Colors.white;
-    final googleBtnBorder = isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
-    final googleBtnText = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1E293B);
-    final dividerColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    final dividerTextColor = isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8);
-    final inputTextColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-    final cursorColor = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
-    final iconToggleColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final googleBtnBorder = isDark
+        ? const Color(0xFF334155)
+        : const Color(0xFFCBD5E1);
+    final googleBtnText = isDark
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF1E293B);
+    final dividerColor = isDark
+        ? const Color(0xFF334155)
+        : const Color(0xFFE2E8F0);
+    final dividerTextColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF64748B);
+    final inputTextColor = isDark
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF0F172A);
+    final cursorColor = AppDesign.accent(isDark);
+    final iconToggleColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF64748B);
 
     return SingleChildScrollView(
       physics: const ClampingScrollPhysics(),
@@ -1590,69 +1417,27 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Brand header row with live secure indicator
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            // Brand header adapts to enlarged text.
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0369A1), Color(0xFF0284C7)],
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF0284C7).withValues(alpha: 0.35),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.add_location_alt_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'ROADSENSE GIS',
-                          style: TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w900,
-                            color: titleColor,
-                            letterSpacing: 1.4,
-                          ),
-                        ),
-                        const Text(
-                          'ENTERPRISE PLATFORM',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF0284C7),
-                            letterSpacing: 1.1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                RoadSenseLogo(
+                  size: 34,
+                  showWordmark: true,
+                  subtitle: 'Road Condition Platform',
+                  isDarkOverride: isDark,
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1E293B)
-                        : const Color(0xFFF1F5F9),
+                    color: AppDesign.sunken(isDark),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFE2E8F0),
-                    ),
+                    border: Border.all(color: AppDesign.border(isDark)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1664,9 +1449,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         style: TextStyle(
                           fontSize: 9.5,
                           fontWeight: FontWeight.w800,
-                          color: isDark
-                              ? const Color(0xFF38BDF8)
-                              : const Color(0xFF0369A1),
+                          color: AppDesign.accent(isDark),
                           letterSpacing: 0.8,
                         ),
                       ),
@@ -1708,24 +1491,26 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               height: 4,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(2),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0284C7), Color(0xFF22D3EE)],
+                gradient: LinearGradient(
+                  colors: [AppDesign.brand, AppDesign.accent(isDark)],
                 ),
               ),
             ),
             const SizedBox(height: 12),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 260),
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: child,
-              ),
+              transitionBuilder: (child, animation) =>
+                  FadeTransition(opacity: animation, child: child),
               child: Text(
                 _isSignUp
                     ? 'Create your surveyor account to get started.'
                     : 'Sign in to access Live Road Inspection & GIS Analytics',
                 key: ValueKey<bool>(_isSignUp),
-                style: TextStyle(color: subtitleColor, fontSize: 13, height: 1.45),
+                style: TextStyle(
+                  color: subtitleColor,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
               ),
             ),
 
@@ -1751,7 +1536,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 color: switchBg,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFFE2E8F0),
                 ),
               ),
               padding: const EdgeInsets.all(4),
@@ -1760,11 +1547,20 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 builder: (context, _) {
                   final t = _modeAnimation.value;
                   final align = Alignment.lerp(
-                      Alignment.centerLeft, Alignment.centerRight, t)!;
-                  final signInColor =
-                      Color.lerp(Colors.white, inactiveTabTextColor, t)!;
-                  final registerColor =
-                      Color.lerp(inactiveTabTextColor, Colors.white, t)!;
+                    Alignment.centerLeft,
+                    Alignment.centerRight,
+                    t,
+                  )!;
+                  final signInColor = Color.lerp(
+                    Colors.white,
+                    inactiveTabTextColor,
+                    t,
+                  )!;
+                  final registerColor = Color.lerp(
+                    inactiveTabTextColor,
+                    Colors.white,
+                    t,
+                  )!;
 
                   return Stack(
                     children: [
@@ -1775,14 +1571,15 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFF0369A1), Color(0xFF0284C7)],
+                                colors: [Color(0xFF1D4ED8), AppDesign.brand],
                               ),
                               borderRadius: BorderRadius.circular(10),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF0284C7)
-                                      .withValues(alpha: 0.35),
-                                  blurRadius: 10,
+                                  color: AppDesign.brand.withValues(
+                                    alpha: 0.28,
+                                  ),
+                                  blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
                               ],
@@ -1795,8 +1592,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                           Expanded(
                             child: MouseRegion(
                               cursor: SystemMouseCursors.click,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
+                              child: InkWell(
                                 onTap: () => _switchAuthMode(false),
                                 child: Center(
                                   child: Text(
@@ -1815,8 +1611,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                           Expanded(
                             child: MouseRegion(
                               cursor: SystemMouseCursors.click,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
+                              child: InkWell(
                                 onTap: () => _switchAuthMode(true),
                                 child: Center(
                                   child: Text(
@@ -1845,16 +1640,29 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               const SizedBox(height: 14),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF7F1D1D).withValues(alpha: 0.3) : const Color(0xFFFEF2F2),
+                  color: isDark
+                      ? const Color(0xFF7F1D1D).withValues(alpha: 0.3)
+                      : const Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? const Color(0xFFDC2626).withValues(alpha: 0.5) : const Color(0xFFFCA5A5)),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFFDC2626).withValues(alpha: 0.5)
+                        : const Color(0xFFFCA5A5),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 20),
+                    const Icon(
+                      Icons.error_outline_rounded,
+                      color: Color(0xFFDC2626),
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -1862,12 +1670,25 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         children: [
                           Text(
                             _errorTitle ?? 'Incorrect Email or Password',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B)),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? const Color(0xFFFCA5A5)
+                                  : const Color(0xFF991B1B),
+                            ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             _errorMessage!,
-                            style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C), height: 1.35, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark
+                                  ? const Color(0xFFFCA5A5)
+                                  : const Color(0xFFB91C1C),
+                              height: 1.35,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -1876,7 +1697,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
                         onTap: () => setState(() => _errorMessage = null),
-                        child: Icon(Icons.close_rounded, color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B), size: 18),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: isDark
+                              ? const Color(0xFFFCA5A5)
+                              : const Color(0xFF991B1B),
+                          size: 18,
+                        ),
                       ),
                     ),
                   ],
@@ -1888,29 +1715,57 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               const SizedBox(height: 14),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5),
+                  color: isDark
+                      ? const Color(0xFF064E3B).withValues(alpha: 0.3)
+                      : const Color(0xFFECFDF5),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? const Color(0xFF059669).withValues(alpha: 0.5) : const Color(0xFFA7F3D0)),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF059669).withValues(alpha: 0.5)
+                        : const Color(0xFFA7F3D0),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF0284C7), size: 20),
+                    Icon(
+                      Icons.check_circle_outline_rounded,
+                      color: isDark
+                          ? const Color(0xFF34D399)
+                          : const Color(0xFF047857),
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Success',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? const Color(0xFF34D399)
+                                  : const Color(0xFF047857),
+                            ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             _successMessage!,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF0284C7), height: 1.35, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark
+                                  ? const Color(0xFFA7F3D0)
+                                  : const Color(0xFF065F46),
+                              height: 1.35,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -1919,7 +1774,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
                         onTap: () => setState(() => _successMessage = null),
-                        child: const Icon(Icons.close_rounded, color: Color(0xFF0284C7), size: 18),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: isDark
+                              ? const Color(0xFF34D399)
+                              : const Color(0xFF047857),
+                          size: 18,
+                        ),
                       ),
                     ),
                   ],
@@ -1932,12 +1793,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             // Google Sign-In Button with vector logo
             OutlinedButton(
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 16,
+                ),
                 minimumSize: const Size(double.infinity, 48),
                 side: BorderSide(color: googleBtnBorder),
                 backgroundColor: googleBtnBg,
                 enabledMouseCursor: SystemMouseCursors.click,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onPressed: _isLoading ? null : _submitGoogleAuth,
               child: Row(
@@ -1945,9 +1811,16 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 children: [
                   const GoogleGLogo(size: 20),
                   const SizedBox(width: 10),
-                  Text(
-                    'Continue with Google',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: googleBtnText, fontSize: 13.5),
+                  Expanded(
+                    child: Text(
+                      'Continue with Google',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: googleBtnText,
+                        fontSize: 13.5,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1962,7 +1835,12 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Text(
                     'OR EMAIL',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: dividerTextColor, letterSpacing: 0.8),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: dividerTextColor,
+                      letterSpacing: 0.8,
+                    ),
                   ),
                 ),
                 Expanded(child: Divider(color: dividerColor)),
@@ -1995,7 +1873,8 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                             Icons.person_outline,
                             isDark: isDark,
                           ),
-                          validator: (v) => (_isSignUp && (v == null || v.trim().isEmpty))
+                          validator: (v) =>
+                              (_isSignUp && (v == null || v.trim().isEmpty))
                               ? 'Required'
                               : null,
                         ),
@@ -2015,7 +1894,8 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                             Icons.person_outline,
                             isDark: isDark,
                           ),
-                          validator: (v) => (_isSignUp && (v == null || v.trim().isEmpty))
+                          validator: (v) =>
+                              (_isSignUp && (v == null || v.trim().isEmpty))
                               ? 'Required'
                               : null,
                         ),
@@ -2031,9 +1911,19 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
               cursorColor: cursorColor,
-              style: TextStyle(color: inputTextColor, fontSize: 14.5, fontWeight: FontWeight.w500),
-              decoration: _inputDecoration('Email Address', Icons.email_outlined, isDark: isDark),
-              validator: (v) => (v == null || !v.contains('@')) ? 'Enter a valid email address' : null,
+              style: TextStyle(
+                color: inputTextColor,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w500,
+              ),
+              decoration: _inputDecoration(
+                'Email Address',
+                Icons.email_outlined,
+                isDark: isDark,
+              ),
+              validator: (v) => (v == null || !v.contains('@'))
+                  ? 'Enter a valid email address'
+                  : null,
             ),
 
             const SizedBox(height: 14),
@@ -2043,23 +1933,35 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               controller: _passwordController,
               obscureText: _obscurePassword,
               cursorColor: cursorColor,
-              style: TextStyle(color: inputTextColor, fontSize: 14.5, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: inputTextColor,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w500,
+              ),
               decoration: _inputDecoration(
                 'Password',
                 Icons.lock_outline_rounded,
                 isDark: isDark,
                 suffixIcon: IconButton(
+                  tooltip: _obscurePassword ? 'Show password' : 'Hide password',
                   icon: Icon(
-                    _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
                     color: iconToggleColor,
                     size: 20,
                   ),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
               validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Please enter a password';
-                if (_isSignUp && v.length < 8) return 'Password must be at least 8 characters long';
+                if (v == null || v.trim().isEmpty) {
+                  return 'Please enter a password';
+                }
+                if (_isSignUp && v.length < 8) {
+                  return 'Password must be at least 8 characters long';
+                }
                 return null;
               },
               onChanged: (_) {
@@ -2087,13 +1989,16 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 opacity: ReverseAnimation(_modeAnimation),
                 child: Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 2),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: GestureDetector(
-                          onTap: () => setState(() => _rememberMe = !_rememberMe),
+                          onTap: () =>
+                              setState(() => _rememberMe = !_rememberMe),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -2107,7 +2012,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  activeColor: const Color(0xFF0284C7),
+                                  activeColor: AppDesign.brand,
                                   materialTapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
                                 ),
@@ -2129,12 +2034,12 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         cursor: SystemMouseCursors.click,
                         child: GestureDetector(
                           onTap: _showForgotPasswordDialog,
-                          child: const Text(
+                          child: Text(
                             'Forgot Password?',
                             style: TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF0284C7),
+                              color: AppDesign.accent(isDark),
                             ),
                           ),
                         ),
@@ -2169,6 +2074,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                         Icons.lock_reset_rounded,
                         isDark: isDark,
                         suffixIcon: IconButton(
+                          tooltip: _obscureConfirmPassword
+                              ? 'Show confirm password'
+                              : 'Hide confirm password',
                           icon: Icon(
                             _obscureConfirmPassword
                                 ? Icons.visibility_off_outlined
@@ -2177,46 +2085,51 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                             size: 20,
                           ),
                           onPressed: () => setState(
-                            () => _obscureConfirmPassword = !_obscureConfirmPassword,
+                            () => _obscureConfirmPassword =
+                                !_obscureConfirmPassword,
                           ),
                         ),
                       ),
                       validator: (v) {
                         if (!_isSignUp) return null;
-                        if (v == null || v.isEmpty) return 'Please confirm your password';
-                        if (v != _passwordController.text) return 'Passwords do not match';
+                        if (v == null || v.isEmpty) {
+                          return 'Please confirm your password';
+                        }
+                        if (v != _passwordController.text) {
+                          return 'Passwords do not match';
+                        }
                         return null;
                       },
                     ),
                     const SizedBox(height: 14),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF0C4A6E).withValues(alpha: 0.25)
-                            : const Color(0xFFECFDF5),
+                        color: AppDesign.brandWash(isDark),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isDark
-                              ? const Color(0xFF0284C7).withValues(alpha: 0.4)
-                              : const Color(0xFFA7F3D0),
+                          color: AppDesign.brandBorder(isDark),
                         ),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.mark_email_read_outlined,
-                              color: Color(0xFF0284C7), size: 18),
+                          Icon(
+                            Icons.mark_email_read_outlined,
+                            color: AppDesign.accent(isDark),
+                            size: 18,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'A verification link will be sent to your email address immediately after registration.',
+                              'A 6-digit verification code will be sent to your email address immediately after registration.',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark
-                                    ? const Color(0xFF38BDF8)
-                                    : const Color(0xFF0284C7),
+                                color: AppDesign.accent(isDark),
                                 height: 1.4,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -2232,7 +2145,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
             const SizedBox(height: 22),
 
-            // Submit Button — brand gradient with glow and fluid label transition
+            // Submit Button — primary brand blue with crisp contrast
             SizedBox(
               width: double.infinity,
               height: 50,
@@ -2240,17 +2153,14 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: const LinearGradient(
-                    colors: [
-                      Color(0xFF0369A1),
-                      Color(0xFF0284C7),
-                      Color(0xFF0891B2),
-                    ],
+                    colors: [Color(0xFF1D4ED8), AppDesign.brand],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0284C7)
-                          .withValues(alpha: _isLoading ? 0.0 : 0.35),
-                      blurRadius: 14,
+                      color: AppDesign.brand.withValues(
+                        alpha: _isLoading ? 0.0 : 0.28,
+                      ),
+                      blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
                   ],
@@ -2312,11 +2222,22 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.lock_outline_rounded, size: 12, color: subtitleColor),
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 12,
+                  color: subtitleColor,
+                ),
                 const SizedBox(width: 5),
-                Text(
-                  'Protected by Firebase Authentication',
-                  style: TextStyle(fontSize: 11, color: subtitleColor, fontWeight: FontWeight.w500),
+                Flexible(
+                  child: Text(
+                    'Protected by Firebase Authentication',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: subtitleColor,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2330,21 +2251,21 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0C4A6E).withValues(alpha: 0.3) : const Color(0xFFF0F9FF),
+        color: AppDesign.brandWash(isDark),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: isDark ? const Color(0xFF0284C7).withValues(alpha: 0.4) : const Color(0xFFBAE6FD)),
+        border: Border.all(color: AppDesign.brandBorder(isDark)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: const Color(0xFF0284C7)),
+          Icon(icon, size: 12, color: AppDesign.accent(isDark)),
           const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
-              color: isDark ? const Color(0xFF7DD3FC) : const Color(0xFF0369A1),
+              color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
             ),
           ),
         ],
@@ -2365,9 +2286,13 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     final Color barColor = score == 1
         ? const Color(0xFFEF4444)
         : score == 2
-            ? const Color(0xFFF59E0B)
-            : const Color(0xFF10B981);
-    final String label = score == 1 ? 'Weak' : score == 2 ? 'Fair' : 'Strong';
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF10B981);
+    final String label = score == 1
+        ? 'Weak'
+        : score == 2
+        ? 'Fair'
+        : 'Strong';
     return Row(
       children: [
         Expanded(
@@ -2378,7 +2303,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   height: 4,
                   margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
                   decoration: BoxDecoration(
-                    color: i < score ? barColor : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    color: i < score
+                        ? barColor
+                        : (isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFE2E8F0)),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -2389,33 +2318,71 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         const SizedBox(width: 10),
         Text(
           label,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: barColor),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: barColor,
+          ),
         ),
       ],
     );
   }
 
-  InputDecoration _inputDecoration(String label, IconData icon, {Widget? suffixIcon, bool isDark = false}) {
-    final borderCol = isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
-    final enabledBorderCol = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-    final focusCol = const Color(0xFF0284C7);
-    final fillCol = isDark ? const Color(0xFF0F172A).withValues(alpha: 0.75) : const Color(0xFFF8FAFC);
+  InputDecoration _inputDecoration(
+    String label,
+    IconData icon, {
+    Widget? suffixIcon,
+    bool isDark = false,
+  }) {
+    final borderCol = isDark
+        ? const Color(0xFF334155)
+        : const Color(0xFFCBD5E1);
+    final enabledBorderCol = isDark
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFE2E8F0);
+    final focusCol = AppDesign.accent(isDark);
+    final fillCol = isDark
+        ? const Color(0xFF0F172A).withValues(alpha: 0.75)
+        : const Color(0xFFF8FAFC);
     final labelCol = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
 
     return InputDecoration(
       labelText: label,
-      labelStyle: TextStyle(color: labelCol, fontSize: 13.5, fontWeight: FontWeight.w500),
-      floatingLabelStyle: TextStyle(color: focusCol, fontSize: 12.5, fontWeight: FontWeight.w700),
+      labelStyle: TextStyle(
+        color: labelCol,
+        fontSize: 13.5,
+        fontWeight: FontWeight.w500,
+      ),
+      floatingLabelStyle: TextStyle(
+        color: focusCol,
+        fontSize: 12.5,
+        fontWeight: FontWeight.w700,
+      ),
       floatingLabelBehavior: FloatingLabelBehavior.auto,
       prefixIcon: Icon(icon, color: labelCol, size: 19),
       suffixIcon: suffixIcon,
       filled: true,
       fillColor: fillCol,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderCol)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: enabledBorderCol, width: 1.1)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: focusCol, width: 2.0)),
-      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.2)),
-      focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2.0)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderCol),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: enabledBorderCol, width: 1.1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: focusCol, width: 2.0),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2.0),
+      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
     );
   }
@@ -2449,83 +2416,10 @@ class TechGridPainter extends CustomPainter {
 }
 
 /// Animated pulsing sonar radar marker widget for road hazards on GIS map
-class _PulsingHazardWidget extends StatelessWidget {
-  final Color color;
-  final Animation<double> animation;
-  final double baseRadius;
-  final IconData icon;
-
-  const _PulsingHazardWidget({
-    required this.color,
-    required this.animation,
-    this.baseRadius = 12.0,
-    this.icon = Icons.warning_amber_rounded,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, _) {
-        final progress = animation.value;
-        final rippleRadius = baseRadius + (progress * 14.0);
-        final opacity = (1.0 - progress).clamp(0.0, 1.0);
-
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            // Outer radar ripple ring
-            Container(
-              width: rippleRadius * 2,
-              height: rippleRadius * 2,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: color.withValues(alpha: opacity * 0.75),
-                  width: 2.0,
-                ),
-              ),
-            ),
-            // Inner glowing halo
-            Container(
-              width: baseRadius * 2 + 6,
-              height: baseRadius * 2 + 6,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color.withValues(alpha: 0.25),
-              ),
-            ),
-            // Core pin / dot
-            Container(
-              width: baseRadius * 2,
-              height: baseRadius * 2,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.6),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: Colors.white, size: 13),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Pulsing live telemetry status indicator dot
 class _PulsingLiveDot extends StatelessWidget {
   final Animation<double> animation;
 
-  const _PulsingLiveDot({
-    required this.animation,
-  });
+  const _PulsingLiveDot({required this.animation});
 
   @override
   Widget build(BuildContext context) {
@@ -2575,9 +2469,7 @@ class GoogleGLogo extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: const CustomPaint(
-        painter: GoogleGLogoPainter(),
-      ),
+      child: const CustomPaint(painter: GoogleGLogoPainter()),
     );
   }
 }
@@ -2619,7 +2511,12 @@ class GoogleGLogoPainter extends CustomPainter {
     final barWidth = radius * 0.95;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(center.dx - 1, center.dy - (barHeight / 2), barWidth, barHeight),
+        Rect.fromLTWH(
+          center.dx - 1,
+          center.dy - (barHeight / 2),
+          barWidth,
+          barHeight,
+        ),
         Radius.circular(thickness * 0.2),
       ),
       barPaint,
@@ -2629,4 +2526,3 @@ class GoogleGLogoPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-
