@@ -1,0 +1,42 @@
+[
+  {
+    "name": "user profile edit through UI persists",
+    "passed": true
+  },
+  {
+    "name": "pending report edit persists through UI",
+    "passed": true
+  },
+  {
+    "name": "browser geolocation and directions form",
+    "passed": true
+  },
+  {
+    "name": "map heatmap toggle and simulated proximity warning",
+    "passed": true
+  },
+  {
+    "name": "session survives page reload",
+    "passed": true
+  },
+  {
+    "name": "admin search and severity filters",
+    "passed": true
+  },
+  {
+    "name": "admin approves a report through UI",
+    "passed": true
+  },
+  {
+    "name": "admin restores a report through UI",
+    "passed": true
+  },
+  {
+    "name": "LGU CSV download contains seeded data",
+    "passed": true
+  },
+  {
+    "name": "admin signs out without Google plugin startup error",
+    "passed": true
+  }
+]

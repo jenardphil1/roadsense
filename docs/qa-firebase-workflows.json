@@ -1,0 +1,73 @@
+{
+  "project": "demo-roadsense-qa",
+  "results": [
+    {
+      "name": "register user and create profile",
+      "passed": true
+    },
+    {
+      "name": "logout and email login",
+      "passed": true
+    },
+    {
+      "name": "reject wrong password",
+      "passed": true
+    },
+    {
+      "name": "verification email action link",
+      "passed": true
+    },
+    {
+      "name": "password reset action and new-password login",
+      "passed": true
+    },
+    {
+      "name": "profile editing persists",
+      "passed": true
+    },
+    {
+      "name": "create local admin fixture",
+      "passed": true
+    },
+    {
+      "name": "user cannot promote own role",
+      "passed": true
+    },
+    {
+      "name": "submit report with app schema",
+      "passed": true
+    },
+    {
+      "name": "edit own pending report",
+      "passed": true
+    },
+    {
+      "name": "trash and restore own pending report",
+      "passed": true
+    },
+    {
+      "name": "user cannot approve report",
+      "passed": true
+    },
+    {
+      "name": "admin approval and approved-map query",
+      "passed": true
+    },
+    {
+      "name": "report owner cannot delete approved report",
+      "passed": true
+    },
+    {
+      "name": "other user cannot edit or delete report",
+      "passed": true
+    },
+    {
+      "name": "admin trash restore and permanent delete",
+      "passed": true
+    },
+    {
+      "name": "Google provider credential through Auth emulator",
+      "passed": true
+    }
+  ]
+}

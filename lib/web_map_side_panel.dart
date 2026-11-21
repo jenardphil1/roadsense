@@ -75,7 +75,6 @@ class WebMapWorkspacePanel extends StatelessWidget {
   final ValueChanged<int> onMoveSuggestionHighlight;
 
   final ValueChanged<WebReportItem> onCenterReportOnMap;
-  final ValueChanged<WebReportItem> onDirectionsToReport;
   final ValueChanged<String> onViewFullPhoto;
   final ValueChanged<WebReportItem>? onEditReport;
   final ValueChanged<WebReportItem>? onDeleteReport;
@@ -125,7 +124,6 @@ class WebMapWorkspacePanel extends StatelessWidget {
     required this.onClearHistory,
     required this.onMoveSuggestionHighlight,
     required this.onCenterReportOnMap,
-    required this.onDirectionsToReport,
     required this.onViewFullPhoto,
     this.onEditReport,
     this.onDeleteReport,
@@ -159,7 +157,6 @@ class WebMapWorkspacePanel extends StatelessWidget {
           isAdminUser: isAdminUser,
           onBack: onBackToResults,
           onCenterOnMap: () => onCenterReportOnMap(selectedReport!),
-          onDirectionsHere: () => onDirectionsToReport(selectedReport!),
           onViewFullPhoto: () => onViewFullPhoto(selectedReport!.imageUrl),
           onEditReport: onEditReport != null
               ? () => onEditReport!(selectedReport!)
@@ -1285,7 +1282,6 @@ class WebReportDetailPanel extends StatelessWidget {
   final bool isAdminUser;
   final VoidCallback onBack;
   final VoidCallback onCenterOnMap;
-  final VoidCallback onDirectionsHere;
   final VoidCallback onViewFullPhoto;
   final VoidCallback? onEditReport;
   final VoidCallback? onDeleteReport;
@@ -1298,7 +1294,6 @@ class WebReportDetailPanel extends StatelessWidget {
     required this.isAdminUser,
     required this.onBack,
     required this.onCenterOnMap,
-    required this.onDirectionsHere,
     required this.onViewFullPhoto,
     this.onEditReport,
     this.onDeleteReport,
@@ -1386,28 +1381,17 @@ class WebReportDetailPanel extends StatelessWidget {
                     onTapFullPhoto: onViewFullPhoto,
                   ),
                   const SizedBox(height: WebDesign.space3),
-                  // Primary actions
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: onDirectionsHere,
-                          icon: const Icon(Icons.directions_rounded, size: 17),
-                          label: const Text('Directions here'),
-                        ),
+                  // Primary action
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onCenterOnMap,
+                      icon: const Icon(
+                        Icons.center_focus_strong_rounded,
+                        size: 17,
                       ),
-                      const SizedBox(width: WebDesign.space2),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: onCenterOnMap,
-                          icon: const Icon(
-                            Icons.center_focus_strong_rounded,
-                            size: 17,
-                          ),
-                          label: const Text('Center map'),
-                        ),
-                      ),
-                    ],
+                      label: const Text('Center map'),
+                    ),
                   ),
                   if (report.normalizedStatus == 'rejected' &&
                       report.rejectionReason.trim().isNotEmpty) ...[

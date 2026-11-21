@@ -12,11 +12,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_flutter_app/app_design.dart';
 import 'package:my_flutter_app/dpwh_standards.dart';
 import 'package:my_flutter_app/developer_markers.dart';
-import 'package:my_flutter_app/web_design.dart' as marker_design;
 import 'package:my_flutter_app/app_settings.dart';
 import 'package:my_flutter_app/map_scale_bar.dart';
 import 'package:my_flutter_app/map_screen.dart' as mobile_map;
 import 'package:my_flutter_app/mobile_components.dart';
+import 'package:my_flutter_app/mobile_tour.dart';
 import 'package:my_flutter_app/road_report_cache.dart';
 import 'package:my_flutter_app/road_hazard_marker.dart';
 import 'package:my_flutter_app/route_pothole_advisor.dart';
@@ -684,8 +684,8 @@ void main() {
         expect(
           find.descendant(
             of: marker,
-            matching: find.byIcon(
-              marker_design.WebDesign.defectIcon(classes[i]),
+            matching: find.byWidgetPredicate(
+              (w) => w is RoadDefectGlyph && w.classId == classes[i].classId,
             ),
           ),
           findsOneWidget,
@@ -708,6 +708,80 @@ void main() {
       await _pumpFrames(tester, count: 2);
     }
   });
+
+  testWidgets(
+    'Mobile MapScreen clustered marker and expanded spider cluster render detailed defect icons',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      AppSettings.instance.toggleSampleStaMariaPotholes(false);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        AppSettings.instance.toggleSampleStaMariaPotholes(true);
+      });
+
+      final screen = mobile_map.MapScreen(
+        detectedPotholes: [
+          mobile_map.PotholeMarker(
+            docId: 'c1',
+            location: const LatLng(14.82900, 120.96350),
+            imagePath: '',
+            timestamp: DateTime(2026),
+            primaryDefect: 'Alligator crack',
+            primaryDpwhCode: 'CODE 02',
+          ),
+          mobile_map.PotholeMarker(
+            docId: 'c2',
+            location: const LatLng(14.82902, 120.96352),
+            imagePath: '',
+            timestamp: DateTime(2026),
+            primaryDefect: 'Alligator crack',
+            primaryDpwhCode: 'CODE 02',
+          ),
+          mobile_map.PotholeMarker(
+            docId: 'c3',
+            location: const LatLng(14.82903, 120.96351),
+            imagePath: '',
+            timestamp: DateTime(2026),
+            primaryDefect: 'Pothole',
+            primaryDpwhCode: 'CODE 01',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: screen)));
+      await _pumpFrames(tester, count: 6);
+      final controller = tester
+          .widget<FlutterMap>(find.byType(FlutterMap))
+          .mapController!;
+      controller.move(const LatLng(14.82901, 120.96351), 16);
+      await _pumpFrames(tester, count: 4);
+
+      // Unexpanded cluster displays dominant defect glyph (Alligator crack, classId 1) + count 3.
+      final clusterGlyph = find.byWidgetPredicate(
+        (w) => w is RoadDefectGlyph && w.classId == 1,
+      );
+      expect(clusterGlyph, findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+
+      // Tap cluster to expand radial spider pins.
+      await tester.tap(clusterGlyph);
+      await _pumpFrames(tester, count: 6);
+
+      // Expanded spider shows all 3 detailed child RoadHazardMarkers + collapse icon.
+      expect(find.byType(RoadHazardMarker), findsNWidgets(3));
+      expect(
+        find.byWidgetPredicate((w) => w is RoadDefectGlyph && w.classId == 1),
+        findsNWidgets(2),
+      );
+      expect(
+        find.byWidgetPredicate((w) => w is RoadDefectGlyph && w.classId == 0),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+    },
+  );
 
   for (final dismissal in [
     'close',
@@ -1144,7 +1218,6 @@ void main() {
                 onClearHistory: () {},
                 onMoveSuggestionHighlight: (_) {},
                 onCenterReportOnMap: (_) {},
-                onDirectionsToReport: (_) {},
                 onViewFullPhoto: (_) {},
               ),
             );
@@ -1736,6 +1809,100 @@ void main() {
       // Scale bar is clearly above the nav bar, not hidden underneath it
       expect(navRect.top - scaleBarRect.bottom, greaterThanOrEqualTo(4.0));
       expect(navRect.top - scaleBarRect.bottom, lessThanOrEqualTo(24.0));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Mobile MapScreen auto-shows first-visit guides on Search, Directions, and Driving Mode without repeating once completed',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      AppSettings.instance.toggleSampleStaMariaPotholes(false);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        AppSettings.instance.toggleSampleStaMariaPotholes(true);
+      });
+
+      final tourController = MobileTourController();
+      addTearDown(tourController.dispose);
+      await tourController.load();
+      // Mark main browse guide done so sub-page transitions can be exercised cleanly.
+      await tourController.markCompleted(MobileTourId.main);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppDesign.buildTheme(isDark: false),
+          home: ListenableBuilder(
+            listenable: tourController,
+            builder: (context, _) => Stack(
+              children: [
+                Scaffold(
+                  body: mobile_map.MapScreen(
+                    detectedPotholes: buildMobileMarkers(),
+                    tourController: tourController,
+                    isTourActive: tourController.isRunning,
+                  ),
+                ),
+                SpotlightTourOverlay(controller: tourController),
+              ],
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester, count: 6);
+
+      // 1. Entering Dedicated Search Page for the first time triggers Search guide.
+      await tester.tap(find.text('Search place, barangay...'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester, count: 3);
+
+      expect(tourController.activeTour, MobileTourId.search);
+      expect(find.text('Search Bulacan places & reports'), findsOneWidget);
+      await tester.tap(find.text('Skip'));
+      await _pumpFrames(tester, count: 4);
+      expect(tourController.isCompleted(MobileTourId.search), isTrue);
+
+      // 2. Switching to Directions A -> B on first visit triggers Directions guide.
+      await tester.tap(find.text('Directions A → B'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester, count: 3);
+
+      expect(tourController.activeTour, MobileTourId.directions);
+      expect(find.text('Set Point A & Point B'), findsOneWidget);
+      await tester.tap(find.text('Skip'));
+      await _pumpFrames(tester, count: 4);
+      expect(tourController.isCompleted(MobileTourId.directions), isTrue);
+
+      // Exit Search/Directions back to map.
+      await tester.tap(find.byTooltip('Back'));
+      await _pumpFrames(tester, count: 5);
+
+      // Re-opening Search stays silent now that Search guide was completed.
+      await tester.tap(find.text('Search place, barangay...'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester, count: 2);
+      expect(tourController.isRunning, isFalse);
+
+      await tester.tap(find.byTooltip('Close search'));
+      await _pumpFrames(tester, count: 4);
+
+      // 3. Entering Driving Mode for the first time triggers Driving HUD guide.
+      await tester.tap(find.byTooltip('Start Free Drive Mode'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester, count: 3);
+
+      expect(tourController.activeTour, MobileTourId.driving);
+      expect(find.text('Switch camera angles'), findsOneWidget);
+      await tester.tap(find.text('Skip'));
+      await _pumpFrames(tester, count: 4);
+      expect(tourController.isCompleted(MobileTourId.driving), isTrue);
       expect(tester.takeException(), isNull);
     },
   );

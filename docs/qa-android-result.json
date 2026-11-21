@@ -1,0 +1,17 @@
+{
+  "test": "integration_test/mobile_workflows_test.dart",
+  "passed": true,
+  "device": "Android 15 x86_64 emulator",
+  "checks": [
+    "native Firebase sign-in",
+    "camera capture",
+    "Package 6 Float32 model loading",
+    "inference completed with an empty detection list for the emulator scene",
+    "injected GPS at 14.85,120.81 via Android LocationManager",
+    "signed-in MyHomePage rendered"
+  ],
+  "limitations": [
+    "no physical road or accuracy validation",
+    "not a complete gallery, voice, or driving test"
+  ]
+}

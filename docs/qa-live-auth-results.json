@@ -1,0 +1,15 @@
+{
+  "email": "roadsense.qa.1793150329298@example.com",
+  "uid": "ytlWGJyy9dXZizj7mKTa2UaUoty1",
+  "results": [
+    {
+      "name": "live test account registration",
+      "passed": true
+    },
+    {
+      "name": "live email password login",
+      "passed": true
+    }
+  ],
+  "limitation": "Reserved example.com email has no test inbox; delivery and verification cannot be asserted."
+}

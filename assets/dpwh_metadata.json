@@ -1,19 +1,20 @@
 {
     "system": "DPWH Road Distress Detection System",
     "input_size": [
-        640,
-        640
+        608,
+        608
     ],
     "confidence_threshold": 0.25,
     "iou_threshold": 0.45,
     "classes": [
         {
             "class_id": 0,
-            "class_name": "Pothole",
+            "class_name": "Bowl-shaped depression / Pothole",
             "dpwh_code": "Code 01",
             "response_time": "3 Days",
-            "corrective_measure": "Bituminous premix (hot) or penetration patching; add base material if needed.",
-            "unit": "sq.m."
+            "corrective_measure": "Bituminous premix (hot) or penetration patching.",
+            "unit": "sq.m.",
+            "model_status": "trained"
         },
         {
             "class_id": 1,
@@ -21,31 +22,36 @@
             "dpwh_code": "Code 02",
             "response_time": "3 Days",
             "corrective_measure": "Bituminous premix (hot) or penetration patching of affected area.",
-            "unit": "sq.m."
+            "unit": "sq.m.",
+            "model_status": "trained"
         },
         {
             "class_id": 2,
-            "class_name": "Depression",
+            "class_name": "Depression (not trained)",
             "dpwh_code": "Code 05",
             "response_time": "30 Days",
-            "corrective_measure": "Re-blocking / replacement of concrete pavement including base correction.",
-            "unit": "sq.m."
+            "corrective_measure": "Re-blocking / replacement including base correction.",
+            "unit": "sq.m.",
+            "model_status": "not_trained",
+            "warning": "This class was not represented in the test ground truth. Do not treat model predictions for this class as validated."
         },
         {
             "class_id": 3,
             "class_name": "Longitudinal crack",
             "dpwh_code": "Code 12",
             "response_time": "Routine maintenance / sealing",
-            "corrective_measure": "Crack sealing with hot or cold applied elastomeric sealant.",
-            "unit": "l.m."
+            "corrective_measure": "Crack sealing with elastomeric sealant.",
+            "unit": "l.m.",
+            "model_status": "trained"
         },
         {
             "class_id": 4,
             "class_name": "Transverse crack",
             "dpwh_code": "Code 12",
             "response_time": "Routine maintenance / sealing",
-            "corrective_measure": "Crack sealing with hot or cold applied elastomeric sealant.",
-            "unit": "l.m."
+            "corrective_measure": "Crack sealing with elastomeric sealant.",
+            "unit": "l.m.",
+            "model_status": "trained"
         }
     ]
 }

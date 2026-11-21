@@ -1,0 +1,41 @@
+- button "2 2"
+- text: Map
+- button "Profile"
+- button
+- button
+- button
+- text: POTHOLE HAZARD NEARBY • 0m ahead • SLOW DOWN
+- button "Collapse directions panel"
+- button "Close directions"
+- text: Live
+- button "Clear starting point"
+- textbox
+- button "Reverse starting point and destination"
+- textbox "Choose destination..."
+- group:
+  - button "Your location"
+  - group "Home Mapulang Lupa Elementary School, Mapulang Lupa, Valenzuela":
+    - button "Edit"
+  - group "Immaculate Conception I-College Bonifacio Street, Poblacion, Santa Maria, Bulacan Open • Closes 5PM":
+    - button "Remove"
+  - group "Santa Maria Municipal Hall - Bulacan Poblacion, Santa Maria, Bulacan Closed • Opens 8AM Mon":
+    - button "Remove"
+  - group "Municipal Hall Drive Poblacion, Santa Maria, Bulacan Open 24 hours":
+    - button "Remove"
+  - group "N-la Cellphone Accessories & General M... Governor Fortunato Halili Avenue, Bagbagu... Open • Closes 8PM":
+    - button "Remove"
+  - group "Gracia Motorcycle Shop and Supplies Quirino Highway, Gumaoc East, San Jose d... Closed • Opens 8AM Sat":
+    - button "Remove"
+  - group "Real de Cacarong Pandi, Bulacan Historic Landmark":
+    - button "Remove"
+  - text: Delays Light traffic in this area No known road disruptions. Pothole hazards will show on route.
+- button "Get Directions (Point A to Point B)"
+- button "Toggle Compass / Navigation Mode"
+- button "Toggle Pothole Heatmap"
+- button "Zoom In"
+- button
+- button
+- button "Zoom Out"
+- button "500 m"
+- button "Center My Location"
+- paragraph: Running in emulator mode. Do not use with production credentials.

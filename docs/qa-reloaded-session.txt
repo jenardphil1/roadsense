@@ -1,0 +1,23 @@
+- button "2 2"
+- text: Map
+- button "Profile"
+- button "Directions / Plan Route"
+- button "Collapse search bar"
+- text: POTHOLE HAZARD NEARBY • 0m ahead • SLOW DOWN Live
+- textbox "Search road, barangay, destination..."
+- text: ⌘K
+- group:
+  - button "Safe Route"
+  - button "Hazards (2)"
+  - button "Heatmap"
+  - button "Default Map"
+- button "Get Directions (Point A to Point B)"
+- button "Toggle Compass / Navigation Mode"
+- button "Toggle Pothole Heatmap"
+- button "Zoom In"
+- button
+- button
+- button "Zoom Out"
+- button "500 m"
+- button "Center My Location"
+- paragraph: Running in emulator mode. Do not use with production credentials.

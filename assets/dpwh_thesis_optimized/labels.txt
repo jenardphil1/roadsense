@@ -1,0 +1,5 @@
+Bowl-shaped depression / Pothole (DPWH Code 01)
+Alligator crack (DPWH Code 02)
+Depression (DPWH Code 05)
+Longitudinal crack (DPWH Code 12)
+Transverse crack (DPWH Code 12)

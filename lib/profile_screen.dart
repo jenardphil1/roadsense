@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'cloud_service.dart';
 import 'dpwh_standards.dart';
 import 'mobile_components.dart';
+import 'nav_vehicle_3d.dart';
 import 'pending_report_queue.dart';
 import 'settings_dialog.dart';
 import 'app_settings.dart';
@@ -1454,6 +1455,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     children: [
                       Expanded(
                         child: TextFormField(
+                          key: widget.tourTargets['details'],
                           controller: _firstNameController,
                           style: TextStyle(fontSize: 14.5, color: textColor),
                           decoration: _inputDecoration(
@@ -1597,6 +1599,136 @@ class _ProfileScreenState extends State<ProfileScreen> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             children: [
+              ValueListenableBuilder<String>(
+                valueListenable:
+                    AppSettings.instance.mobileNavVehicleModeNotifier,
+                builder: (context, vehicleMode, _) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.navigation_rounded,
+                              color: accentColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Navigation Vehicle Profile',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Choose Car, Motorcycle, or Walking icon for driving mode',
+                                    style: TextStyle(
+                                      color: subtextColor,
+                                      fontSize: 12.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            for (final item in const [
+                              (
+                                id: 'car',
+                                label: 'Car',
+                                vehicleType: NavVehicleType.car,
+                              ),
+                              (
+                                id: 'motorcycle',
+                                label: 'Motorcycle',
+                                vehicleType: NavVehicleType.motorcycle,
+                              ),
+                              (
+                                id: 'walk',
+                                label: 'Walking',
+                                vehicleType: NavVehicleType.walking,
+                              ),
+                            ])
+                              Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.only(
+                                    right: item.id == 'walk' ? 0 : 8,
+                                  ),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onTap: () => AppSettings.instance
+                                        .setMobileNavVehicleMode(item.id),
+                                    child: AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 160,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 10,
+                                        horizontal: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: vehicleMode == item.id
+                                            ? accentColor.withValues(
+                                                alpha: isDark ? 0.22 : 0.12,
+                                              )
+                                            : AppDesign.sunken(isDark),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: vehicleMode == item.id
+                                              ? accentColor
+                                              : cardBorder,
+                                          width: vehicleMode == item.id
+                                              ? 1.5
+                                              : 1.0,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          NavVehicle3DWidget(
+                                            type: item.vehicleType,
+                                            size: 36,
+                                            showHeadlightGlow: false,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            item.label,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: vehicleMode == item.id
+                                                  ? FontWeight.w800
+                                                  : FontWeight.w600,
+                                              color: vehicleMode == item.id
+                                                  ? accentColor
+                                                  : textColor,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              Divider(color: cardBorder, height: 1),
               ListTile(
                 key: widget.tourTargets['settings'],
                 minTileHeight: 56,

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoadSense — design direction B</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=Fira+Code:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F8FAFC;--surface:#fff;--border:#E2E8F0;--fg:#020617;--fg-muted:#475569;--accent:#0369A1;--brand:#0F172A;
+  --sev-low:#16A34A;--sev-med:#B45309;--sev-high:#DC2626;
+  --font:'Lexend',system-ui,sans-serif;--body:'Source Sans 3',system-ui,sans-serif;--mono:'Fira Code',monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);padding:56px 28px 80px}
+.wrap{max-width:1060px;margin:0 auto}
+.tag{display:inline-block;font-family:var(--font);font-size:12px;font-weight:600;color:var(--accent);
+  background:rgba(3,105,161,.10);border:1px solid rgba(3,105,161,.3);padding:4px 11px;border-radius:999px;margin-bottom:16px}
+h1{font-family:var(--font);font-size:30px;font-weight:600;margin:0 0 10px;letter-spacing:-.02em}
+.lead{color:var(--fg-muted);font-size:16px;line-height:1.6;max-width:74ch;margin:0 0 40px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+a.card{display:block;background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;
+  text-decoration:none;color:inherit;box-shadow:0 1px 2px rgba(2,6,23,.05),0 10px 30px rgba(2,6,23,.06)}
+a.card:hover{border-color:#CBD5E1}
+.preview{height:190px;position:relative;overflow:hidden;border-bottom:1px solid var(--border)}
+.preview.web{background:var(--bg)}
+.preview.mob{background:#020617}
+.pv-side{position:absolute;left:0;top:0;bottom:0;width:26%;background:#0F172A}
+.pv-kpi{position:absolute;left:30%;right:6%;top:12px;height:34px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.pv-kpi2{position:absolute;left:30%;right:6%;top:56px;height:90px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.pv-kpi2 .road{position:absolute;left:10%;right:10%;top:48%;height:8px;background:#D7DEE7;border-radius:9px}
+.pv-kpi2 .dot{position:absolute;width:12px;height:12px;border-radius:50%;top:36%;left:38%;background:var(--sev-high)}
+.pv-kpi2 .dot2{position:absolute;width:9px;height:9px;border-radius:50%;top:62%;left:66%;background:var(--sev-med)}
+.pv-kpi3{position:absolute;left:30%;right:6%;top:158px;height:24px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.pv-phone{position:absolute;left:50%;top:18px;transform:translateX(-50%);width:112px;height:154px;border-radius:20px;
+  background:#0E1223;border:1px solid #28324A;overflow:hidden}
+.pv-phone .map{position:absolute;inset:0;background:radial-gradient(60px 40px at 50% 30%,#1a2133,#070B16)}
+.pv-phone .route{position:absolute;left:48%;top:10%;bottom:14%;width:7px;background:#38BDF8;border-radius:9px}
+.pv-phone .haz{position:absolute;left:8px;right:8px;top:8px;height:20px;border-radius:7px;
+  background:linear-gradient(90deg,rgba(239,68,68,.55),rgba(239,68,68,.2));border:1px solid rgba(239,68,68,.7)}
+.pv-phone .sheet{position:absolute;left:0;right:0;bottom:0;height:56px;background:#0A0E1A;border-top:1px solid #28324A;
+  border-radius:14px 14px 0 0}
+.pv-phone .cta{position:absolute;left:10px;right:10px;bottom:10px;height:22px;border-radius:7px;background:#38BDF8}
+.card h2{font-family:var(--font);font-size:18px;font-weight:600;margin:16px 18px 4px}
+.card p{margin:0 18px 18px;color:var(--fg-muted);font-size:14px;line-height:1.5}
+.card .go{font-family:var(--font);font-size:13px;font-weight:600;color:var(--accent);margin:0 18px 18px;display:block}
+.row{display:flex;gap:8px;margin:0 18px 18px;flex-wrap:wrap}
+.sw{font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 9px;border-radius:7px;color:#fff}
+.section{margin-top:52px}
+.section h3{font-family:var(--font);font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-muted);margin:0 0 14px}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:14px}
+th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--border)}
+th{font-family:var(--font);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-muted);background:#F1F5F9}
+td:first-child{font-family:var(--font);font-weight:500}
+.m{font-family:var(--mono);font-size:12.5px}
+tr:last-child td{border-bottom:none}
+ol{color:var(--fg-muted);line-height:1.7;padding-left:20px}
+code{font-family:var(--mono);font-size:13px;background:#F1F5F9;padding:2px 6px;border-radius:5px}
+@media (max-width:760px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="tag">Prototype · direction B</span>
+  <h1>RoadSense — a second design direction</h1>
+  <p class="lead">Two clickable prototypes sharing one token system, generated from the <b>ui-ux-pro-max</b> skill data:
+    the <em>Data-Dense Dashboard</em> style with the <em>Government/Public Service</em> palette for web, and a low-glare
+    <em>OLED/kiosk</em> dark theme for the mobile driving HUD. Red is reserved strictly for hazard severity.</p>
+
+  <div class="cards">
+    <a class="card" href="mobile.html">
+      <div class="preview mob">
+        <div class="pv-phone"><div class="map"></div><div class="route"></div><div class="haz"></div>
+          <div class="sheet"></div><div class="cta"></div></div>
+      </div>
+      <h2>Mobile app →</h2>
+      <p>Three screens: Navigate (route choice + hazard alert), Scan (on-device detection with DPWH codes), Reports.</p>
+      <span class="go">Open prototype →</span>
+    </a>
+    <a class="card" href="web.html">
+      <div class="preview web">
+        <div class="pv-side"></div>
+        <div class="pv-kpi"></div>
+        <div class="pv-kpi2"><div class="road"></div><div class="dot"></div><div class="dot2"></div></div>
+        <div class="pv-kpi3"></div>
+      </div>
+      <h2>Web console →</h2>
+      <p>GIS operations dashboard: KPI tiles, live defect map with severity clusters, breakdowns, and a filterable report table.</p>
+      <span class="go">Open prototype →</span>
+    </a>
+  </div>
+
+  <div class="section">
+    <h3>Shared colour tokens</h3>
+    <table>
+      <tr><th>Role</th><th>Web (light)</th><th>Mobile / dark</th><th>Use</th></tr>
+      <tr><td>Brand</td><td class="m">#0F172A</td><td class="m">#020617</td><td>Chrome, sidebar, app background</td></tr>
+      <tr><td>Accent</td><td class="m">#0369A1</td><td class="m">#38BDF8</td><td>Primary action, active route</td></tr>
+      <tr><td>Low</td><td class="m">#16A34A</td><td class="m">#22C55E</td><td>Minor defect</td></tr>
+      <tr><td>Medium</td><td class="m">#B45309</td><td class="m">#F59E0B</td><td>Monitor</td></tr>
+      <tr><td>High</td><td class="m">#DC2626</td><td class="m">#EF4444</td><td>Hazard — red never decorative</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3>Why this direction</h3>
+    <ol>
+      <li><b>Driving-first contrast.</b> Dark, low-glare surfaces with tabular numerals — legible at a glance, day or night.</li>
+      <li><b>One primary action per screen.</b> The route CTA dominates; everything else is subordinate.</li>
+      <li><b>Severity is redundant, not colour-only.</b> Every state pairs colour with a label (WCAG <code>color-not-only</code>).</li>
+      <li><b>Government-grade web.</b> Navy + blue reads institutional and prints/Embeds cleanly for DPWH reporting.</li>
+      <li><b>Token-driven.</b> One variable set drives both apps; a palette change lands everywhere at once.</li>
+    </ol>
+    <p class="lead" style="margin-top:8px;font-size:14px">Note: the skill's product-type query returned 0 matches for
+      “maps/navigation utility”, so style/colour/type guidance was used directly (noted as a fallback, not a DB hit).
+      Fonts load from Google Fonts; everything else is self-contained and works offline.</p>
+  </div>
+</div>
+</body>
+</html>

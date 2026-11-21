@@ -3514,90 +3514,45 @@ extension _WebMapScreenCards on MapScreenState {
 
                   const SizedBox(height: 14),
 
-                  // Actions: Get Directions & Full Report
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 42,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2563EB),
-                              foregroundColor: Colors.white,
-                              elevation: 2,
-                              shadowColor: const Color(
-                                0xFF2563EB,
-                              ).withValues(alpha: 0.4),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                            ),
-                            icon: const Icon(Icons.near_me_rounded, size: 17),
-                            label: const Text(
-                              'Get Directions',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                            onPressed: () {
-                              _applyMapState(() {
-                                _destination = pothole.location;
-                                _isRoutePlanningMode = false;
-                                _searchController.text =
-                                    'Hazard (${pothole.location.latitude.toStringAsFixed(4)}, ${pothole.location.longitude.toStringAsFixed(4)})';
-                              });
-                              _calculateRoute(pothole.location);
-                            },
-                          ),
+                  // Action: Full Report
+                  SizedBox(
+                    width: double.infinity,
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isDark
+                            ? Colors.white
+                            : const Color(0xFF0F172A),
+                        backgroundColor: isDark
+                            ? const Color(0xFF334155)
+                            : const Color(0xFFF8FAFC),
+                        side: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF475569)
+                              : const Color(0xFFCBD5E1),
+                          width: 1.2,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: SizedBox(
-                          height: 42,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF0F172A),
-                              backgroundColor: isDark
-                                  ? const Color(0xFF334155)
-                                  : const Color(0xFFF8FAFC),
-                              side: BorderSide(
-                                color: isDark
-                                    ? const Color(0xFF475569)
-                                    : const Color(0xFFCBD5E1),
-                                width: 1.2,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                            ),
-                            icon: const Icon(
-                              Icons.assignment_rounded,
-                              size: 17,
-                              color: Color(0xFF2563EB),
-                            ),
-                            label: const Text(
-                              'Full Report',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            onPressed: () => _showPotholeDetails(pothole),
-                          ),
+                      icon: const Icon(
+                        Icons.assignment_rounded,
+                        size: 17,
+                        color: Color(0xFF2563EB),
+                      ),
+                      label: const Text(
+                        'Full Report',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ],
+                      onPressed: () => _showPotholeDetails(pothole),
+                    ),
                   ),
                 ],
               ),

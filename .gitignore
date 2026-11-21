@@ -47,10 +47,26 @@ app.*.map.json
 # Binaries and packages
 *.apk
 *.dill
-DPWH_Thesis_and_App_Package/
+DPWH_Thesis_and_App_Package*/
+assets/dpwh_thesis_package3/
+assets/dpwh_thesis_package6/
+archive/
+opt/
+graphify-out/
+brag-output/
 *.pt
 *.onnx
 *.torchscript
+
+# Dependencies and local caches
+.firebase/
+functions/node_modules/
+.tecno_adb_last.txt
+*.extracted.txt
+*extracted.txt
+Untitled-1.txt
+web-audit-desktop.png
+ZZZZZZZ.bat
 
 # ML calibration / dataset artifacts
 *.npy

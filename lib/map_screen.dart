@@ -9,7 +9,8 @@ import 'package:flutter/gestures.dart'
         GestureDisposition,
         GestureRecognizer;
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, compute, defaultTargetPlatform, kIsWeb;
 import 'app_settings.dart';
 import 'app_design.dart';
 import 'dpwh_standards.dart';
@@ -37,6 +38,9 @@ import 'mobile_tour.dart';
 import 'sta_maria_sample_potholes.dart';
 import 'route_pothole_advisor.dart';
 import 'road_report_cache.dart';
+import 'resilient_tile_provider.dart';
+import 'gps_tracker_smoother.dart';
+import 'nav_vehicle_3d.dart';
 
 enum FollowMode { none, location, compass }
 
@@ -286,6 +290,8 @@ typedef CorridorReportFetcher =
       required double maxLon,
     });
 
+enum _MapSubPageTour { none, search, directions, routePreview, driving }
+
 class MapScreen extends StatefulWidget {
   final List<PotholeMarker> detectedPotholes;
   final Future<void> Function(PotholeMarker pothole)? onDeleteDetectedPothole;
@@ -294,6 +300,7 @@ class MapScreen extends StatefulWidget {
   final VoidCallback? onOpenProfile;
   final VoidCallback? onOpenScanner;
   final VoidCallback? onReplayTour;
+  final MobileTourController? tourController;
   final GlobalKey? tourSearchBarKey;
   final GlobalKey? tourLayersFilterKey;
   final GlobalKey? tourLocationButtonKey;
@@ -312,6 +319,7 @@ class MapScreen extends StatefulWidget {
     this.onOpenProfile,
     this.onOpenScanner,
     this.onReplayTour,
+    this.tourController,
     this.tourSearchBarKey,
     this.tourLayersFilterKey,
     this.tourLocationButtonKey,
@@ -336,7 +344,54 @@ class MapScreenState extends State<MapScreen>
   final _directionsGuideKey = GlobalKey();
   final _compassGuideKey = GlobalKey();
   final _zoomGuideKey = GlobalKey();
+  final _freeDriveGuideKey = GlobalKey();
   final _locationGuideKey = GlobalKey();
+  final _searchInputGuideKey = GlobalKey();
+  final _searchQuickPicksGuideKey = GlobalKey();
+  final _routeEndpointsGuideKey = GlobalKey();
+  final _routeSwapGuideKey = GlobalKey();
+  final _routeTravelModeGuideKey = GlobalKey();
+  final _routeStartDrivingGuideKey = GlobalKey();
+  final _routeAvoidGuideKey = GlobalKey();
+  final _routeCompareGuideKey = GlobalKey();
+  final _drivingAngleGuideKey = GlobalKey();
+  final _drivingSearchGuideKey = GlobalKey();
+  final _drivingVoiceGuideKey = GlobalKey();
+  final _drivingRerouteGuideKey = GlobalKey();
+  final _drivingBottomSheetGuideKey = GlobalKey();
+
+  Timer? _subPageTourTimer;
+  _MapSubPageTour _lastScheduledSubPage = _MapSubPageTour.none;
+  int _subPageTourSeq = 0;
+
+  bool get isDrivingActive => _isNavigating;
+  bool get isSearchOrDirectionsActive => _isSearchPageActive;
+  bool get isRoutePreviewActive =>
+      _routePoints.isNotEmpty &&
+      !_isNavigating &&
+      !_isSearchPageActive &&
+      _selectedPothole == null &&
+      _searchedPlace == null;
+
+  _MapSubPageTour get _currentSubPageTour {
+    if (kIsWeb || !widget.isMapActive || _isChoosingLocationOnMap) {
+      return _MapSubPageTour.none;
+    }
+    if (_isSearchPageActive) {
+      return _isRoutePlanningMode
+          ? _MapSubPageTour.directions
+          : _MapSubPageTour.search;
+    }
+    if (_isNavigating) {
+      return _MapSubPageTour.driving;
+    }
+    if (_routePoints.isNotEmpty &&
+        _selectedPothole == null &&
+        _searchedPlace == null) {
+      return _MapSubPageTour.routePreview;
+    }
+    return _MapSubPageTour.none;
+  }
 
   List<TourStepSpec> get mapControlGuideSteps => [
     TourStepSpec(
@@ -351,23 +406,233 @@ class MapScreenState extends State<MapScreen>
       targetKey: _compassGuideKey,
       title: 'Map direction',
       description:
-          'Use this button to follow your heading or return the map to north. You can also rotate the map with two fingers.',
+          'Follow your heading or return the map to north. You can also rotate the map with two fingers.',
     ),
     TourStepSpec(
       id: 'map_zoom',
       targetKey: _zoomGuideKey,
       title: 'See more or less detail',
       description:
-          'Use + and ? or pinch the map. Tap a hazard for its class and report details; tap a numbered cluster to separate nearby reports.',
+          'Use + and - or pinch the map. Tap a hazard for its class and report details; tap a numbered cluster to separate nearby reports.',
+    ),
+    TourStepSpec(
+      id: 'map_free_drive',
+      targetKey: _freeDriveGuideKey,
+      title: 'Free Drive radar mode',
+      description:
+          'Enter 3D Free Drive anytime without a destination to hear ahead pothole alerts while driving.',
     ),
     TourStepSpec(
       id: 'map_location',
-      targetKey: _locationGuideKey,
+      targetKey: widget.tourLocationButtonKey ?? _locationGuideKey,
       title: 'Return to your location',
       description:
-          'Center the map on your GPS location. During driving, the green header shows directions and the next pothole distance. Location permission is needed.',
+          'Center the map on your GPS location and re-lock follow mode.',
     ),
   ];
+
+  List<TourStepSpec> _buildSearchPageGuideSteps() => [
+    TourStepSpec(
+      id: 'search_input',
+      targetKey: _searchInputGuideKey,
+      title: 'Search Bulacan places & reports',
+      description:
+          'Type a barangay, street, landmark, or defect class to jump straight to that location.',
+    ),
+    TourStepSpec(
+      id: 'search_quick_picks',
+      targetKey: _searchQuickPicksGuideKey,
+      title: 'Quick picks & pin drop',
+      description:
+          'Tap Choose on map to drop a pin manually, switch to Directions A -> B, or pick a nearby barangay.',
+    ),
+  ];
+
+  List<TourStepSpec> _buildDirectionsPageGuideSteps() => [
+    TourStepSpec(
+      id: 'directions_endpoints',
+      targetKey: _routeEndpointsGuideKey,
+      title: 'Set Point A & Point B',
+      description:
+          'Enter your start and destination, or tap Choose on map below to place either pin manually.',
+    ),
+    TourStepSpec(
+      id: 'directions_swap',
+      targetKey: _routeSwapGuideKey,
+      title: 'Swap A & B',
+      description: 'Flip your starting point and destination with one tap.',
+    ),
+    TourStepSpec(
+      id: 'directions_mode',
+      targetKey: _routeTravelModeGuideKey,
+      title: 'Choose Car, Motorcycle, or Walk',
+      description:
+          'Switch travel mode to tailor routing and travel time estimates.',
+    ),
+  ];
+
+  List<TourStepSpec> _buildRoutePreviewGuideSteps() => [
+    TourStepSpec(
+      id: 'route_start',
+      targetKey: _routeStartDrivingGuideKey,
+      title: 'Start 3D driving navigation',
+      description:
+          'Launch turn-by-turn navigation with 100m ahead pothole alerts. Drag A or B on the map anytime to adjust endpoints.',
+    ),
+    TourStepSpec(
+      id: 'route_avoid',
+      targetKey: _routeAvoidGuideKey,
+      title: 'Find fewer potholes',
+      description:
+          'Look for safer alternative routes that detour around reported severe road hazards.',
+    ),
+    TourStepSpec(
+      id: 'route_compare',
+      targetKey: _routeCompareGuideKey,
+      title: 'Compare route options',
+      description:
+          'Compare travel duration and reported potholes side by side across available routes.',
+    ),
+  ];
+
+  List<TourStepSpec> _buildDrivingModeGuideSteps() => [
+    TourStepSpec(
+      id: 'driving_angle',
+      targetKey: _drivingAngleGuideKey,
+      borderRadius: 24,
+      title: 'Switch camera angles',
+      description:
+          'Cycle between 3D Chase View, 2D Heading, North Up, and Full Route Overview.',
+    ),
+    TourStepSpec(
+      id: 'driving_search',
+      targetKey: _drivingSearchGuideKey,
+      borderRadius: 24,
+      title: 'Search along drive',
+      description: 'Search a destination or new stop while navigating.',
+    ),
+    TourStepSpec(
+      id: 'driving_voice',
+      targetKey: _drivingVoiceGuideKey,
+      borderRadius: 24,
+      title: 'Voice hazard alerts',
+      description:
+          'Mute or unmute spoken turn prompts and 100m ahead pothole warnings.',
+    ),
+    TourStepSpec(
+      id: 'driving_reroute',
+      targetKey: _drivingRerouteGuideKey,
+      borderRadius: 24,
+      title: 'Live reroute',
+      description:
+          'Switch to an alternate route near the start or recalculate from your current GPS position.',
+    ),
+    TourStepSpec(
+      id: 'driving_sheet',
+      targetKey: _drivingBottomSheetGuideKey,
+      borderRadius: 24,
+      title: '3D vehicle & drive drawer',
+      description:
+          'Swipe up or tap here to choose your 3D Car, Motorcycle, or Walker, view turn steps, or tap × to End navigation.',
+    ),
+  ];
+
+  void _syncSubPageTourIfNeeded() {
+    if (widget.tourController == null || kIsWeb) return;
+    final mode = _currentSubPageTour;
+    if (mode != _lastScheduledSubPage) {
+      _lastScheduledSubPage = mode;
+      _onSubPageTourChanged(mode);
+    }
+  }
+
+  void _onSubPageTourChanged(_MapSubPageTour mode) {
+    final tc = widget.tourController;
+    if (tc == null || kIsWeb) return;
+    _subPageTourTimer?.cancel();
+    final seq = ++_subPageTourSeq;
+
+    final MobileTourId? targetId = switch (mode) {
+      _MapSubPageTour.search => MobileTourId.search,
+      _MapSubPageTour.directions => MobileTourId.directions,
+      _MapSubPageTour.routePreview => MobileTourId.routePreview,
+      _MapSubPageTour.driving => MobileTourId.driving,
+      _MapSubPageTour.none => null,
+    };
+
+    if (tc.isRunning &&
+        tc.activeTour != targetId &&
+        tc.activeTour != MobileTourId.main) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            tc.isRunning &&
+            tc.activeTour != targetId &&
+            tc.activeTour != MobileTourId.main) {
+          tc.cancelWithoutCompleting();
+        }
+      });
+    }
+
+    if (targetId == null) return;
+
+    _subPageTourTimer = Timer(const Duration(milliseconds: 420), () async {
+      if (!mounted || seq != _subPageTourSeq) return;
+      await tc.ensureLoaded();
+      if (!mounted || seq != _subPageTourSeq || _currentSubPageTour != mode) {
+        return;
+      }
+      if (!tc.isCompleted(targetId) &&
+          tc.isRunning &&
+          tc.activeTour != targetId) {
+        tc.cancelWithoutCompleting();
+      }
+      _startSubPageTour(mode);
+    });
+  }
+
+  bool _startSubPageTour(_MapSubPageTour mode, {bool force = false}) {
+    final tc = widget.tourController;
+    if (tc == null || kIsWeb || !mounted) return false;
+    switch (mode) {
+      case _MapSubPageTour.none:
+        return false;
+      case _MapSubPageTour.search:
+        return tc.startTour(
+          MobileTourId.search,
+          _buildSearchPageGuideSteps(),
+          force: force,
+        );
+      case _MapSubPageTour.directions:
+        return tc.startTour(
+          MobileTourId.directions,
+          _buildDirectionsPageGuideSteps(),
+          force: force,
+        );
+      case _MapSubPageTour.routePreview:
+        return tc.startTour(
+          MobileTourId.routePreview,
+          _buildRoutePreviewGuideSteps(),
+          force: force,
+        );
+      case _MapSubPageTour.driving:
+        return tc.startTour(
+          MobileTourId.driving,
+          _buildDrivingModeGuideSteps(),
+          force: force,
+        );
+    }
+  }
+
+  bool startSearchOrDirectionsGuide({bool force = false}) => _startSubPageTour(
+    _isRoutePlanningMode ? _MapSubPageTour.directions : _MapSubPageTour.search,
+    force: force,
+  );
+
+  bool startRoutePreviewGuide({bool force = false}) =>
+      _startSubPageTour(_MapSubPageTour.routePreview, force: force);
+
+  bool startDrivingGuide({bool force = false}) =>
+      _startSubPageTour(_MapSubPageTour.driving, force: force);
 
   final MapController _mapController = MapController();
   double _lastMarkerZoom = 15;
@@ -381,70 +646,220 @@ class MapScreenState extends State<MapScreen>
   bool _dismissedLocationPrompt = false;
   PotholeMarker? _selectedPothole;
 
+  final http.Client _httpClient = http.Client();
+  final StreamController<void> _tileLayerResetController =
+      StreamController<void>.broadcast();
+  bool _hasPartialTileFallback = false;
+  late final ResilientTileProvider _tileProvider = ResilientTileProvider(
+    httpClient: _httpClient,
+    isOfflineCheck: () => _isOffline,
+    onFallbackStateChanged: _onTileFallbackStateChanged,
+  );
+
+  void _onTileFallbackStateChanged() {
+    if (!mounted) return;
+    final hasFallback = _tileProvider.hasFallbackTiles;
+    if (hasFallback == _hasPartialTileFallback) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final nowFallback = _tileProvider.hasFallbackTiles;
+      if (nowFallback != _hasPartialTileFallback) {
+        setState(() => _hasPartialTileFallback = nowFallback);
+      }
+    });
+  }
+
+  void _refreshMapTiles() {
+    _tileProvider.evictFallbackTiles();
+    if (!_tileLayerResetController.isClosed) {
+      _tileLayerResetController.add(null);
+    }
+    if (mounted && _hasPartialTileFallback) {
+      setState(() => _hasPartialTileFallback = false);
+    }
+  }
+  List<PotholeMarker>? _cachedEffectivePotholes;
+  List<PotholeMarker>? _cachedDetectedPotholesRef;
+  int _cachedDetectedPotholesLen = -1;
+  bool? _cachedDevMockEnabled;
+  int _cachedEffectiveVersion = -1;
+  List<RouteHazardInput>? _cachedHazardInputs;
+  int _cachedHazardInputsVersion = -1;
+  int _potholeDerivedVersion = 0;
+
+  void _invalidatePotholeDerivedCaches() {
+    _potholeDerivedVersion++;
+    _cachedEffectivePotholes = null;
+    _cachedHazardInputs = null;
+    _cachedPotholeClusters = null;
+  }
+
   late final AnimationController _puckPulseController;
-  AnimationController? _puckMoveController;
+  final GpsTrackerSmoother _gpsSmoother = GpsTrackerSmoother();
+  Ticker? _puckTicker;
+  Duration _lastPuckTickElapsed = Duration.zero;
   AnimationController? _mapMoveController;
   final ValueNotifier<LatLng?> _animatedPuckPositionNotifier =
       ValueNotifier<LatLng?>(null);
 
-  /// Smoothly interpolates the user location marker between GPS fixes (Google Maps 60 FPS puck motion)
-  void _animatePuckTo(LatLng targetPos) {
-    final current = _animatedPuckPositionNotifier.value ?? _currentPosition;
-    if (current == null) {
-      _animatedPuckPositionNotifier.value = targetPos;
+  void _ensurePuckTickerRunning() {
+    if (!mounted || !widget.isMapActive) return;
+    _puckTicker ??= createTicker(_onPuckTick);
+    if (!_puckTicker!.isActive) {
+      _lastPuckTickElapsed = Duration.zero;
+      _puckTicker!.start();
+    }
+  }
+
+  void _stopPuckTicker() {
+    _puckTicker?.stop();
+    _lastPuckTickElapsed = Duration.zero;
+  }
+
+  void _onPuckTick(Duration elapsed) {
+    if (!mounted || !widget.isMapActive) {
+      _stopPuckTicker();
       return;
     }
+    final double dtSeconds = _lastPuckTickElapsed == Duration.zero
+        ? (1.0 / 60.0)
+        : ((elapsed - _lastPuckTickElapsed).inMicroseconds / 1e6).clamp(
+            0.001,
+            0.05,
+          );
+    _lastPuckTickElapsed = elapsed;
 
-    final startLat = current.latitude;
-    final startLng = current.longitude;
-    final endLat = targetPos.latitude;
-    final endLng = targetPos.longitude;
+    final frame = _gpsSmoother.advanceFrame(
+      now: DateTime.now(),
+      dtSeconds: dtSeconds,
+    );
 
-    final dist = Geolocator.distanceBetween(startLat, startLng, endLat, endLng);
-    if (dist > 300 || dist < 0.1) {
-      _puckMoveController?.stop();
-      _animatedPuckPositionNotifier.value = targetPos;
-      if (_followMode != FollowMode.none) {
+    if (frame.headingDeg != null) {
+      final prevHeading = _lastHeadingNotifier.value;
+      if (prevHeading == null ||
+          GpsTrackerSmoother.shortestAngleDeltaDeg(
+                prevHeading,
+                frame.headingDeg!,
+              ).abs() >=
+              0.08) {
+        _lastHeadingNotifier.value = frame.headingDeg;
+      }
+    }
+
+    if (_followMode == FollowMode.compass &&
+        !_isDraggingEndpoint &&
+        _lastHeadingNotifier.value != null) {
+      final double targetRot =
+          (360.0 - _lastHeadingNotifier.value!) % 360.0;
+      if (GpsTrackerSmoother.shortestAngleDeltaDeg(
+            _currentMapRotation,
+            targetRot,
+          ).abs() >=
+          0.25) {
+        _currentMapRotation = targetRot;
+        _mapRotationNotifier.value = targetRot;
+        _mapController.rotate(targetRot);
+      }
+    }
+
+    if (frame.position != null) {
+      final prevPos = _animatedPuckPositionNotifier.value;
+      if (prevPos == null ||
+          prevPos.latitude != frame.position!.latitude ||
+          prevPos.longitude != frame.position!.longitude) {
+        _animatedPuckPositionNotifier.value = frame.position;
+      }
+
+      if (_followMode != FollowMode.none &&
+          !_isDraggingEndpoint &&
+          (_mapMoveController == null || !_mapMoveController!.isAnimating)) {
+        double nextZoom = _mapController.camera.zoom;
+        if (_isNavigating &&
+            !_isNavOverview &&
+            _followMode == FollowMode.compass) {
+          final double spd = _gpsSmoother.speedMps;
+          final double targetZoom =
+              _drivingCameraAngle == DrivingCameraAngle.chase3D
+              ? (spd < 4.0
+                    ? 17.8
+                    : (spd < 12.0 ? 17.3 : (spd < 20.0 ? 16.8 : 16.3)))
+              : (spd < 4.0
+                    ? 17.0
+                    : (spd < 12.0 ? 16.6 : (spd < 20.0 ? 16.2 : 15.8)));
+          nextZoom =
+              nextZoom +
+              (targetZoom - nextZoom) * (dtSeconds * 1.4).clamp(0.0, 0.25);
+        }
         final cameraCenter = _getVisibleMapOffsetCameraCenter(
-          targetPos,
+          frame.position!,
+          nextZoom,
+          rotationDeg: _currentMapRotation,
+        );
+        final curCam = _mapController.camera;
+        final bool centerMoved =
+            (curCam.center.latitude - cameraCenter.latitude).abs() >= 2e-6 ||
+            (curCam.center.longitude - cameraCenter.longitude).abs() >= 2e-6;
+        final bool zoomMoved = (curCam.zoom - nextZoom).abs() >= 0.015;
+        if (centerMoved || zoomMoved) {
+          _mapController.move(cameraCenter, nextZoom);
+        }
+      }
+    }
+
+    if (frame.isSettled) {
+      _stopPuckTicker();
+    }
+  }
+
+  void _snapPuckImmediately(LatLng targetPos, {double? headingDeg}) {
+    _stopPuckTicker();
+    _gpsSmoother.reset(position: targetPos, headingDeg: headingDeg);
+    _animatedPuckPositionNotifier.value = targetPos;
+    if (headingDeg != null && headingDeg.isFinite) {
+      _lastHeadingNotifier.value = GpsTrackerSmoother.normalizeAngleDeg(
+        headingDeg,
+      );
+    }
+    if (_followMode != FollowMode.none && !_isDraggingEndpoint) {
+      final cameraCenter = _getVisibleMapOffsetCameraCenter(
+        targetPos,
+        _mapController.camera.zoom,
+      );
+      _mapController.move(cameraCenter, _mapController.camera.zoom);
+    }
+  }
+
+  /// Smoothly interpolates the user location marker between GPS fixes (60 FPS
+  /// continuous velocity-aware motion without start-stop lunging).
+  void _animatePuckTo(
+    LatLng targetPos, {
+    DateTime? timestamp,
+    double speedMps = 0.0,
+    double? headingDeg,
+    bool isMock = false,
+  }) {
+    final result = _gpsSmoother.ingestFix(
+      GpsFixSample(
+        position: targetPos,
+        timestamp: timestamp ?? DateTime.now(),
+        speedMps: speedMps,
+        headingDeg: headingDeg,
+        isMock: isMock,
+      ),
+    );
+    if (!result.accepted || result.filteredPosition == null) return;
+    if (result.shouldSnapImmediately) {
+      _animatedPuckPositionNotifier.value = result.filteredPosition;
+      if (_followMode != FollowMode.none && !_isDraggingEndpoint) {
+        final cameraCenter = _getVisibleMapOffsetCameraCenter(
+          result.filteredPosition!,
           _mapController.camera.zoom,
         );
         _mapController.move(cameraCenter, _mapController.camera.zoom);
       }
       return;
     }
-
-    _puckMoveController?.stop();
-    _puckMoveController?.dispose();
-
-    _puckMoveController = AnimationController(
-      duration: const Duration(milliseconds: 850),
-      vsync: this,
-    );
-
-    final curved = CurvedAnimation(
-      parent: _puckMoveController!,
-      curve: Curves.easeOutCubic,
-    );
-
-    _puckMoveController!.addListener(() {
-      if (!mounted) return;
-      final t = curved.value;
-      final interpLat = startLat + (endLat - startLat) * t;
-      final interpLng = startLng + (endLng - startLng) * t;
-      final interpPos = LatLng(interpLat, interpLng);
-      _animatedPuckPositionNotifier.value = interpPos;
-
-      if (_followMode != FollowMode.none) {
-        final cameraCenter = _getVisibleMapOffsetCameraCenter(
-          interpPos,
-          _mapController.camera.zoom,
-        );
-        _mapController.move(cameraCenter, _mapController.camera.zoom);
-      }
-    });
-
-    _puckMoveController!.forward();
+    _ensurePuckTickerRunning();
   }
 
   /// Smoothly glides the GIS map camera to a target location and zoom level
@@ -672,16 +1087,19 @@ class MapScreenState extends State<MapScreen>
   }
 
   /// Calculates the adjusted camera center so that [targetLocation] is rendered
-  /// right in the middle of the unobstructed visible map area (between top header and bottom dock/sheet)
+  /// right in the middle of the unobstructed visible map area (or anchored near
+  /// the bottom of the screen during active driving navigation).
   LatLng _getVisibleMapOffsetCameraCenter(
     LatLng targetLocation,
     double zoom, {
     bool? isExpandedSheet,
+    double? rotationDeg,
   }) {
     try {
       final Size screenSize = MediaQuery.sizeOf(context);
       final double screenHeight = screenSize.height;
       final double topInset = MediaQuery.paddingOf(context).top;
+      final double bottomInset = MediaQuery.paddingOf(context).bottom;
 
       final bool expanded = isExpandedSheet ?? _isRouteSheetExpanded;
 
@@ -690,16 +1108,36 @@ class MapScreenState extends State<MapScreen>
           ? (topInset + 84.0)
           : (topInset + 56.0);
 
-      // Bottom obstruction (expanded 50% sheet or compact bottom dock)
+      // Bottom obstruction (expanded drawer, sleek 96dp driving ETA bar, or route preview dock)
       final double bottomObstruction = expanded
           ? (screenHeight * 0.50)
-          : ((_isNavigating || _routePoints.isNotEmpty) ? 170.0 : 96.0);
+          : ((_isNavigating && !_isNavOverview)
+                ? (96.0 + bottomInset)
+                : (_routePoints.isNotEmpty ? (190.0 + bottomInset) : 96.0));
 
       final double bottomSheetTop = screenHeight - bottomObstruction;
-      final double visibleCenterY = (topObstruction + bottomSheetTop) / 2.0;
+      // Anchor vehicle puck according to the active driving camera angle.
+      final double visibleCenterY;
+      if (_isNavigating && !expanded && !_isNavOverview) {
+        switch (_drivingCameraAngle) {
+          case DrivingCameraAngle.chase3D:
+            visibleCenterY = (bottomSheetTop - 58.0).clamp(
+              topObstruction + 90.0,
+              screenHeight * 0.72,
+            );
+          case DrivingCameraAngle.topDown2D:
+            visibleCenterY =
+                topObstruction + (bottomSheetTop - topObstruction) * 0.62;
+          case DrivingCameraAngle.northUp2D:
+          case DrivingCameraAngle.overview:
+            visibleCenterY = (topObstruction + bottomSheetTop) / 2.0;
+        }
+      } else {
+        visibleCenterY = (topObstruction + bottomSheetTop) / 2.0;
+      }
       final double screenCenterY = screenHeight / 2.0;
 
-      // Pixel shift needed to move the target into the center of the visible area
+      // Pixel shift needed to move the target into the desired screen Y position
       final double pixelShiftUp = screenCenterY - visibleCenterY;
 
       if (pixelShiftUp.abs() < 1.0) return targetLocation;
@@ -707,12 +1145,18 @@ class MapScreenState extends State<MapScreen>
       final double metersPerPixel =
           (156543.03392 * math.cos(targetLocation.latitude * math.pi / 180.0)) /
           math.pow(2.0, zoom);
-      final double metersDeltaY = pixelShiftUp * metersPerPixel;
-      final double deltaLat = metersDeltaY / 111139.0;
+      final double aheadMeters = -pixelShiftUp * metersPerPixel;
+      final double effectiveRotation = rotationDeg ?? _currentMapRotation;
+      final double upHeadingRad = (-effectiveRotation) * math.pi / 180.0;
+      final double dLat = (aheadMeters * math.cos(upHeadingRad)) / 111139.0;
+      final double metersPerLng =
+          (111320.0 * math.cos(targetLocation.latitude * math.pi / 180.0))
+              .clamp(1.0, 111320.0);
+      final double dLng = (aheadMeters * math.sin(upHeadingRad)) / metersPerLng;
 
       return LatLng(
-        targetLocation.latitude - deltaLat,
-        targetLocation.longitude,
+        targetLocation.latitude + dLat,
+        targetLocation.longitude + dLng,
       );
     } catch (_) {
       return targetLocation;
@@ -723,11 +1167,13 @@ class MapScreenState extends State<MapScreen>
     LatLng targetLocation,
     double destZoom, {
     bool? isExpandedSheet,
+    double? rotationDeg,
   }) {
     final center = _getVisibleMapOffsetCameraCenter(
       targetLocation,
       destZoom,
       isExpandedSheet: isExpandedSheet,
+      rotationDeg: rotationDeg ?? _currentMapRotation,
     );
     _animatedMapMove(center, destZoom);
   }
@@ -795,6 +1241,13 @@ class MapScreenState extends State<MapScreen>
   Timer? _liveRerouteTimer;
   int _endpointDragRevision = 0;
   bool _isNavigating = false;
+  bool _isNavOverview = false;
+  DrivingCameraAngle _drivingCameraAngle = DrivingCameraAngle.chase3D;
+  bool _isManualRerouting = false;
+  String? _drivingHudNotice;
+  Timer? _drivingHudNoticeTimer;
+  final ValueNotifier<double> _mapRotationNotifier = ValueNotifier<double>(0.0);
+  Timer? _navAutoRecenterTimer;
   bool _isAutoRerouting = false;
   DateTime? _lastAutoRerouteAt;
   bool _useMockLocation = false;
@@ -853,6 +1306,8 @@ class MapScreenState extends State<MapScreen>
   double? _lastGpsAccuracyMeters;
   double? _lastGpsSpeedMps;
   DateTime? _lastGpsTimestamp;
+  LatLng? _lastProximityCheckPos;
+  DateTime? _lastProximityCheckAt;
   final ValueNotifier<double?> _lastHeadingNotifier = ValueNotifier(null);
   List<LatLng> _potholesOnRoute = [];
   RouteComparisonResult? _routeComparison;
@@ -946,7 +1401,7 @@ class MapScreenState extends State<MapScreen>
     setState(() {
       _snappedPotholeCache.clear();
       _expandedClusterId = null;
-      _cachedPotholeClusters = null;
+      _invalidatePotholeDerivedCaches();
       if (DeveloperMarkers.owns(_selectedPothole?.docId)) {
         final matching = _localDeveloperMarkers.where(
           (p) => p.docId == _selectedPothole!.docId,
@@ -958,50 +1413,74 @@ class MapScreenState extends State<MapScreen>
   }
 
   List<PotholeMarker> get _effectivePotholes {
+    final bool devMockEnabled = AppSettings.instance.devMockModeEnabled;
+    if (_cachedEffectivePotholes != null &&
+        identical(widget.detectedPotholes, _cachedDetectedPotholesRef) &&
+        _cachedDetectedPotholesLen == widget.detectedPotholes.length &&
+        _cachedDevMockEnabled == devMockEnabled &&
+        _cachedEffectiveVersion == _potholeDerivedVersion) {
+      return _cachedEffectivePotholes!;
+    }
     final reports = [
       ...widget.detectedPotholes.where(
         (p) => !isSampleStaMariaMarkerId(p.docId),
       ),
       ..._localDeveloperMarkers,
     ];
+    List<PotholeMarker> resolved;
     if (_corridorSupplementPotholes.isEmpty) {
-      return reports;
-    }
-    final existingIds = <String>{};
-    final existingKeys = <String>{};
-    final suppressedIds = <String>{..._dismissedSampleIds};
-    for (final p in reports) {
-      final docId = p.docId?.trim();
-      if (docId != null && docId.isNotEmpty) {
-        existingIds.add(docId);
-        if (_isReportExcluded(p)) {
-          suppressedIds.add(docId);
+      resolved = reports;
+    } else {
+      final existingIds = <String>{};
+      final existingKeys = <String>{};
+      final suppressedIds = <String>{..._dismissedSampleIds};
+      for (final p in reports) {
+        final docId = p.docId?.trim();
+        if (docId != null && docId.isNotEmpty) {
+          existingIds.add(docId);
+          if (_isReportExcluded(p)) {
+            suppressedIds.add(docId);
+          }
+        } else {
+          existingKeys.add(_potholeKey(p.location));
         }
-      } else {
-        existingKeys.add(_potholeKey(p.location));
       }
-    }
-    final merged = List<PotholeMarker>.from(reports);
-    for (final c in _corridorSupplementPotholes) {
-      if (isSampleStaMariaMarkerId(c.docId)) continue;
-      if (_isReportExcluded(c)) continue;
-      final docId = c.docId?.trim();
-      if (docId != null && docId.isNotEmpty) {
-        if (suppressedIds.contains(docId) || existingIds.contains(docId)) {
-          continue;
+      final merged = List<PotholeMarker>.from(reports);
+      for (final c in _corridorSupplementPotholes) {
+        if (isSampleStaMariaMarkerId(c.docId)) continue;
+        if (_isReportExcluded(c)) continue;
+        final docId = c.docId?.trim();
+        if (docId != null && docId.isNotEmpty) {
+          if (suppressedIds.contains(docId) || existingIds.contains(docId)) {
+            continue;
+          }
+          existingIds.add(docId);
+        } else {
+          final key = _potholeKey(c.location);
+          if (existingKeys.contains(key)) continue;
+          existingKeys.add(key);
         }
-        existingIds.add(docId);
-      } else {
-        final key = _potholeKey(c.location);
-        if (existingKeys.contains(key)) continue;
-        existingKeys.add(key);
+        merged.add(c);
       }
-      merged.add(c);
+      resolved = merged;
     }
-    return merged;
+    _cachedDetectedPotholesRef = widget.detectedPotholes;
+    _cachedDetectedPotholesLen = widget.detectedPotholes.length;
+    _cachedDevMockEnabled = devMockEnabled;
+    _cachedEffectiveVersion = _potholeDerivedVersion;
+    _cachedEffectivePotholes = resolved;
+    return resolved;
   }
 
   List<RouteHazardInput> _buildHazardInputs() {
+    final bool devMockEnabled = AppSettings.instance.devMockModeEnabled;
+    if (_cachedHazardInputs != null &&
+        identical(widget.detectedPotholes, _cachedDetectedPotholesRef) &&
+        _cachedDetectedPotholesLen == widget.detectedPotholes.length &&
+        _cachedDevMockEnabled == devMockEnabled &&
+        _cachedHazardInputsVersion == _potholeDerivedVersion) {
+      return _cachedHazardInputs!;
+    }
     final List<RouteHazardInput> inputs = [];
     for (final p in _effectivePotholes) {
       if (_isReportExcluded(p)) {
@@ -1037,6 +1516,11 @@ class MapScreenState extends State<MapScreen>
         ),
       );
     }
+    _cachedDetectedPotholesRef = widget.detectedPotholes;
+    _cachedDetectedPotholesLen = widget.detectedPotholes.length;
+    _cachedDevMockEnabled = devMockEnabled;
+    _cachedHazardInputsVersion = _potholeDerivedVersion;
+    _cachedHazardInputs = inputs;
     return inputs;
   }
 
@@ -1056,9 +1540,13 @@ class MapScreenState extends State<MapScreen>
     _puckPulseController = AnimationController(
       duration: const Duration(milliseconds: 1800),
       vsync: this,
-    )..repeat();
+    );
+    if (widget.isMapActive) {
+      _puckPulseController.repeat();
+    }
     if (_cachedGlobalPosition != null) {
       _currentPosition = _cachedGlobalPosition;
+      _gpsSmoother.reset(position: _cachedGlobalPosition);
       _animatedPuckPositionNotifier.value = _cachedGlobalPosition;
       _isLoadingLocation = false;
     }
@@ -1081,9 +1569,26 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.devEditLocationNotifier.addListener(
       _onDevEditLocationSettingChanged,
     );
+    _travelMode = _travelModeFromSetting(
+      AppSettings.instance.mobileNavVehicleModeNotifier.value,
+    );
+    AppSettings.instance.mobileNavVehicleModeNotifier.addListener(
+      _onNavVehicleModeChanged,
+    );
     _connectivitySubscription = watchSafeOfflineState((offline) {
+      final wasOffline = _isOffline;
       if (mounted && _isOffline != offline) {
         setState(() => _isOffline = offline);
+      }
+      if (!offline && (wasOffline || _tileProvider.hasFallbackTiles)) {
+        _refreshMapTiles();
+      }
+      if (!offline) {
+        unawaited(
+          _tileProvider.prewarmArea(
+            center: _currentPosition ?? _bulacanCenter,
+          ),
+        );
       }
     });
   }
@@ -1199,10 +1704,15 @@ class MapScreenState extends State<MapScreen>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isMapActive != widget.isMapActive) {
       if (widget.isMapActive) {
+        if (!_isNavigating && !_puckPulseController.isAnimating) {
+          _puckPulseController.repeat();
+        }
         _startFollowing();
       } else {
+        _puckPulseController.stop();
         _positionSubscription?.cancel();
         _compassSubscription?.cancel();
+        _stopPuckTicker();
       }
     }
     final oldSig = _potholeListSignature(oldWidget.detectedPotholes);
@@ -1213,7 +1723,7 @@ class MapScreenState extends State<MapScreen>
       _snappedWasVerified.clear();
       _corridorSupplementPotholes = const [];
       _lastCorridorFetchKey = null;
-      _cachedPotholeClusters = null;
+      _invalidatePotholeDerivedCaches();
       unawaited(_refreshRouteAwarePotholeState(refetchCorridor: true));
     }
   }
@@ -1240,6 +1750,12 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.devEditLocationNotifier.removeListener(
       _onDevEditLocationSettingChanged,
     );
+    AppSettings.instance.mobileNavVehicleModeNotifier.removeListener(
+      _onNavVehicleModeChanged,
+    );
+    _subPageTourTimer?.cancel();
+    _navAutoRecenterTimer?.cancel();
+    _drivingHudNoticeTimer?.cancel();
     _simulationTimer?.cancel();
     _searchController.dispose();
     _originController.dispose();
@@ -1254,14 +1770,18 @@ class MapScreenState extends State<MapScreen>
     _puckPulseController.dispose();
     _warningBannerTimer?.cancel();
     _warningBanner.dispose();
-    _puckMoveController?.stop();
-    _puckMoveController?.dispose();
+    _puckTicker?.stop();
+    _puckTicker?.dispose();
+    _puckTicker = null;
     final prevMapMoveController = _mapMoveController;
     _mapMoveController = null;
     prevMapMoveController?.stop();
     prevMapMoveController?.dispose();
     _animatedPuckPositionNotifier.dispose();
     _lastHeadingNotifier.dispose();
+    _mapRotationNotifier.dispose();
+    _tileLayerResetController.close();
+    _httpClient.close();
     if (!kIsWeb) _tts.stop();
     AppSettings.instance.setRouteActive(false);
     super.dispose();
@@ -1514,16 +2034,49 @@ class MapScreenState extends State<MapScreen>
     );
   }
 
+  LocationSettings _buildTrackingLocationSettings() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        intervalDuration: const Duration(milliseconds: 500),
+      );
+    }
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        activityType: ActivityType.automotiveNavigation,
+        distanceFilter: 0,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+    );
+  }
+
+  List<LatLng>? _activeRouteForPuckSnap() {
+    if (_destination == null || _alternativeRoutes.isEmpty) return null;
+    final bool isUsingCustomOrigin =
+        _customOrigin != null && _originController.text != 'Your location';
+    if (isUsingCustomOrigin && !_isSimulatingRoute) return null;
+    final int activeIndex = _selectedRouteIndex < _alternativeRoutes.length
+        ? _selectedRouteIndex
+        : 0;
+    final route = _alternativeRoutes[activeIndex];
+    return route.length >= 2 ? route : null;
+  }
+
   void _startFollowing() {
     _positionSubscription?.cancel();
     _compassSubscription?.cancel();
 
     _positionSubscription =
         Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3,
-          ),
+          locationSettings: _buildTrackingLocationSettings(),
         ).listen(
           (Position position) {
             if (!widget.isMapActive || !mounted) return;
@@ -1537,11 +2090,55 @@ class MapScreenState extends State<MapScreen>
               return;
             }
 
-            final newPos = gpsPos;
+            final result = _gpsSmoother.ingestFix(
+              GpsFixSample(
+                position: gpsPos,
+                timestamp: position.timestamp,
+                accuracyMeters: position.accuracy,
+                speedMps: position.speed,
+                headingDeg: position.heading >= 0 ? position.heading : null,
+              ),
+              activeRoute: _activeRouteForPuckSnap(),
+              isNavigating: _isNavigating,
+            );
+            if (!result.accepted || result.filteredPosition == null) {
+              return;
+            }
+
+            final newPos = result.filteredPosition!;
             _currentPosition = newPos;
-            _checkPotholeProximity(newPos);
+            final now = DateTime.now();
+            final shouldCheckProximity =
+                _lastProximityCheckPos == null ||
+                _lastProximityCheckAt == null ||
+                now.difference(_lastProximityCheckAt!).inMilliseconds >= 1200 ||
+                GpsTrackerSmoother.distanceMeters(
+                      _lastProximityCheckPos!,
+                      newPos,
+                    ) >=
+                    1.8;
+            if (shouldCheckProximity) {
+              _lastProximityCheckPos = newPos;
+              _lastProximityCheckAt = now;
+              _checkPotholeProximity(newPos);
+            }
             unawaited(_autoAdjustRouteToCurrentPath(newPos));
-            _animatePuckTo(newPos);
+
+            if (result.shouldSnapImmediately) {
+              _animatedPuckPositionNotifier.value = newPos;
+              if (result.fusedHeadingDeg != null) {
+                _lastHeadingNotifier.value = result.fusedHeadingDeg;
+              }
+              if (_followMode != FollowMode.none && !_isDraggingEndpoint) {
+                final cameraCenter = _getVisibleMapOffsetCameraCenter(
+                  newPos,
+                  _mapController.camera.zoom,
+                );
+                _mapController.move(cameraCenter, _mapController.camera.zoom);
+              }
+            } else {
+              _ensurePuckTickerRunning();
+            }
           },
           onError: (_) {
             if (!mounted) return;
@@ -1563,21 +2160,15 @@ class MapScreenState extends State<MapScreen>
         if (!widget.isMapActive || !mounted) return;
         if (event.heading == null) return;
 
-        double heading = event.heading!;
-
-        if (_lastHeadingNotifier.value != null) {
-          final double prev = _lastHeadingNotifier.value!;
-          final double diff = (heading - prev + 180) % 360 - 180;
-          // Continuous exponential moving average without stutter-inducing deadband
-          heading = (prev + diff * 0.25 + 360) % 360;
-        }
-
-        if (mounted) {
-          _lastHeadingNotifier.value = heading;
-        }
-
-        if (_followMode == FollowMode.compass && !_isDraggingEndpoint) {
-          _mapController.rotate((360 - heading) % 360);
+        // Fused heading: compass drives orientation when stationary/slow,
+        // while steady GPS course / route bearing takes priority during nav.
+        _gpsSmoother.ingestCompassHeading(
+          event.heading!,
+          now: DateTime.now(),
+          isNavigating: _isNavigating,
+        );
+        if (!_isNavigating || _lastHeadingNotifier.value == null) {
+          _ensurePuckTickerRunning();
         }
       });
     }
@@ -1654,6 +2245,7 @@ class MapScreenState extends State<MapScreen>
 
     double absoluteMin = double.infinity;
     String? closestPotholeKey;
+    LatLng? closestPotholeLoc;
 
     for (final pothole in warningCandidates) {
       final dist = Geolocator.distanceBetween(
@@ -1664,6 +2256,7 @@ class MapScreenState extends State<MapScreen>
       );
       if (dist < absoluteMin) {
         absoluteMin = dist;
+        closestPotholeLoc = pothole;
         closestPotholeKey =
             '${pothole.latitude.toStringAsFixed(5)},${pothole.longitude.toStringAsFixed(5)}';
       }
@@ -1685,7 +2278,7 @@ class MapScreenState extends State<MapScreen>
       return d > _proximityCircleRadiusMeters;
     }).toList();
 
-    final UpcomingHazardCountdown? upcoming;
+    UpcomingHazardCountdown? upcoming;
     if (navState != null &&
         navState.status == NavigationHazardStatus.hazardAhead &&
         navState.nextEncounter != null &&
@@ -1715,6 +2308,30 @@ class MapScreenState extends State<MapScreen>
       );
     } else {
       upcoming = null;
+    }
+
+    if (upcoming == null && inProximity && closestPotholeLoc != null) {
+      RouteHazardInput? matchedHazard;
+      for (final h in roamingEligiblePotholes) {
+        if ((h.location.latitude - closestPotholeLoc.latitude).abs() < 1e-6 &&
+            (h.location.longitude - closestPotholeLoc.longitude).abs() <
+                1e-6) {
+          matchedHazard = h;
+          break;
+        }
+      }
+      upcoming = UpcomingHazardCountdown(
+        distanceMeters: absoluteMin,
+        defectName: matchedHazard?.defectName ?? 'Pothole',
+        dpwhCode: matchedHazard?.dpwhCode ?? 'POTH',
+        barangay: matchedHazard?.barangay ?? '',
+        potholeCount: matchedHazard?.resolvedPotholeDetectionCount ?? 1,
+        isOnActiveRoute: activeFullRoute != null,
+        location: closestPotholeLoc,
+        encounterId: 'prox_${closestPotholeKey ?? ''}',
+        remainingOnRoute: 1,
+        totalOnRoute: 1,
+      );
     }
 
     String nearestInfo = 'Clear ahead';
@@ -1758,20 +2375,49 @@ class MapScreenState extends State<MapScreen>
       }
     }
 
-    setState(() {
-      _currentPosition = userPos;
-      _inProximityWarning = inProximity;
+    final nextRoutePoints = (_destination != null && !_isDraggingEndpoint)
+        ? routeForChecks
+        : _routePoints;
+    final nextPotholesOnRoute = (_destination != null && !_isDraggingEndpoint)
+        ? (pendingPotholes.isNotEmpty ? pendingPotholes : warningCandidates)
+        : _potholesOnRoute;
+
+    final bool hudChanged =
+        _inProximityWarning != inProximity ||
+        _nearestPotholeInfo != nearestInfo ||
+        _nextPotholeEta != nextPotholeEta ||
+        _upcomingHazard?.encounterId != upcoming?.encounterId ||
+        _upcomingHazard?.distanceMeters.round() !=
+            upcoming?.distanceMeters.round() ||
+        _navHazardState?.status != navState?.status ||
+        _navHazardState?.remainingPotholeCount !=
+            navState?.remainingPotholeCount ||
+        _navHazardState?.distanceToNextMeters?.round() !=
+            navState?.distanceToNextMeters?.round() ||
+        _routePoints.length != nextRoutePoints.length ||
+        _potholesOnRoute.length != nextPotholesOnRoute.length;
+
+    _currentPosition = userPos;
+    if (hudChanged) {
+      setState(() {
+        _inProximityWarning = inProximity;
+        _navHazardState = navState;
+        _upcomingHazard = upcoming;
+        _nearestPotholeInfo = nearestInfo;
+        _nextPotholeEta = nextPotholeEta;
+        if (_destination != null && !_isDraggingEndpoint) {
+          _routePoints = nextRoutePoints;
+          _potholesOnRoute = nextPotholesOnRoute;
+        }
+      });
+    } else {
       _navHazardState = navState;
       _upcomingHazard = upcoming;
-      _nearestPotholeInfo = nearestInfo;
-      _nextPotholeEta = nextPotholeEta;
       if (_destination != null && !_isDraggingEndpoint) {
-        _routePoints = routeForChecks;
-        _potholesOnRoute = pendingPotholes.isNotEmpty
-            ? pendingPotholes
-            : warningCandidates;
+        _routePoints = nextRoutePoints;
+        _potholesOnRoute = nextPotholesOnRoute;
       }
-    });
+    }
 
     final bool allowAlerts =
         _showMarkers &&
@@ -1809,12 +2455,12 @@ class MapScreenState extends State<MapScreen>
         if (_showMarkers) {
           HapticFeedback.lightImpact();
           _triggerWarningBannerCountdown();
-          if (allowAlerts && navState == null) {
-            final String routeHazardPrompt =
-                RoutePotholeAdvisor.formatVoiceAlertAnnouncement(absoluteMin);
-            _tts.speak(routeHazardPrompt);
+          if (allowAlerts &&
+              (navState == null || navState.alertTriggerToSpeak == null)) {
+            final int meters = absoluteMin.round().clamp(1, 999);
+            _tts.speak('Caution, pothole in proximity, $meters meters away.');
             PotholeNotifier.instance.showPotholeAlert(
-              RoutePotholeAdvisor.formatDistanceAhead(absoluteMin),
+              'Pothole in proximity (${meters}m)',
             );
           }
         }
@@ -1927,7 +2573,8 @@ class MapScreenState extends State<MapScreen>
 
   void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
     bool needsRebuild = false;
-    if ((camera.zoom - _lastMarkerZoom).abs() >= .05) {
+    final double zoomThreshold = _isNavigating ? 0.60 : 0.05;
+    if ((camera.zoom - _lastMarkerZoom).abs() >= zoomThreshold) {
       _lastMarkerZoom = camera.zoom;
       needsRebuild = true;
     }
@@ -1939,11 +2586,19 @@ class MapScreenState extends State<MapScreen>
           needsRebuild ||
           ((_currentMapRotation.abs() > 1.0) != (camera.rotation.abs() > 1.0));
       _currentMapRotation = camera.rotation;
+      _mapRotationNotifier.value = camera.rotation;
     }
 
     if (hasGesture && _followMode != FollowMode.none) {
       _followMode = FollowMode.none;
       needsRebuild = true;
+      if (_isNavigating && !_isNavOverview) {
+        _navAutoRecenterTimer?.cancel();
+        _navAutoRecenterTimer = Timer(const Duration(seconds: 4), () {
+          if (!mounted || !_isNavigating || _isNavOverview) return;
+          _applyDrivingCameraAngle(_drivingCameraAngle, showNotice: false);
+        });
+      }
     }
 
     if (_isPlacingMarker && hasGesture) {
@@ -2037,6 +2692,7 @@ class MapScreenState extends State<MapScreen>
       _currentPosition = location;
       _followMode = FollowMode.location;
     });
+    _snapPuckImmediately(location);
 
     if (AppSettings.instance.devEditLocationNotifier.value) {
       AppSettings.instance.devEditLocationNotifier.value = false;
@@ -2089,6 +2745,7 @@ class MapScreenState extends State<MapScreen>
 
     if (_currentPosition != null) {
       final LatLng pos = _currentPosition!;
+      _snapPuckImmediately(pos);
       _checkPotholeProximity(pos);
       final bool usingYourLocation =
           _customOrigin == null ||
@@ -2216,9 +2873,12 @@ class MapScreenState extends State<MapScreen>
         _snappedPotholeCache[key] = p;
         _snappedWasVerified[key] = false;
       }
+      _potholeDerivedVersion++;
+      _cachedHazardInputs = null;
       return;
     }
 
+    bool anySnapUpdated = false;
     // Batch missing locations in chunks of 30 to strictly satisfy ORS max-location parameter limits (max 50)
     const int batchSize = 30;
     for (int i = 0; i < missing.length; i += batchSize) {
@@ -2240,7 +2900,7 @@ class MapScreenState extends State<MapScreen>
           'radius': snapRadius,
         };
 
-        final response = await http
+        final response = await _httpClient
             .post(
               url,
               headers: {
@@ -2288,10 +2948,15 @@ class MapScreenState extends State<MapScreen>
             _snappedPotholeCache[key] = original;
             _snappedWasVerified[key] = false;
           }
+          anySnapUpdated = true;
         }
       } catch (_) {
         // Leave uncached so subsequent refreshes can retry snapping once back online.
       }
+    }
+    if (anySnapUpdated) {
+      _potholeDerivedVersion++;
+      _cachedHazardInputs = null;
     }
   }
 
@@ -2352,6 +3017,7 @@ class MapScreenState extends State<MapScreen>
       }
       _corridorSupplementPotholes = fetched;
       _lastCorridorFetchKey = key;
+      _invalidatePotholeDerivedCaches();
     } catch (_) {}
   }
 
@@ -2432,15 +3098,38 @@ class MapScreenState extends State<MapScreen>
       growable: false,
     );
 
-    final comparison = RoutePotholeAdvisor.evaluateAlternatives(
-      routes: _alternativeRoutes,
-      distancesMeters: _routeDistances,
-      durationsSeconds: _routeDurations,
-      hazards: hazards,
-      viaSummaries: viaList,
-      stepsByRoute: spansByRoute,
-      corridorConfig: _corridorConfig,
+    final int totalRefreshVertices = _alternativeRoutes.fold<int>(
+      0,
+      (sum, r) => sum + r.length,
     );
+    final RouteComparisonResult comparison =
+        (!kIsWeb && (totalRefreshVertices >= 120 || hazards.length >= 60))
+        ? await compute(
+            evaluateRouteAlternativesWorker,
+            RouteAlternativesEvalRequest(
+              routes: _alternativeRoutes,
+              distancesMeters: _routeDistances,
+              durationsSeconds: _routeDurations,
+              hazards: hazards,
+              viaSummaries: viaList,
+              stepsByRoute: spansByRoute,
+              corridorConfig: _corridorConfig,
+            ),
+          )
+        : RoutePotholeAdvisor.evaluateAlternatives(
+            routes: _alternativeRoutes,
+            distancesMeters: _routeDistances,
+            durationsSeconds: _routeDurations,
+            hazards: hazards,
+            viaSummaries: viaList,
+            stepsByRoute: spansByRoute,
+            corridorConfig: _corridorConfig,
+          );
+    if (!mounted ||
+        routeSeq != _routingRequestSeq ||
+        hazardSeq != _hazardRefreshSeq) {
+      return;
+    }
 
     final List<int> updatedCounts = List<int>.generate(
       _alternativeRoutes.length,
@@ -2554,8 +3243,30 @@ class MapScreenState extends State<MapScreen>
       _currentPosition = path.first;
       _animatedPuckPositionNotifier.value = path.first;
     });
+    final double? simHeading = GpsTrackerSmoother.routeForwardBearingDeg(
+      path,
+      path.first,
+      lookaheadMeters: 30.0,
+      maxDistanceMeters: 500.0,
+    );
+    _gpsSmoother.reset(position: path.first, headingDeg: simHeading);
+    if (simHeading != null) {
+      _lastHeadingNotifier.value = simHeading;
+      if (_isNavigating && _drivingCameraAngle.isHeadingUp) {
+        final double rot = (360.0 - simHeading) % 360.0;
+        _currentMapRotation = rot;
+        _mapRotationNotifier.value = rot;
+        try {
+          _mapController.rotate(rot);
+        } catch (_) {}
+      }
+    }
     _checkPotholeProximity(path.first);
-    _animatedMapMoveToVisible(path.first, 16.5, isExpandedSheet: false);
+    _animatedMapMoveToVisible(
+      path.first,
+      _isNavigating ? 17.5 : 16.5,
+      isExpandedSheet: false,
+    );
 
     _simulationTimer = Timer.periodic(const Duration(milliseconds: 350), (t) {
       if (!mounted || !_isSimulatingRoute) {
@@ -2581,11 +3292,12 @@ class MapScreenState extends State<MapScreen>
         _stopRouteSimulation();
         return;
       }
-      _animatePuckTo(nextPos);
+      _animatePuckTo(
+        nextPos,
+        speedMps: 18.0 / 0.35,
+        isMock: true,
+      );
       _checkPotholeProximity(nextPos);
-      if (_followMode != FollowMode.none) {
-        _animatedMapMoveToVisible(nextPos, _mapController.camera.zoom);
-      }
     });
   }
 
@@ -2764,10 +3476,8 @@ class MapScreenState extends State<MapScreen>
         ? 'https://routing.openstreetmap.de/routed-foot/route/v1/driving/'
         : 'https://router.project-osrm.org/route/v1/driving/';
 
-    for (final via in waypoints) {
-      if (!mounted || requestSeq != _routingRequestSeq || routes.length >= 3) {
-        break;
-      }
+    final selectedWaypoints = waypoints.take(2).toList(growable: false);
+    Future<http.Response?> fetchViaWaypoint(LatLng via) async {
       try {
         final viaUrl = Uri.parse(
           '$baseHost${start.longitude},${start.latitude};'
@@ -2775,7 +3485,9 @@ class MapScreenState extends State<MapScreen>
           '${destination.longitude},${destination.latitude}'
           '?overview=full&geometries=geojson&steps=true&annotations=true',
         );
-        var res = await http.get(viaUrl).timeout(const Duration(seconds: 4));
+        var res = await _httpClient
+            .get(viaUrl)
+            .timeout(const Duration(milliseconds: 3500));
         if (res.statusCode != 200 && _travelMode != OsrmTravelMode.car) {
           final carUrl = Uri.parse(
             'https://router.project-osrm.org/route/v1/driving/'
@@ -2784,9 +3496,25 @@ class MapScreenState extends State<MapScreen>
             '${destination.longitude},${destination.latitude}'
             '?overview=full&geometries=geojson&steps=true&annotations=true',
           );
-          res = await http.get(carUrl).timeout(const Duration(seconds: 4));
+          res = await _httpClient
+              .get(carUrl)
+              .timeout(const Duration(milliseconds: 3500));
         }
-        if (res.statusCode != 200) continue;
+        return res;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final responses = await Future.wait(
+      selectedWaypoints.map(fetchViaWaypoint),
+    );
+    for (final res in responses) {
+      if (!mounted || requestSeq != _routingRequestSeq || routes.length >= 3) {
+        break;
+      }
+      try {
+        if (res == null || res.statusCode != 200) continue;
 
         final data = jsonDecode(res.body);
         final List osrmRoutes = data['routes'] ?? [];
@@ -2931,15 +3659,38 @@ class MapScreenState extends State<MapScreen>
       growable: false,
     );
 
-    final comparison = RoutePotholeAdvisor.evaluateAlternatives(
-      routes: routes,
-      distancesMeters: distances,
-      durationsSeconds: durations,
-      hazards: hazards,
-      viaSummaries: viaList,
-      stepsByRoute: spansByRoute,
-      corridorConfig: _corridorConfig,
+    final int totalVertices = routes.fold<int>(
+      0,
+      (sum, r) => sum + r.length,
     );
+    final RouteComparisonResult comparison =
+        (!kIsWeb && (totalVertices >= 120 || hazards.length >= 60))
+        ? await compute(
+            evaluateRouteAlternativesWorker,
+            RouteAlternativesEvalRequest(
+              routes: routes,
+              distancesMeters: distances,
+              durationsSeconds: durations,
+              hazards: hazards,
+              viaSummaries: viaList,
+              stepsByRoute: spansByRoute,
+              corridorConfig: _corridorConfig,
+            ),
+          )
+        : RoutePotholeAdvisor.evaluateAlternatives(
+            routes: routes,
+            distancesMeters: distances,
+            durationsSeconds: durations,
+            hazards: hazards,
+            viaSummaries: viaList,
+            stepsByRoute: spansByRoute,
+            corridorConfig: _corridorConfig,
+          );
+    if (!mounted ||
+        routeSeq != _routingRequestSeq ||
+        hazardSeq != _hazardRefreshSeq) {
+      return;
+    }
 
     final List<int> potholeCounts = List<int>.generate(
       routes.length,
@@ -2984,6 +3735,7 @@ class MapScreenState extends State<MapScreen>
           distancesMeters: distances,
         ),
       );
+      unawaited(_tileProvider.prewarmRoute(initialRoute));
     }
 
     if (!mounted || (requestSeq != null && requestSeq != _routingRequestSeq)) {
@@ -3072,11 +3824,19 @@ class MapScreenState extends State<MapScreen>
       _warningBannerTimer?.cancel();
       _warningBanner.value = (highlighted: false, dismissedEncounterId: null);
       _isRoutePlanningMode = false;
+      _drivingHudNoticeTimer?.cancel();
       _isNavigating = false;
+      _isNavOverview = false;
+      _drivingCameraAngle = DrivingCameraAngle.chase3D;
+      _isManualRerouting = false;
+      _drivingHudNotice = null;
       _isRouteSheetExpanded = false;
       _isRouteDockMinimized = false;
     });
     AppSettings.instance.setRouteActive(false);
+    if (widget.isMapActive && !_puckPulseController.isAnimating) {
+      _puckPulseController.repeat();
+    }
     if (_currentPosition != null) {
       _checkPotholeProximity(_currentPosition!);
     }
@@ -4994,14 +5754,16 @@ class MapScreenState extends State<MapScreen>
         );
       }
 
-      var osrmRes = await http.get(osrmUrl).timeout(const Duration(seconds: 6));
+      var osrmRes = await _httpClient
+          .get(osrmUrl)
+          .timeout(const Duration(seconds: 6));
       if (osrmRes.statusCode != 200 && _travelMode != OsrmTravelMode.car) {
         final fallbackUrl = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/'
           '${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}'
           '?overview=full&geometries=geojson&alternatives=3&steps=true&annotations=true',
         );
-        osrmRes = await http
+        osrmRes = await _httpClient
             .get(fallbackUrl)
             .timeout(const Duration(seconds: 6));
       }
@@ -5073,7 +5835,7 @@ class MapScreenState extends State<MapScreen>
           },
         };
 
-        final response = await http
+        final response = await _httpClient
             .post(
               url,
               headers: {
@@ -5385,6 +6147,10 @@ class MapScreenState extends State<MapScreen>
           }
           _isLoadingLocation = false;
         });
+        if (!_useMockLocation && _animatedPuckPositionNotifier.value == null) {
+          _gpsSmoother.reset(position: lastPos);
+          _animatedPuckPositionNotifier.value = lastPos;
+        }
         _startFollowing();
       }
 
@@ -5408,6 +6174,14 @@ class MapScreenState extends State<MapScreen>
           }
           _isLoadingLocation = false;
         });
+        if (!_useMockLocation) {
+          _animatePuckTo(
+            livePosition,
+            timestamp: position.timestamp,
+            speedMps: position.speed,
+            headingDeg: position.heading >= 0 ? position.heading : null,
+          );
+        }
         if (_currentPosition != null) {
           _checkPotholeProximity(_currentPosition!);
         }
@@ -6087,37 +6861,16 @@ class MapScreenState extends State<MapScreen>
                       ),
 
                       const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: AppDesign.outlinedButtonStyle(
-                                isDark: isDarkNow,
-                              ),
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              icon: const Icon(Icons.close_rounded, size: 18),
-                              label: const Text('Close'),
-                            ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: AppDesign.outlinedButtonStyle(
+                            isDark: isDarkNow,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            flex: 2,
-                            child: ElevatedButton.icon(
-                              style: AppDesign.primaryButtonStyle(
-                                isDark: isDarkNow,
-                              ),
-                              icon: const Icon(
-                                Icons.directions_rounded,
-                                size: 18,
-                              ),
-                              label: const Text('Directions'),
-                              onPressed: () {
-                                Navigator.of(ctx).pop();
-                                _calculateRoute(pothole.location);
-                              },
-                            ),
-                          ),
-                        ],
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          label: const Text('Close'),
+                        ),
                       ),
 
                       // Admin Administrative Bar
@@ -6754,7 +7507,7 @@ class MapScreenState extends State<MapScreen>
         _dismissedSampleIds.add(pothole.docId!);
         _snappedPotholeCache.remove(key);
         _snappedWasVerified.remove(key);
-        _cachedPotholeClusters = null;
+        _invalidatePotholeDerivedCaches();
       });
       await _refreshRouteAwarePotholeState();
       return;
@@ -6769,12 +7522,12 @@ class MapScreenState extends State<MapScreen>
       final key = _potholeKey(pothole.location);
       _snappedPotholeCache.remove(key);
       _snappedWasVerified.remove(key);
-      _cachedPotholeClusters = null;
       if (pothole.docId != null && _corridorSupplementPotholes.isNotEmpty) {
         _corridorSupplementPotholes = _corridorSupplementPotholes
             .where((c) => c.docId != pothole.docId)
             .toList(growable: false);
       }
+      _invalidatePotholeDerivedCaches();
     });
 
     await widget.onDeleteDetectedPothole!(pothole);
@@ -6813,6 +7566,7 @@ class MapScreenState extends State<MapScreen>
   }) {
     if (potholes.isEmpty) return [];
 
+    final double degRadius = (radiusMeters / 111000.0) * 1.35;
     final List<PotholeCluster> clusters = [];
     final Set<PotholeMarker> visited = {};
 
@@ -6826,6 +7580,11 @@ class MapScreenState extends State<MapScreen>
       for (int j = i + 1; j < potholes.length; j++) {
         final p2 = potholes[j];
         if (visited.contains(p2)) continue;
+
+        if ((p1.location.latitude - p2.location.latitude).abs() > degRadius ||
+            (p1.location.longitude - p2.location.longitude).abs() > degRadius) {
+          continue;
+        }
 
         final dist = Geolocator.distanceBetween(
           p1.location.latitude,
@@ -6945,6 +7704,25 @@ class MapScreenState extends State<MapScreen>
     return clusters.where((c) => bounds.containsWithMargin(c.center));
   }
 
+  int _dominantClusterClassId(List<PotholeMarker> items) {
+    final counts = <int, int>{};
+    for (final item in items) {
+      final id = DpwhStandards.classify(item.primaryDefect).classId;
+      counts[id] = (counts[id] ?? 0) + 1;
+    }
+    const priority = [0, 1, 3, 4];
+    var bestId = 0;
+    var bestCount = -1;
+    for (final id in priority) {
+      final c = counts[id] ?? 0;
+      if (c > bestCount) {
+        bestCount = c;
+        bestId = id;
+      }
+    }
+    return bestId;
+  }
+
   /// Builds the radial Spider Tree marker with connecting stems and anchor ring
   Widget _buildSpiderClusterMarker(PotholeCluster cluster, bool isDark) {
     final count = cluster.items.length;
@@ -6975,10 +7753,10 @@ class MapScreenState extends State<MapScreen>
             ),
           ),
 
-          // 2. Center Anchor Ring (Hollow circle with teal border matching reference image)
+          // 2. Center Anchor Ring (Collapse trigger with clear close icon)
           Positioned(
-            left: centerXY - 12,
-            top: centerXY - 12,
+            left: centerXY - 13,
+            top: centerXY - 13,
             child: GestureDetector(
               onTap: () {
                 setState(() {
@@ -6986,14 +7764,14 @@ class MapScreenState extends State<MapScreen>
                 });
               },
               child: Container(
-                width: 24,
-                height: 24,
+                width: 26,
+                height: 26,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: isDark ? const Color(0xFF0F172A) : Colors.white,
                   border: Border.all(
                     color: const Color(0xFF00796B),
-                    width: 3.2,
+                    width: 2.8,
                   ),
                   boxShadow: const [
                     BoxShadow(
@@ -7003,14 +7781,11 @@ class MapScreenState extends State<MapScreen>
                     ),
                   ],
                 ),
-                child: Center(
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFF00796B),
-                    ),
+                child: const Center(
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 14,
+                    color: Color(0xFF00796B),
                   ),
                 ),
               ),
@@ -7020,8 +7795,8 @@ class MapScreenState extends State<MapScreen>
           // 3. Child Pothole Nodes
           for (int i = 0; i < count; i++) ...[
             Positioned(
-              left: centerXY + childOffsets[i].dx - 15,
-              top: centerXY + childOffsets[i].dy - 15,
+              left: centerXY + childOffsets[i].dx - 17,
+              top: centerXY + childOffsets[i].dy - 17,
               child: GestureDetector(
                 onTap: () {
                   final item = cluster.items[i];
@@ -7061,14 +7836,16 @@ class MapScreenState extends State<MapScreen>
   }) => RoadHazardMarker(
     primaryDefect: pothole.primaryDefect,
     status: pothole.status,
-    size: 32,
+    count: pothole.potholeCount,
+    size: 34,
     isSelected: isSelected,
-    compact: true,
+    compact: false,
   );
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    _syncSubPageTourIfNeeded();
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: AppSettings.instance.themeModeNotifier,
       builder: (context, themeMode, _) {
@@ -7225,20 +8002,49 @@ class MapScreenState extends State<MapScreen>
                           setState(() => _isMapDragging = false);
                         }
                       },
-                      child: FlutterMap(
+                      child: ClipRect(
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(
+                            end: (_isNavigating &&
+                                    _drivingCameraAngle ==
+                                        DrivingCameraAngle.chase3D &&
+                                    _followMode != FollowMode.none)
+                                ? 1.0
+                                : 0.0,
+                          ),
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, tiltT, mapChild) {
+                            if (tiltT <= 0.001) return mapChild!;
+                            final double s = 1.0 + 0.26 * tiltT;
+                            final matrix = Matrix4.identity()
+                              ..setEntry(3, 2, 0.00075 * tiltT)
+                              ..rotateX(-0.34 * tiltT)
+                              ..scaleByDouble(s, s, 1.0, 1.0);
+                            return Transform(
+                              alignment: const Alignment(0.0, 0.26),
+                              transform: matrix,
+                              child: mapChild,
+                            );
+                          },
+                          child: RepaintBoundary(
+                            child: FlutterMap(
                         mapController: _mapController,
                         options: MapOptions(
                           initialCenter: _currentPosition ?? _bulacanCenter,
                           initialZoom: 15.0,
                           minZoom: 3.0,
                           maxZoom: 19.0,
-                          interactionOptions: const InteractionOptions(
-                            flags: InteractiveFlag.all,
+                          interactionOptions: InteractionOptions(
+                            flags: (_isNavigating && !_isNavOverview)
+                                ? InteractiveFlag.none
+                                : InteractiveFlag.all,
                             pinchMoveThreshold: 35.0,
                             scrollWheelVelocity: 0.005,
                           ),
                           onPositionChanged: _onMapPositionChanged,
                           onTap: (_, point) {
+                            if (_isNavigating) return;
                             if (_isPlacingMarker) {
                               setState(() => _pendingMarkerLocation = point);
                             } else if (_isEditingDevLocation) {
@@ -7376,10 +8182,14 @@ class MapScreenState extends State<MapScreen>
                         ),
                         children: [
                           TileLayer(
+                            tileProvider: _tileProvider,
                             urlTemplate:
                                 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                             subdomains: const ['0', '1', '2', '3'],
-                            userAgentPackageName: 'com.example.pothole_scanner',
+                            userAgentPackageName: 'com.example.my_flutter_app',
+                            evictErrorTileStrategy:
+                                EvictErrorTileStrategy.notVisible,
+                            reset: _tileLayerResetController.stream,
                             tileDisplay: const TileDisplay.fadeIn(
                               duration: Duration(milliseconds: 100),
                             ),
@@ -7393,11 +8203,12 @@ class MapScreenState extends State<MapScreen>
                           if (_alternativeRoutes.isNotEmpty)
                             PolylineLayer(
                               polylines: [
-                                // 1. Draw unselected alternative routes with subtle casing
-                                for (final entry
-                                    in _alternativeRoutes.asMap().entries.where(
-                                      (e) => e.key != _selectedRouteIndex,
-                                    )) ...[
+                                // 1. Draw unselected alternative routes with subtle casing (hidden in 3D driving view)
+                                if (!_isNavigating || _isNavOverview)
+                                  for (final entry
+                                      in _alternativeRoutes.asMap().entries.where(
+                                        (e) => e.key != _selectedRouteIndex,
+                                      )) ...[
                                   Polyline(
                                     points: entry.value,
                                     color: isDark
@@ -7417,20 +8228,24 @@ class MapScreenState extends State<MapScreen>
                                     strokeJoin: StrokeJoin.round,
                                   ),
                                 ],
-                                // 2. Draw selected main route with RoadSense Brand Blue casing & core
+                                // 2. Draw selected main route with high-contrast driving casing & core
                                 Polyline(
                                   points: activeRoutePolyline,
-                                  color: AppDesign.brandHover.withValues(
-                                    alpha: 0.55,
-                                  ),
-                                  strokeWidth: 11.5,
+                                  color: _isNavigating
+                                      ? const Color(0xFF0B4DB8)
+                                      : AppDesign.brandHover.withValues(
+                                          alpha: 0.55,
+                                        ),
+                                  strokeWidth: _isNavigating ? 13.0 : 11.5,
                                   strokeCap: StrokeCap.round,
                                   strokeJoin: StrokeJoin.round,
                                 ),
                                 Polyline(
                                   points: activeRoutePolyline,
-                                  color: AppDesign.brand,
-                                  strokeWidth: 6.5,
+                                  color: _isNavigating
+                                      ? const Color(0xFF00B8FF)
+                                      : AppDesign.brand,
+                                  strokeWidth: _isNavigating ? 8.0 : 6.5,
                                   strokeCap: StrokeCap.round,
                                   strokeJoin: StrokeJoin.round,
                                 ),
@@ -7468,9 +8283,6 @@ class MapScreenState extends State<MapScreen>
                                   return const SizedBox.shrink();
                                 }
                                 return CircleLayer(
-                                  key: ValueKey(
-                                    'user_circle_${effectivePos.latitude}_${effectivePos.longitude}_$_inProximityWarning',
-                                  ),
                                   circles: [
                                     CircleMarker(
                                       point: effectivePos,
@@ -7521,56 +8333,68 @@ class MapScreenState extends State<MapScreen>
                                         child: Stack(
                                           alignment: Alignment.center,
                                           children: [
-                                            // 1. Google Maps Breathing Radar Pulse Halo
-                                            AnimatedBuilder(
-                                              animation: _puckPulseController,
-                                              builder: (context, _) {
-                                                final t =
-                                                    _puckPulseController.value;
-                                                final haloSize =
-                                                    22.0 + t * 42.0;
-                                                final haloOpacity =
-                                                    (1.0 - t) * 0.42;
-                                                return Container(
-                                                  width: haloSize,
-                                                  height: haloSize,
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    color:
-                                                        const Color(
-                                                          0xFF1A73E8,
-                                                        ).withValues(
-                                                          alpha: haloOpacity,
-                                                        ),
+                                            if (!_isNavigating) ...[
+                                              // 1. Google Maps Breathing Radar Pulse Halo
+                                              AnimatedBuilder(
+                                                animation: _puckPulseController,
+                                                builder: (context, _) {
+                                                  final t =
+                                                      _puckPulseController.value;
+                                                  final haloSize =
+                                                      22.0 + t * 42.0;
+                                                  final haloOpacity =
+                                                      (1.0 - t) * 0.42;
+                                                  return Container(
+                                                    width: haloSize,
+                                                    height: haloSize,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color:
+                                                          const Color(
+                                                            0xFF1A73E8,
+                                                          ).withValues(
+                                                            alpha: haloOpacity,
+                                                          ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                              // 2. Directional Vision Cone
+                                              CustomPaint(
+                                                size: const Size(160, 160),
+                                                painter: VisionConePainter(),
+                                              ),
+                                            ],
+                                            // 3. Center Puck (Google Maps 3D Vehicle/Walker Avatar when navigating, Blue Dot otherwise)
+                                            if (_isNavigating)
+                                              GestureDetector(
+                                                onTap: () =>
+                                                    _showVehicleProfilePickerSheet(
+                                                      isDark,
+                                                    ),
+                                                child:
+                                                    _buildNavigationVehiclePuck(),
+                                              )
+                                            else
+                                              Container(
+                                                width: 22,
+                                                height: 22,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Colors.blue.shade600,
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                      color: Colors.black26,
+                                                      blurRadius: 10,
+                                                      spreadRadius: 2,
+                                                    ),
+                                                  ],
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 3,
                                                   ),
-                                                );
-                                              },
-                                            ),
-                                            // 2. Directional Vision Cone (Always Visible)
-                                            CustomPaint(
-                                              size: const Size(160, 160),
-                                              painter: VisionConePainter(),
-                                            ),
-                                            // 3. Center Dot (Google Maps Style Blue Dot)
-                                            Container(
-                                              width: 22,
-                                              height: 22,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: Colors.blue.shade600,
-                                                boxShadow: const [
-                                                  BoxShadow(
-                                                    color: Colors.black26,
-                                                    blurRadius: 10,
-                                                    spreadRadius: 2,
-                                                  ),
-                                                ],
-                                                border: Border.all(
-                                                  color: Colors.white,
-                                                  width: 3,
                                                 ),
                                               ),
-                                            ),
                                           ],
                                         ),
                                       ),
@@ -7687,6 +8511,11 @@ class MapScreenState extends State<MapScreen>
                                     );
                                   } else {
                                     // Unexpanded 10m Cluster Marker
+                                    final double clusterDiameter =
+                                        (_getDynamicMarkerSize() + 4)
+                                            .clamp(24.0, 36.0);
+                                    final int dominantClassId =
+                                        _dominantClusterClassId(cluster.items);
                                     return Marker(
                                       key: ValueKey('cluster_${cluster.id}'),
                                       point: cluster.center,
@@ -7709,12 +8538,8 @@ class MapScreenState extends State<MapScreen>
                                           clipBehavior: Clip.none,
                                           children: [
                                             Container(
-                                              width:
-                                                  (_getDynamicMarkerSize() + 4)
-                                                      .clamp(22.0, 34.0),
-                                              height:
-                                                  (_getDynamicMarkerSize() + 4)
-                                                      .clamp(22.0, 34.0),
+                                              width: clusterDiameter,
+                                              height: clusterDiameter,
                                               decoration: BoxDecoration(
                                                 shape: BoxShape.circle,
                                                 color: const Color(0xFF9333EA),
@@ -7730,11 +8555,12 @@ class MapScreenState extends State<MapScreen>
                                                   ),
                                                 ],
                                               ),
-                                              child: const Center(
-                                                child: Icon(
-                                                  Icons.hub_rounded,
+                                              child: Center(
+                                                child: RoadDefectGlyph(
+                                                  classId: dominantClassId,
                                                   color: Colors.white,
-                                                  size: 18,
+                                                  size: (clusterDiameter * 0.62)
+                                                      .clamp(14.0, 23.0),
                                                 ),
                                               ),
                                             ),
@@ -7783,8 +8609,10 @@ class MapScreenState extends State<MapScreen>
                                 }),
                               ],
 
-                              // Start Location Pin (Draggable A — shown whenever route or custom origin exists)
-                              if (_customOrigin != null || _destination != null)
+                              // Start Location Pin (Draggable A — hidden while actively driving)
+                              if (!_isNavigating &&
+                                  (_customOrigin != null ||
+                                      _destination != null))
                                 _buildDraggableEndpointPin(
                                   point:
                                       _customOrigin ??
@@ -7794,8 +8622,8 @@ class MapScreenState extends State<MapScreen>
                                   color: const Color(0xFF0284C7),
                                 ),
 
-                              // Destination Location Pin (Draggable B)
-                              if (_destination != null)
+                              // Destination Location Pin (Draggable B — hidden while driving like Google Maps hideDestinationPins)
+                              if (!_isNavigating && _destination != null)
                                 _buildDraggableEndpointPin(
                                   point: _destination!,
                                   kind: 2,
@@ -7803,7 +8631,8 @@ class MapScreenState extends State<MapScreen>
                                 ),
 
                               // Active Selected Turn-by-Turn Maneuver Waypoint Dot (Translucent Halo + High-Visibility Core Dot)
-                              if (_selectedStepIndex != null &&
+                              if (!_isNavigating &&
+                                  _selectedStepIndex != null &&
                                   _routeSteps.isNotEmpty &&
                                   _selectedStepIndex! < _routeSteps.length)
                                 Marker(
@@ -8155,6 +8984,9 @@ class MapScreenState extends State<MapScreen>
                           ),
                         ],
                       ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
 
@@ -8198,12 +9030,14 @@ class MapScreenState extends State<MapScreen>
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (_isNavigating && _routePoints.isNotEmpty) ...[
-                                // Google Maps Style Sleek Top Guidance Header (Active Navigation Only)
+                              if (_isNavigating) ...[
+                                // Google Maps Style Sleek Top Guidance Header (Turn-by-Turn or Free Drive)
                                 _buildGoogleMapsNavigationHeader(
                                   isDark: isDark,
                                   activePotholeCount: activePotholeCount,
-                                  navHeadline: navHeadline,
+                                  navHeadline: _routePoints.isEmpty
+                                      ? 'Free Drive'
+                                      : navHeadline,
                                 ),
                               ] else if (_routePoints.isNotEmpty) ...[
                                 // Google Maps Style Active Route Header (Dual Point A & B Card)
@@ -8214,19 +9048,30 @@ class MapScreenState extends State<MapScreen>
                               ],
 
                               // 1. Offline, active filter, empty result & GPS status chips
-                              if (_routePoints.isEmpty)
+                              if (!_isNavigating && _routePoints.isEmpty)
                                 _buildMapStatusChips(isDark, showMarkers),
 
                               // 2. Natural Upper-Side Pothole Countdown Notification & Proactive Detour Cue
-                              if (!_isNavigating &&
-                                  !_isSearchingActive &&
-                                  ((_isNavigating ||
-                                          _routePoints.isNotEmpty ||
-                                          _destination != null) ||
-                                      (_upcomingHazard != null &&
-                                          showMarkers &&
-                                          !_isLocationDisabled &&
-                                          !_isPermissionDenied)))
+                              if (!_isSearchingActive &&
+                                  ((_isNavigating &&
+                                          ((_upcomingHazard != null &&
+                                                  _upcomingHazard!
+                                                          .distanceMeters <=
+                                                      _proximityCircleRadiusMeters) ||
+                                              (_navHazardState
+                                                          ?.distanceToNextMeters !=
+                                                      null &&
+                                                  _navHazardState!
+                                                          .distanceToNextMeters! <=
+                                                      _proximityCircleRadiusMeters)) &&
+                                          showMarkers) ||
+                                      (!_isNavigating &&
+                                          ((_routePoints.isNotEmpty ||
+                                                  _destination != null) ||
+                                              (_upcomingHazard != null &&
+                                                  showMarkers &&
+                                                  !_isLocationDisabled &&
+                                                  !_isPermissionDenied)))))
                                 ValueListenableBuilder(
                                   valueListenable: _warningBanner,
                                   builder: (context, warning, child) =>
@@ -8399,8 +9244,68 @@ class MapScreenState extends State<MapScreen>
                       ),
                     ),
 
-                  // RIGHT SIDE ACTION BUTTONS (Google Maps Controls Stack - Positioned near bottom)
-                  if (!_isChoosingLocationOnMap && !_isSearchPageActive)
+                  // RIGHT SIDE ACTION BUTTONS:
+                  // Dedicated 4-button dark circular stack in Driving Mode (no zoom +/-),
+                  // or standard Browse/Planning stack outside Driving Mode.
+                  if (_isNavigating &&
+                      !_isChoosingLocationOnMap &&
+                      !_isSearchPageActive) ...[
+                    Positioned(
+                      right: 16,
+                      bottom: (_isRouteSheetExpanded ? 290.0 : 112.0) +
+                          bottomInset,
+                      child: _buildDrivingRightControls(isDark),
+                    ),
+                    if (!_isNavOverview && !_isRouteSheetExpanded)
+                      Positioned(
+                        left: 16,
+                        bottom: 112.0 + bottomInset,
+                        child: _buildDrivingSpeedometer(),
+                      ),
+                    if (_drivingHudNotice != null)
+                      Positioned(
+                        left: 84,
+                        right: 84,
+                        bottom: (_isRouteSheetExpanded ? 290.0 : 120.0) +
+                            bottomInset,
+                        child: IgnorePointer(
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xE60B0F17),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white24,
+                                  width: 1.0,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black54,
+                                    blurRadius: 10,
+                                    offset: Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                _drivingHudNotice!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ] else if (!_isChoosingLocationOnMap &&
+                      !_isSearchPageActive)
                     Positioned(
                       right: 14,
                       bottom: actionButtonsBottom,
@@ -8693,6 +9598,91 @@ class MapScreenState extends State<MapScreen>
                             },
                           ),
 
+                          if (_isNavigating) ...[
+                            const SizedBox(height: 8),
+                            MobileTouchIconButton(
+                              icon: AppSettings.instance.mobileVoiceAlertsEnabled
+                                  ? Icons.volume_up_rounded
+                                  : Icons.volume_off_rounded,
+                              tooltip:
+                                  AppSettings.instance.mobileVoiceAlertsEnabled
+                                  ? 'Mute voice alerts'
+                                  : 'Unmute voice alerts',
+                              foregroundColor:
+                                  AppSettings.instance.mobileVoiceAlertsEnabled
+                                  ? AppDesign.textPrimary(isDark)
+                                  : const Color(0xFFFCA5A5),
+                              onPressed: () {
+                                final wasEnabled = AppSettings
+                                    .instance
+                                    .mobileVoiceAlertsEnabled;
+                                setState(() {
+                                  AppSettings
+                                          .instance
+                                          .mobileVoiceAlertsEnabled =
+                                      !wasEnabled;
+                                });
+                                if (wasEnabled && !kIsWeb) {
+                                  try {
+                                    _tts.stop();
+                                  } catch (_) {}
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            MobileTouchIconButton(
+                              icon: _travelMode == OsrmTravelMode.car
+                                  ? Icons.directions_car_rounded
+                                  : _travelMode == OsrmTravelMode.bike
+                                  ? Icons.two_wheeler_rounded
+                                  : Icons.directions_walk_rounded,
+                              tooltip: 'Vehicle Profile (Car / Motorcycle / Walk)',
+                              foregroundColor: AppDesign.accent(isDark),
+                              onPressed: () =>
+                                  _showVehicleProfilePickerSheet(isDark),
+                            ),
+                            const SizedBox(height: 8),
+                            MobileTouchIconButton(
+                              icon: _isNavOverview
+                                  ? Icons.navigation_rounded
+                                  : Icons.alt_route_rounded,
+                              tooltip: _isNavOverview
+                                  ? 'Resume 3D Driving View'
+                                  : 'Route Overview',
+                              foregroundColor: _isNavOverview
+                                  ? AppDesign.accent(isDark)
+                                  : AppDesign.textPrimary(isDark),
+                              onPressed: () {
+                                setState(() {
+                                  _isNavOverview = !_isNavOverview;
+                                  if (!_isNavOverview) {
+                                    _followMode = FollowMode.compass;
+                                  }
+                                });
+                                if (_isNavOverview && _routePoints.isNotEmpty) {
+                                  try {
+                                    _mapController.rotate(0);
+                                  } catch (_) {}
+                                  _fitCameraToRoute(_routePoints);
+                                } else if (_currentPosition != null) {
+                                  if (_lastHeadingNotifier.value != null) {
+                                    try {
+                                      _mapController.rotate(
+                                        (360.0 - _lastHeadingNotifier.value!) %
+                                            360.0,
+                                      );
+                                    } catch (_) {}
+                                  }
+                                  _animatedMapMoveToVisible(
+                                    _currentPosition!,
+                                    17.5,
+                                    isExpandedSheet: false,
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+
                           const SizedBox(height: 8),
 
                           // 2. Zoom Controls Connected Vertical Pill (>= 48dp each)
@@ -8772,37 +9762,82 @@ class MapScreenState extends State<MapScreen>
 
                           const SizedBox(height: 8),
 
-                          // 3. Target My Location Button
-                          MobileTouchIconButton(
-                            targetKey:
-                                widget.tourLocationButtonKey ??
-                                _locationGuideKey,
-                            icon: Icons.my_location_rounded,
-                            tooltip: 'Center My Location',
-                            foregroundColor: AppDesign.accent(isDark),
-                            isLoading:
-                                _isLoadingLocation && _currentPosition == null,
-                            onPressed: () {
-                              if (_currentPosition != null) {
-                                if (_followMode == FollowMode.none) {
-                                  setState(
-                                    () => _followMode = FollowMode.location,
-                                  );
-                                }
-                                _animatedMapMove(_currentPosition!, 16.5);
-                                _mapController.rotate(0.0);
-                                _startFollowing();
-                              } else {
-                                _determinePosition();
-                              }
-                            },
+                          // 3. Target My Location (+ Free Drive quick button beside it)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!_isNavigating && _routePoints.isEmpty) ...[
+                                MobileTouchIconButton(
+                                  targetKey: _freeDriveGuideKey,
+                                  icon: _travelMode == OsrmTravelMode.car
+                                      ? Icons.directions_car_rounded
+                                      : _travelMode == OsrmTravelMode.bike
+                                      ? Icons.two_wheeler_rounded
+                                      : Icons.directions_walk_rounded,
+                                  tooltip: 'Start Free Drive Mode',
+                                  foregroundColor: const Color(0xFF0F766E),
+                                  onPressed: _startFreeDriveNavigation,
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              MobileTouchIconButton(
+                                targetKey:
+                                    widget.tourLocationButtonKey ??
+                                    _locationGuideKey,
+                                icon: Icons.my_location_rounded,
+                                tooltip: 'Center My Location',
+                                foregroundColor: AppDesign.accent(isDark),
+                                isLoading:
+                                    _isLoadingLocation &&
+                                    _currentPosition == null,
+                                onPressed: () {
+                                  _navAutoRecenterTimer?.cancel();
+                                  if (_currentPosition != null) {
+                                    if (_isNavigating) {
+                                      setState(() {
+                                        _isNavOverview = false;
+                                        _followMode = FollowMode.compass;
+                                      });
+                                      if (_lastHeadingNotifier.value != null) {
+                                        final rot =
+                                            (360.0 -
+                                                _lastHeadingNotifier.value!) %
+                                            360.0;
+                                        _currentMapRotation = rot;
+                                        try {
+                                          _mapController.rotate(rot);
+                                        } catch (_) {}
+                                      }
+                                      _animatedMapMoveToVisible(
+                                        _currentPosition!,
+                                        17.5,
+                                        isExpandedSheet: false,
+                                      );
+                                    } else {
+                                      if (_followMode == FollowMode.none) {
+                                        setState(
+                                          () =>
+                                              _followMode = FollowMode.location,
+                                        );
+                                      }
+                                      _animatedMapMove(_currentPosition!, 16.5);
+                                      _mapController.rotate(0.0);
+                                    }
+                                    _startFollowing();
+                                  } else {
+                                    _determinePosition();
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
 
-                  // Zoom-based distance scale bar & subtle attribution
-                  if (_selectedPothole == null &&
+                  // Zoom-based distance scale bar & subtle attribution (hidden in driving mode)
+                  if (!_isNavigating &&
+                      _selectedPothole == null &&
                       _searchedPlace == null &&
                       _routePoints.isEmpty &&
                       !_isChoosingLocationOnMap &&
@@ -8889,8 +9924,24 @@ class MapScreenState extends State<MapScreen>
                       ),
                     ),
 
-                  // 6. Google Maps Style Bottom Navigation Dock
-                  if (_routePoints.isNotEmpty &&
+                  // 6. Google Maps Style Bottom Navigation Dock (Dedicated full-width dark drawer when driving)
+                  if (_isNavigating &&
+                      _selectedPothole == null &&
+                      _searchedPlace == null &&
+                      !_isChoosingLocationOnMap &&
+                      !_isSearchPageActive)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _buildDrivingModeBottomSheet(
+                        isDark: isDark,
+                        distStr: distStr,
+                        totalEtaStr: totalEtaStr,
+                        activePotholeCount: activePotholeCount,
+                      ),
+                    )
+                  else if (_routePoints.isNotEmpty &&
                       _selectedPothole == null &&
                       _searchedPlace == null &&
                       !_isChoosingLocationOnMap &&
@@ -9269,6 +10320,7 @@ class MapScreenState extends State<MapScreen>
         const SizedBox(width: 2),
         Expanded(
           child: Container(
+            key: _searchInputGuideKey,
             constraints: const BoxConstraints(minHeight: 48),
             padding: const EdgeInsets.only(left: 14, right: 6),
             decoration: BoxDecoration(
@@ -9480,6 +10532,7 @@ class MapScreenState extends State<MapScreen>
             const SizedBox(width: 6),
             Expanded(
               child: Column(
+                key: _routeEndpointsGuideKey,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // Point A (Starting Point)
@@ -9661,6 +10714,7 @@ class MapScreenState extends State<MapScreen>
             ),
             const SizedBox(width: 6),
             IconButton(
+              key: _routeSwapGuideKey,
               icon: Container(
                 width: 38,
                 height: 38,
@@ -9682,7 +10736,10 @@ class MapScreenState extends State<MapScreen>
           ],
         ),
         const SizedBox(height: 10),
-        _buildTravelModeSelector(isDark),
+        KeyedSubtree(
+          key: _routeTravelModeGuideKey,
+          child: _buildTravelModeSelector(isDark),
+        ),
       ],
     );
   }
@@ -9728,6 +10785,7 @@ class MapScreenState extends State<MapScreen>
         // Quick action pills (Google Maps style Saved / Quick Picks bar)
         if (_suggestions.isEmpty && matchingReports.isEmpty)
           Padding(
+            key: _searchQuickPicksGuideKey,
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -10457,6 +11515,7 @@ class MapScreenState extends State<MapScreen>
         _getFilteredActiveMarkers().isEmpty;
 
     if (!_isOffline &&
+        !_hasPartialTileFallback &&
         _routeErrorMessage == null &&
         showMarkers &&
         !_hasActiveDefectFilter &&
@@ -10472,7 +11531,10 @@ class MapScreenState extends State<MapScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_isOffline) ...[
-            const MobileOfflineBanner(),
+            const MobileOfflineBanner(
+              message:
+                  'Offline: showing saved map tiles, road hazards & routes.',
+            ),
             const SizedBox(height: 6),
           ],
           if (_routeErrorMessage != null && _destination != null) ...[
@@ -10530,6 +11592,12 @@ class MapScreenState extends State<MapScreen>
             spacing: 8,
             runSpacing: 6,
             children: [
+              if (!_isOffline && _hasPartialTileFallback)
+                ActionChip(
+                  avatar: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Some map tiles offline · Reload'),
+                  onPressed: _refreshMapTiles,
+                ),
               if (!showMarkers)
                 ActionChip(
                   avatar: const Icon(Icons.layers_clear_rounded, size: 16),
@@ -11850,13 +12918,13 @@ class MapScreenState extends State<MapScreen>
     required int activePotholeCount,
     String? navHeadline,
   }) {
-    final bool voiceEnabled = AppSettings.instance.mobileVoiceAlertsEnabled;
     final int remainingCount =
         _navHazardState?.remainingPotholeCount ?? activePotholeCount;
-    final String routeHazardNote =
-        _navHazardState != null && activePotholeCount > 0
-        ? '$remainingCount ahead · $activePotholeCount on route'
-        : '$activePotholeCount reported pothole${activePotholeCount == 1 ? '' : 's'} on route';
+    final String routeHazardNote = _routePoints.isEmpty
+        ? 'Pothole radar active'
+        : (_navHazardState != null && activePotholeCount > 0
+              ? '$remainingCount ahead · $activePotholeCount on route'
+              : '$activePotholeCount reported pothole${activePotholeCount == 1 ? '' : 's'} on route');
 
     final double? nextHazardMeters =
         _navHazardState?.distanceToNextMeters ??
@@ -11865,63 +12933,19 @@ class MapScreenState extends State<MapScreen>
         ? routeHazardNote
         : 'Next pothole: ${RoutePotholeAdvisor.formatDistanceAhead(nextHazardMeters)}';
 
-    Widget buildVoiceMuteButton() {
-      return Semantics(
-        button: true,
-        label: voiceEnabled ? 'Mute voice alerts' : 'Unmute voice alerts',
-        child: Tooltip(
-          message: voiceEnabled ? 'Mute voice alerts' : 'Unmute voice alerts',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                setState(() {
-                  AppSettings.instance.mobileVoiceAlertsEnabled = !voiceEnabled;
-                });
-                if (voiceEnabled && !kIsWeb) {
-                  try {
-                    _tts.stop();
-                  } catch (_) {}
-                }
-              },
-              borderRadius: BorderRadius.circular(22),
-              child: Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(
-                    alpha: voiceEnabled ? 0.18 : 0.10,
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  voiceEnabled
-                      ? Icons.volume_up_rounded
-                      : Icons.volume_off_rounded,
-                  color: voiceEnabled ? Colors.white : Colors.white70,
-                  size: 20,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
     if (_routeSteps.isEmpty) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF132A1D) : const Color(0xFF0F5132),
+          color: isDark ? const Color(0xFF005B4F) : const Color(0xFF00695C),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: isDark ? const Color(0xFF235336) : const Color(0xFF198754),
+            color: isDark ? const Color(0xFF00897B) : const Color(0xFF00796B),
             width: 1.2,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
+              color: Colors.black.withValues(alpha: 0.34),
               blurRadius: 16,
               offset: const Offset(0, 4),
             ),
@@ -11929,37 +12953,37 @@ class MapScreenState extends State<MapScreen>
         ),
         child: Row(
           children: [
-            const Icon(Icons.navigation_rounded, color: Colors.white, size: 22),
-            const SizedBox(width: 10),
+            const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 32),
+            const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                navHeadline?.isNotEmpty == true ? navHeadline! : 'Follow Route',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            buildVoiceMuteButton(),
-            const SizedBox(width: 6),
-            Semantics(
-              button: true,
-              label: 'Exit navigation',
-              child: InkWell(
-                onTap: _clearRouteState,
-                borderRadius: BorderRadius.circular(22),
-                child: const SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Icon(
-                    Icons.close_rounded,
-                    color: Colors.white,
-                    size: 20,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    navHeadline?.isNotEmpty == true ? navHeadline! : 'Follow Route',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hazardGuidance,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: nextHazardMeters != null
+                          ? const Color(0xFFFBBF24)
+                          : Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -11980,152 +13004,732 @@ class MapScreenState extends State<MapScreen>
     final String instruction = _currentStepInstruction();
 
     final Color headerBg = isDark
-        ? const Color(0xFF132A1D)
-        : const Color(0xFF0F5132);
+        ? const Color(0xFF005B4F)
+        : const Color(0xFF00695C);
     final Color headerBorder = isDark
-        ? const Color(0xFF235336)
-        : const Color(0xFF198754);
+        ? const Color(0xFF00897B)
+        : const Color(0xFF00796B);
+    final Color thenBg = isDark
+        ? const Color(0xFF00433A)
+        : const Color(0xFF004D40);
+    final nextStep = (stepIdx + 1 < _routeSteps.length)
+        ? _routeSteps[stepIdx + 1]
+        : null;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: headerBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: headerBorder, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
-              shape: BoxShape.circle,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: headerBg,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(nextStep != null ? 4 : 18),
             ),
-            child: Icon(maneuverIcon, color: Colors.white, size: 24),
+            border: Border.all(color: headerBorder, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.34),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Semantics(
-              button: true,
-              hint: 'Tap to repeat navigation instruction',
-              child: InkWell(
-                onTap: _speakCurrentStepInstruction,
-                borderRadius: BorderRadius.circular(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'In $stepDistStr',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      instruction,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                    ),
-                    if (activePotholeCount > 0) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.warning_amber_rounded,
-                            color: Color(0xFFFBBF24),
-                            size: 13,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              hazardGuidance,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFFFBBF24),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
+          child: Row(
+            children: [
+              Icon(maneuverIcon, color: Colors.white, size: 34),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  hint: 'Tap to repeat navigation instruction',
+                  child: InkWell(
+                    onTap: _speakCurrentStepInstruction,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (stepDist >= 15)
+                          Text(
+                            stepDistStr,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2,
                             ),
                           ),
+                        Text(
+                          instruction,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
+                        ),
+                        if (activePotholeCount > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.warning_amber_rounded,
+                                color: Color(0xFFFBBF24),
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  hazardGuidance,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xFFFBBF24),
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          buildVoiceMuteButton(),
-          const SizedBox(width: 6),
-          Semantics(
-            button: true,
-            label: 'Exit navigation',
-            child: Tooltip(
-              message: 'Exit Navigation',
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: _clearRouteState,
-                  borderRadius: BorderRadius.circular(22),
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.16),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      color: Colors.white,
-                      size: 20,
+                      ],
                     ),
                   ),
                 ),
               ),
+            ],
+          ),
+        ),
+        if (nextStep != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: thenBg,
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(14),
+                bottomRight: Radius.circular(14),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.28),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Then',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  _getStepIconData(nextStep),
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ],
             ),
           ),
-        ],
+      ],
+    );
+  }
+
+  OsrmTravelMode _travelModeFromSetting(String mode) {
+    switch (mode) {
+      case 'motorcycle':
+      case 'bike':
+        return OsrmTravelMode.bike;
+      case 'walk':
+      case 'foot':
+        return OsrmTravelMode.foot;
+      default:
+        return OsrmTravelMode.car;
+    }
+  }
+
+  void _onNavVehicleModeChanged() {
+    if (!mounted) return;
+    final nextMode = _travelModeFromSetting(
+      AppSettings.instance.mobileNavVehicleModeNotifier.value,
+    );
+    if (_travelMode != nextMode) {
+      setState(() => _travelMode = nextMode);
+    }
+  }
+
+  NavVehicleType _navVehicleTypeFor(OsrmTravelMode mode) {
+    switch (mode) {
+      case OsrmTravelMode.car:
+        return NavVehicleType.car;
+      case OsrmTravelMode.bike:
+        return NavVehicleType.motorcycle;
+      case OsrmTravelMode.foot:
+        return NavVehicleType.walking;
+    }
+  }
+
+  Widget _buildNavigationVehiclePuck() {
+    return NavVehicle3DWidget(
+      type: _navVehicleTypeFor(_travelMode),
+      size: 64.0,
+      showHeadlightGlow: true,
+    );
+  }
+
+  Widget _buildDrivingCircleButton({
+    Key? targetKey,
+    required Widget icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    String? badgeText,
+    Color badgeAccent = const Color(0xFF38BDF8),
+  }) {
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.bottomCenter,
+          children: [
+            Material(
+              key: targetKey,
+              color: const Color(0xE60B0F17),
+              shape: const CircleBorder(
+                side: BorderSide(color: Color(0x33FFFFFF), width: 1.1),
+              ),
+              elevation: 6,
+              shadowColor: Colors.black54,
+              child: InkWell(
+                onTap: onPressed,
+                customBorder: const CircleBorder(),
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(child: icon),
+                ),
+              ),
+            ),
+            if (badgeText != null && badgeText.isNotEmpty)
+              Positioned(
+                bottom: -5,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0B0F17),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: badgeAccent.withValues(alpha: 0.75),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Text(
+                      badgeText,
+                      style: TextStyle(
+                        color: badgeAccent,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                        height: 1.05,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  void _startTurnByTurnNavigation(int activePotholeCount) {
+  void _showDrivingHudNotice(
+    String message, {
+    Duration duration = const Duration(milliseconds: 2200),
+  }) {
+    _drivingHudNoticeTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _drivingHudNotice = message);
+    _drivingHudNoticeTimer = Timer(duration, () {
+      if (!mounted) return;
+      setState(() => _drivingHudNotice = null);
+    });
+  }
+
+  void _applyDrivingCameraAngle(
+    DrivingCameraAngle angle, {
+    bool showNotice = true,
+  }) {
+    _navAutoRecenterTimer?.cancel();
+    final bool isOverview = angle == DrivingCameraAngle.overview;
+    final FollowMode nextFollow;
+    switch (angle) {
+      case DrivingCameraAngle.chase3D:
+      case DrivingCameraAngle.topDown2D:
+        nextFollow = FollowMode.compass;
+      case DrivingCameraAngle.northUp2D:
+        nextFollow = FollowMode.location;
+      case DrivingCameraAngle.overview:
+        nextFollow = FollowMode.none;
+    }
+
+    setState(() {
+      _drivingCameraAngle = angle;
+      _isNavOverview = isOverview;
+      _followMode = nextFollow;
+    });
+
+    if (isOverview && _routePoints.isNotEmpty) {
+      _currentMapRotation = 0.0;
+      _mapRotationNotifier.value = 0.0;
+      try {
+        _mapController.rotate(0.0);
+      } catch (_) {}
+      _fitCameraToRoute(_routePoints);
+    } else {
+      final double targetRot;
+      if (angle.isHeadingUp && _lastHeadingNotifier.value != null) {
+        targetRot = (360.0 - _lastHeadingNotifier.value!) % 360.0;
+      } else {
+        targetRot = 0.0;
+      }
+      _currentMapRotation = targetRot;
+      _mapRotationNotifier.value = targetRot;
+      try {
+        _mapController.rotate(targetRot);
+      } catch (_) {}
+
+      final LatLng? focus =
+          _animatedPuckPositionNotifier.value ?? _currentPosition;
+      if (focus != null) {
+        final double targetZoom = switch (angle) {
+          DrivingCameraAngle.chase3D => 17.5,
+          DrivingCameraAngle.topDown2D => 16.6,
+          DrivingCameraAngle.northUp2D => 16.2,
+          DrivingCameraAngle.overview => 15.0,
+        };
+        _animatedMapMoveToVisible(
+          focus,
+          targetZoom,
+          isExpandedSheet: false,
+          rotationDeg: targetRot,
+        );
+      }
+      _startFollowing();
+    }
+
+    if (showNotice) {
+      _showDrivingHudNotice(angle.label);
+    }
+  }
+
+  void _alignDrivingCameraToActiveRoute(LatLng anchorPos) {
+    final double? routeBearing = _routePoints.length >= 2
+        ? GpsTrackerSmoother.routeForwardBearingDeg(
+            _routePoints,
+            anchorPos,
+            lookaheadMeters: 30.0,
+            maxDistanceMeters: 500.0,
+          )
+        : null;
+    if (routeBearing != null) {
+      _gpsSmoother.setHeading(routeBearing);
+      _lastHeadingNotifier.value = routeBearing;
+    }
+    _applyDrivingCameraAngle(_drivingCameraAngle, showNotice: false);
+  }
+
+  Future<void> _handleDrivingReroute() async {
+    if (_isManualRerouting || _isRouting) return;
+    HapticFeedback.mediumImpact();
+
+    final LatLng? dest = _destination;
+    if (dest == null) {
+      _showDrivingHudNotice('Set a destination first to reroute');
+      return;
+    }
+
+    final LatLng livePos =
+        _animatedPuckPositionNotifier.value ??
+        _currentPosition ??
+        (_routePoints.isNotEmpty ? _routePoints.first : _bulacanCenter);
+    final double distFromStart = _routePoints.isNotEmpty
+        ? Geolocator.distanceBetween(
+            livePos.latitude,
+            livePos.longitude,
+            _routePoints.first.latitude,
+            _routePoints.first.longitude,
+          )
+        : double.infinity;
+    final double distToRoute = _routePoints.isNotEmpty
+        ? _distancePointToRouteMeters(livePos, _routePoints)
+        : double.infinity;
+
+    // Fast path near the origin: cycle to the next already-fetched alternative.
+    if (distFromStart <= 65.0 &&
+        distToRoute <= 35.0 &&
+        _alternativeRoutes.length > 1) {
+      final int nextIndex =
+          (_selectedRouteIndex + 1) % _alternativeRoutes.length;
+      _selectActiveRoute(nextIndex);
+      _alignDrivingCameraToActiveRoute(livePos);
+      final int hazards = _selectedRouteIndex < _routePotholeCounts.length
+          ? _routePotholeCounts[_selectedRouteIndex]
+          : _potholesOnRoute.length;
+      final String hazardText = hazards == 0
+          ? '0 potholes'
+          : '$hazards pothole${hazards == 1 ? '' : 's'}';
+      _showDrivingHudNotice(
+        'Rerouted · Route ${nextIndex + 1}/${_alternativeRoutes.length} ($hazardText)',
+      );
+      if (!kIsWeb && AppSettings.instance.mobileVoiceAlertsEnabled) {
+        _tts.speak(
+          'Rerouted to route ${nextIndex + 1} of ${_alternativeRoutes.length}.',
+        );
+      }
+      return;
+    }
+
+    final LatLng? prevMid = _routePoints.length >= 2
+        ? _routePoints[_routePoints.length ~/ 2]
+        : null;
+
+    setState(() {
+      _isManualRerouting = true;
+      _customOrigin = null;
+    });
+    _showDrivingHudNotice(
+      'Rerouting...',
+      duration: const Duration(seconds: 6),
+    );
+
+    try {
+      await _calculateRoute(
+        dest,
+        customOrigin: livePos,
+        fitCamera: false,
+        silent: true,
+      );
+      if (!mounted || !_isNavigating) return;
+
+      if (_alternativeRoutes.length < 2) {
+        await _findFewerPotholes();
+        if (!mounted || !_isNavigating) return;
+      }
+
+      // If still on-route and alternative 0 matches the previous route, pick alternate 1.
+      if (_alternativeRoutes.length > 1 &&
+          prevMid != null &&
+          distToRoute <= 35.0 &&
+          _alternativeRoutes.first.length >= 2) {
+        final newMid =
+            _alternativeRoutes.first[_alternativeRoutes.first.length ~/ 2];
+        final midShiftMeters = Geolocator.distanceBetween(
+          prevMid.latitude,
+          prevMid.longitude,
+          newMid.latitude,
+          newMid.longitude,
+        );
+        if (midShiftMeters < 40.0) {
+          _selectActiveRoute(1);
+        }
+      }
+
+      _alignDrivingCameraToActiveRoute(livePos);
+      final int hazards = _selectedRouteIndex < _routePotholeCounts.length
+          ? _routePotholeCounts[_selectedRouteIndex]
+          : _potholesOnRoute.length;
+      final String hazardText = hazards == 0
+          ? 'clear road'
+          : '$hazards pothole${hazards == 1 ? '' : 's'}';
+      _showDrivingHudNotice(
+        'Rerouted · Route ${_selectedRouteIndex + 1}/${_alternativeRoutes.isEmpty ? 1 : _alternativeRoutes.length} ($hazardText)',
+      );
+      if (!kIsWeb && AppSettings.instance.mobileVoiceAlertsEnabled) {
+        _tts.speak('Rerouted.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isManualRerouting = false);
+      } else {
+        _isManualRerouting = false;
+      }
+    }
+  }
+
+  Widget _buildDrivingRightControls(bool isDark) {
+    final bool voiceEnabled = AppSettings.instance.mobileVoiceAlertsEnabled;
+    final bool isReroutingBusy = _isManualRerouting || _isRouting;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildDrivingCircleButton(
+          targetKey: _drivingAngleGuideKey,
+          icon: _drivingCameraAngle == DrivingCameraAngle.overview
+              ? const Icon(
+                  Icons.zoom_out_map_rounded,
+                  color: Color(0xFF38BDF8),
+                  size: 22,
+                )
+              : ValueListenableBuilder<double>(
+                  valueListenable: _mapRotationNotifier,
+                  builder: (_, rotDeg, _) => NavCompassNeedleIcon(
+                    size: 24,
+                    angleRadians: _drivingCameraAngle.isHeadingUp
+                        ? rotDeg * math.pi / 180.0
+                        : 0.0,
+                  ),
+                ),
+          badgeText: _drivingCameraAngle.shortBadge,
+          tooltip:
+              'Camera angle: ${_drivingCameraAngle.label} (tap to switch)',
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            _applyDrivingCameraAngle(
+              _drivingCameraAngle.next(hasRoute: _routePoints.isNotEmpty),
+            );
+          },
+        ),
+        const SizedBox(height: 14),
+        _buildDrivingCircleButton(
+          targetKey: _drivingSearchGuideKey,
+          icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
+          tooltip: 'Search destination',
+          onPressed: () {
+            setState(() {
+              _isSearchPageActive = true;
+              _isRoutePlanningMode = false;
+              _suggestions = [];
+            });
+            _destinationFocusNode.requestFocus();
+          },
+        ),
+        const SizedBox(height: 14),
+        _buildDrivingCircleButton(
+          targetKey: _drivingVoiceGuideKey,
+          icon: Icon(
+            voiceEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            color: voiceEnabled ? Colors.white : const Color(0xFFFCA5A5),
+            size: 22,
+          ),
+          tooltip: voiceEnabled ? 'Mute voice alerts' : 'Unmute voice alerts',
+          onPressed: () {
+            final wasEnabled = AppSettings.instance.mobileVoiceAlertsEnabled;
+            setState(() {
+              AppSettings.instance.mobileVoiceAlertsEnabled = !wasEnabled;
+            });
+            if (wasEnabled && !kIsWeb) {
+              try {
+                _tts.stop();
+              } catch (_) {}
+            }
+          },
+        ),
+        const SizedBox(height: 14),
+        _buildDrivingCircleButton(
+          targetKey: _drivingRerouteGuideKey,
+          icon: isReroutingBusy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: Color(0xFF38BDF8),
+                  ),
+                )
+              : const Icon(
+                  Icons.alt_route_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+          badgeText: !isReroutingBusy && _alternativeRoutes.length > 1
+              ? '${_selectedRouteIndex + 1}/${_alternativeRoutes.length}'
+              : null,
+          tooltip: 'Reroute',
+          onPressed: () => unawaited(_handleDrivingReroute()),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDrivingSpeedometer() {
+    return ValueListenableBuilder<LatLng?>(
+      valueListenable: _animatedPuckPositionNotifier,
+      builder: (context, _, _) {
+        final int kmh = (_gpsSmoother.speedMps * 3.6).round().clamp(0, 299);
+        return Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xE60B0F17),
+            border: Border.all(color: Colors.white38, width: 1.4),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$kmh',
+                style: AppDesign.tabular(
+                  const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'km/h',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.0,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showVehicleProfilePickerSheet(bool isDark) {
+    _setRouteSheetExpanded(true);
+  }
+
+  void _startFreeDriveNavigation() {
+    AppSettings.instance.setRouteActive(true);
+    _navAutoRecenterTimer?.cancel();
+    _drivingHudNoticeTimer?.cancel();
+    if (_puckPulseController.isAnimating) {
+      _puckPulseController.stop();
+    }
+    _endpointDragScreenBase = null;
+    _endpointDragPointerOffset = null;
     setState(() {
       _isNavigating = true;
+      _isNavOverview = false;
+      _drivingCameraAngle = DrivingCameraAngle.chase3D;
+      _isManualRerouting = false;
+      _drivingHudNotice = null;
       _isRoutePlanningMode = false;
-      _followMode = FollowMode.location;
+      _isDraggingEndpoint = false;
+      _draggingEndpointKind = 0;
+      _isEditingDevLocation = false;
+      _isChoosingLocationOnMap = false;
+      _isPlacingMarker = false;
+      _followMode = FollowMode.compass;
+      _isRouteSheetExpanded = false;
+      _isRouteDockMinimized = false;
+      _selectedStepIndex = null;
+    });
+    if (_currentPosition != null) {
+      if (_lastHeadingNotifier.value != null) {
+        final rot = (360.0 - _lastHeadingNotifier.value!) % 360.0;
+        _currentMapRotation = rot;
+        _mapRotationNotifier.value = rot;
+        try {
+          _mapController.rotate(rot);
+        } catch (_) {}
+      }
+      _animatedMapMoveToVisible(
+        _currentPosition!,
+        17.6,
+        isExpandedSheet: false,
+      );
+      _checkPotholeProximity(_currentPosition!);
+    } else {
+      _determinePosition();
+    }
+    _startFollowing();
+  }
+
+  void _startTurnByTurnNavigation(int activePotholeCount) {
+    AppSettings.instance.setRouteActive(true);
+    _navAutoRecenterTimer?.cancel();
+    _drivingHudNoticeTimer?.cancel();
+    if (_puckPulseController.isAnimating) {
+      _puckPulseController.stop();
+    }
+    final double? initialRouteHeading = _routePoints.length >= 2
+        ? GpsTrackerSmoother.routeForwardBearingDeg(
+            _routePoints,
+            _currentPosition ?? _routePoints.first,
+            lookaheadMeters: 30.0,
+            maxDistanceMeters: 500.0,
+          )
+        : null;
+    if (initialRouteHeading != null) {
+      _gpsSmoother.setHeading(initialRouteHeading);
+      _lastHeadingNotifier.value = initialRouteHeading;
+    }
+    _endpointDragScreenBase = null;
+    _endpointDragPointerOffset = null;
+    setState(() {
+      _isNavigating = true;
+      _isNavOverview = false;
+      _drivingCameraAngle = DrivingCameraAngle.chase3D;
+      _isManualRerouting = false;
+      _drivingHudNotice = null;
+      _isRoutePlanningMode = false;
+      _isDraggingEndpoint = false;
+      _draggingEndpointKind = 0;
+      _isEditingDevLocation = false;
+      _isChoosingLocationOnMap = false;
+      _isPlacingMarker = false;
+      _followMode = FollowMode.compass;
       _isRouteSheetExpanded = false;
       _isRouteDockMinimized = false;
       _selectedStepIndex = null;
     });
 
     if (_currentPosition != null) {
+      final heading = initialRouteHeading ?? _lastHeadingNotifier.value;
+      double? targetRot;
+      if (heading != null) {
+        targetRot = (360.0 - heading) % 360.0;
+        _currentMapRotation = targetRot;
+        _mapRotationNotifier.value = targetRot;
+        try {
+          _mapController.rotate(targetRot);
+        } catch (_) {}
+      }
       _animatedMapMoveToVisible(
         _currentPosition!,
-        17.0,
+        17.5,
         isExpandedSheet: false,
+        rotationDeg: targetRot,
       );
+      _checkPotholeProximity(_currentPosition!);
     }
     _startFollowing();
 
@@ -13060,6 +14664,465 @@ class MapScreenState extends State<MapScreen>
     );
   }
 
+  Widget _buildDrivingModeBottomSheet({
+    required bool isDark,
+    required String distStr,
+    required String totalEtaStr,
+    required int activePotholeCount,
+  }) {
+    final double activeDistance =
+        _routeDistances.isNotEmpty &&
+            _selectedRouteIndex < _routeDistances.length
+        ? _routeDistances[_selectedRouteIndex]
+        : 0.0;
+    final double activeDuration =
+        _routeDurations.isNotEmpty &&
+            _selectedRouteIndex < _routeDurations.length
+        ? _routeDurations[_selectedRouteIndex]
+        : 0.0;
+
+    final String formattedDist = distStr.isNotEmpty
+        ? distStr
+        : RoutePotholeAdvisor.formatRouteDistance(activeDistance);
+
+    final double accurateSeconds = _calculateAccurateEtaSeconds(
+      activeDuration,
+      distanceMeters: activeDistance,
+      potholeCount: activePotholeCount,
+    );
+    final int min = (accurateSeconds / 60).round().clamp(1, 9999);
+    final String formattedDur = _routePoints.isEmpty
+        ? 'Free Drive'
+        : (totalEtaStr.isNotEmpty
+              ? totalEtaStr
+              : (min < 60 ? '$min min' : '${min ~/ 60}h ${min % 60}m'));
+
+    final DateTime arrivalTime = DateTime.now().add(Duration(minutes: min));
+    final int hour = arrivalTime.hour % 12 == 0 ? 12 : arrivalTime.hour % 12;
+    final String amPm = arrivalTime.hour >= 12 ? 'PM' : 'AM';
+    final String clockStr =
+        '$hour:${arrivalTime.minute.toString().padLeft(2, '0')} $amPm';
+
+    final Color etaColor = _routePoints.isEmpty
+        ? const Color(0xFF38BDF8)
+        : (activePotholeCount == 0
+              ? const Color(0xFF34D399)
+              : const Color(0xFFFBBF24));
+
+    final String subtitleText = _routePoints.isEmpty
+        ? (activePotholeCount == 0
+              ? 'Pothole radar active'
+              : '$activePotholeCount nearby hazards')
+        : '$formattedDist · $clockStr';
+
+    final int remainingPotholes =
+        _navHazardState?.remainingPotholeCount ?? activePotholeCount;
+
+    return GestureDetector(
+      key: _drivingBottomSheetGuideKey,
+      onVerticalDragEnd: (details) {
+        final v = details.primaryVelocity ?? 0.0;
+        if (v < -100 && !_isRouteSheetExpanded) {
+          _setRouteSheetExpanded(true);
+        } else if (v > 100 && _isRouteSheetExpanded) {
+          _setRouteSheetExpanded(false);
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A0D12),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(
+            top: BorderSide(
+              color: Colors.white.withValues(alpha: 0.14),
+              width: 1.0,
+            ),
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 18,
+              offset: Offset(0, -4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _setRouteSheetExpanded(!_isRouteSheetExpanded),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white30,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Semantics(
+                      button: true,
+                      label: 'End',
+                      child: Tooltip(
+                        message: 'End navigation',
+                        child: Material(
+                          color: Colors.transparent,
+                          shape: const CircleBorder(
+                            side: BorderSide(color: Colors.white38, width: 1.4),
+                          ),
+                          child: InkWell(
+                            onTap: _clearRouteState,
+                            customBorder: const CircleBorder(),
+                            child: const SizedBox(
+                              width: 46,
+                              height: 46,
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            _setRouteSheetExpanded(!_isRouteSheetExpanded),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              formattedDur,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppDesign.tabular(
+                                TextStyle(
+                                  color: etaColor,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.05,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              subtitleText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppDesign.tabular(
+                                const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Material(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        onTap: () =>
+                            _setRouteSheetExpanded(!_isRouteSheetExpanded),
+                        customBorder: const CircleBorder(),
+                        child: SizedBox(
+                          width: 46,
+                          height: 46,
+                          child: Icon(
+                            _isRouteSheetExpanded
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_up_rounded,
+                            color: Colors.white70,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_isRouteSheetExpanded) ...[
+                  const SizedBox(height: 12),
+                  Divider(color: Colors.white.withValues(alpha: 0.12), height: 1),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'VEHICLE PROFILE (3D)',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final item in const [
+                        (
+                          mode: OsrmTravelMode.car,
+                          setting: 'car',
+                          label: 'Car',
+                          vehicleType: NavVehicleType.car,
+                        ),
+                        (
+                          mode: OsrmTravelMode.bike,
+                          setting: 'motorcycle',
+                          label: 'Motorcycle',
+                          vehicleType: NavVehicleType.motorcycle,
+                        ),
+                        (
+                          mode: OsrmTravelMode.foot,
+                          setting: 'walk',
+                          label: 'Walking',
+                          vehicleType: NavVehicleType.walking,
+                        ),
+                      ])
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              right: item.mode == OsrmTravelMode.foot ? 0 : 8,
+                            ),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () {
+                                if (_travelMode != item.mode) {
+                                  setState(() => _travelMode = item.mode);
+                                  AppSettings.instance.setMobileNavVehicleMode(
+                                    item.setting,
+                                  );
+                                  final dest =
+                                      _destination ??
+                                      (_routePoints.isNotEmpty
+                                          ? _routePoints.last
+                                          : null);
+                                  if (dest != null) {
+                                    _calculateRoute(dest);
+                                  }
+                                }
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                  horizontal: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _travelMode == item.mode
+                                      ? const Color(0xFF00B8FF).withValues(
+                                          alpha: 0.16,
+                                        )
+                                      : const Color(0xFF141923),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: _travelMode == item.mode
+                                        ? const Color(0xFF00B8FF)
+                                        : Colors.white12,
+                                    width: _travelMode == item.mode ? 1.6 : 1.0,
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    NavVehicle3DWidget(
+                                      type: item.vehicleType,
+                                      size: 46,
+                                      showHeadlightGlow: false,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      item.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: _travelMode == item.mode
+                                            ? FontWeight.w800
+                                            : FontWeight.w600,
+                                        color: _travelMode == item.mode
+                                            ? const Color(0xFF38BDF8)
+                                            : Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (_routePoints.isNotEmpty)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _toggleRouteSimulation,
+                            icon: Icon(
+                              _isSimulatingRoute
+                                  ? Icons.stop_rounded
+                                  : Icons.play_arrow_rounded,
+                              size: 18,
+                            ),
+                            label: Text(
+                              _isSimulatingRoute
+                                  ? 'Stop Test Drive'
+                                  : 'Simulate drive',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 42),
+                              backgroundColor: _isSimulatingRoute
+                                  ? const Color(0xFF451A03)
+                                  : const Color(0xFF141923),
+                              foregroundColor: _isSimulatingRoute
+                                  ? const Color(0xFFFBBF24)
+                                  : Colors.white,
+                              side: const BorderSide(color: Colors.white12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_routePoints.isNotEmpty) const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(
+                          height: 42,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF141923),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                activePotholeCount == 0
+                                    ? Icons.verified_user_rounded
+                                    : Icons.warning_amber_rounded,
+                                size: 15,
+                                color: activePotholeCount == 0
+                                    ? const Color(0xFF34D399)
+                                    : const Color(0xFFFBBF24),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  activePotholeCount == 0
+                                      ? 'Clear ahead'
+                                      : '$remainingPotholes ahead · $activePotholeCount total',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: activePotholeCount == 0
+                                        ? const Color(0xFF34D399)
+                                        : const Color(0xFFFBBF24),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_routeSteps.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 165),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _routeSteps.length,
+                        separatorBuilder: (_, _) => Divider(
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                        itemBuilder: (_, i) {
+                          final step = _routeSteps[i];
+                          return ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 0,
+                            ),
+                            leading: Icon(
+                              _getStepIconData(step),
+                              color: i == 0
+                                  ? const Color(0xFF38BDF8)
+                                  : Colors.white70,
+                              size: 20,
+                            ),
+                            title: Text(
+                              step.instruction.isNotEmpty
+                                  ? step.instruction
+                                  : (step.roadName.isNotEmpty
+                                        ? step.roadName
+                                        : 'Proceed'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            trailing: Text(
+                              RoutePotholeAdvisor.formatRouteDistance(
+                                step.distanceMeters,
+                              ),
+                              style: AppDesign.tabular(
+                                const TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildGoogleMapsBottomDock({
     required bool isDark,
     required String distStr,
@@ -13513,6 +15576,7 @@ class MapScreenState extends State<MapScreen>
                   button: true,
                   label: 'Start driving navigation',
                   child: ElevatedButton.icon(
+                    key: _routeStartDrivingGuideKey,
                     onPressed: () =>
                         _startTurnByTurnNavigation(activePotholeCount),
                     icon: const Icon(Icons.navigation_rounded, size: 16),
@@ -13599,6 +15663,7 @@ class MapScreenState extends State<MapScreen>
             children: [
               Expanded(
                 child: OutlinedButton.icon(
+                  key: _routeAvoidGuideKey,
                   onPressed: _isSearchingAlternatives
                       ? null
                       : _findFewerPotholes,
@@ -13633,6 +15698,7 @@ class MapScreenState extends State<MapScreen>
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton.icon(
+                  key: _routeCompareGuideKey,
                   onPressed: () => _showCompareRoutesBottomSheet(isDark),
                   icon: const Icon(Icons.compare_arrows_rounded, size: 16),
                   label: Text(
@@ -14334,6 +16400,7 @@ class MapScreenState extends State<MapScreen>
           onTap: () {
             if (_travelMode != mode) {
               setState(() => _travelMode = mode);
+              AppSettings.instance.setMobileNavVehicleMode(mode.name);
               final dest =
                   _destination ??
                   (_routePoints.isNotEmpty ? _routePoints.last : null);
@@ -14518,34 +16585,18 @@ class MapScreenState extends State<MapScreen>
               ],
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: AppDesign.outlinedButtonStyle(isDark: isDark),
-                    icon: const Icon(Icons.directions_rounded, size: 18),
-                    label: const Text(
-                      'Directions',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onPressed: () => _calculateRoute(pothole.location),
-                  ),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: AppDesign.primaryButtonStyle(isDark: isDark),
+                icon: const Icon(Icons.info_outline_rounded, size: 18),
+                label: const Text(
+                  'Inspect Report',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: AppDesign.primaryButtonStyle(isDark: isDark),
-                    icon: const Icon(Icons.info_outline_rounded, size: 18),
-                    label: const Text(
-                      'Inspect Report',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onPressed: () => _showPotholeDetails(pothole),
-                  ),
-                ),
-              ],
+                onPressed: () => _showPotholeDetails(pothole),
+              ),
             ),
           ],
         ),
@@ -14767,6 +16818,7 @@ class MapScreenState extends State<MapScreen>
   }
 
   void _onEndpointPanStart(int kind, DragStartDetails details) {
+    if (_isNavigating) return;
     final LatLng? point = kind == 1
         ? (_customOrigin ??
               (_destination != null
@@ -14793,6 +16845,7 @@ class MapScreenState extends State<MapScreen>
   }
 
   void _onEndpointPanUpdate(DragUpdateDetails details) {
+    if (_isNavigating) return;
     final Offset? base = _endpointDragScreenBase;
     final pointer = _mapScreenPosition(details.globalPosition);
     if (!_isDraggingEndpoint ||
@@ -14827,7 +16880,7 @@ class MapScreenState extends State<MapScreen>
   }
 
   void _onEndpointPanEnd(DragEndDetails details) {
-    if (!_isDraggingEndpoint) return;
+    if (_isNavigating || !_isDraggingEndpoint) return;
     _liveRerouteTimer?.cancel();
     _endpointDragScreenBase = null;
     _endpointDragPointerOffset = null;

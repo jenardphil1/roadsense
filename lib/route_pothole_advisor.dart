@@ -2203,3 +2203,40 @@ class _SegmentMatchCollection {
   final List<_SegmentMatch> passEncounters;
   const _SegmentMatchCollection({required this.passEncounters});
 }
+
+/// Immutable payload for offloading [RoutePotholeAdvisor.evaluateAlternatives]
+/// onto a background Dart isolate via `compute(...)`.
+class RouteAlternativesEvalRequest {
+  final List<List<LatLng>> routes;
+  final List<double> distancesMeters;
+  final List<double> durationsSeconds;
+  final List<RouteHazardInput> hazards;
+  final List<String> viaSummaries;
+  final List<List<RouteStepRoadSpan>> stepsByRoute;
+  final RouteCorridorConfig corridorConfig;
+
+  const RouteAlternativesEvalRequest({
+    required this.routes,
+    required this.distancesMeters,
+    required this.durationsSeconds,
+    required this.hazards,
+    required this.viaSummaries,
+    required this.stepsByRoute,
+    required this.corridorConfig,
+  });
+}
+
+/// Top-level worker entry point for `compute(...)`.
+RouteComparisonResult evaluateRouteAlternativesWorker(
+  RouteAlternativesEvalRequest req,
+) {
+  return RoutePotholeAdvisor.evaluateAlternatives(
+    routes: req.routes,
+    distancesMeters: req.distancesMeters,
+    durationsSeconds: req.durationsSeconds,
+    hazards: req.hazards,
+    viaSummaries: req.viaSummaries,
+    stepsByRoute: req.stepsByRoute,
+    corridorConfig: req.corridorConfig,
+  );
+}

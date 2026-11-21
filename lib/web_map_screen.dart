@@ -7929,8 +7929,6 @@ class MapScreenState extends State<MapScreen>
       onCenterReportOnMap: (item) {
         _animatedMapMove(item.location, 17.8);
       },
-      onDirectionsToReport: (item) =>
-          _startDirectionsToPoint(item.location, label: item.locationLabel),
       onViewFullPhoto: _showFullScreenPhoto,
       onEditReport: null,
       onDeleteReport: _confirmTrashReport,
@@ -8368,13 +8366,6 @@ class MapScreenState extends State<MapScreen>
               onCenterOnMap: () {
                 Navigator.of(sheetCtx).pop();
                 _animatedMapMove(item.location, 17.8);
-              },
-              onDirectionsHere: () {
-                Navigator.of(sheetCtx).pop();
-                _startDirectionsToPoint(
-                  item.location,
-                  label: item.locationLabel,
-                );
               },
               onViewFullPhoto: () => _showFullScreenPhoto(item.imageUrl),
               onEditReport: null,

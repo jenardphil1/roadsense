@@ -399,7 +399,6 @@ void main() {
               onClearHistory: () {},
               onMoveSuggestionHighlight: (_) {},
               onCenterReportOnMap: (_) {},
-              onDirectionsToReport: (_) {},
               onViewFullPhoto: (_) {},
             ),
           ),
@@ -435,13 +434,14 @@ void main() {
               isAdminUser: false,
               onBack: () {},
               onCenterOnMap: () {},
-              onDirectionsHere: () {},
               onViewFullPhoto: () {},
               onEditReport: () {},
               onDeleteReport: () {},
             ),
           ),
         );
+        expect(find.text('Directions here'), findsNothing);
+        expect(find.text('Center map'), findsOneWidget);
         expect(
           find.text(
             'Confidence reflects how certain the detector is about the defect class.',
@@ -467,7 +467,6 @@ void main() {
               isAdminUser: false,
               onBack: () {},
               onCenterOnMap: () {},
-              onDirectionsHere: () {},
               onViewFullPhoto: () {},
               onEditReport: () {},
               onDeleteReport: () {},
@@ -494,7 +493,6 @@ void main() {
               isAdminUser: false,
               onBack: () {},
               onCenterOnMap: () {},
-              onDirectionsHere: () {},
               onViewFullPhoto: () {},
               onEditReport: () {},
               onDeleteReport: () {},

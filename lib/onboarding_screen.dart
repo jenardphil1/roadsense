@@ -367,7 +367,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             iconColor: accentColor,
             title: 'Live AI Road Scanner',
             subtitle:
-                'Detects 4 DPWH distress classes directly from your camera or photo captures.',
+                'Detects 4 DPWH distress classes directly from the live road scanner.',
             badgeText: 'ON-DEVICE AI',
             badgeColor: accentColor,
             textColor: textColor,
@@ -605,9 +605,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   isDark: isDark,
                   icon: Icons.videocam_rounded,
                   iconColor: accentColor,
-                  title: 'Live Dashcam',
+                  title: 'Live AI Scanner',
                   description:
-                      'Continuous real-time road scanning with save-frame capture.',
+                      'Real-time 4-class road scanning with cropped save-frame capture.',
                   borderColor: borderColor,
                   cardColor: cardColor,
                   textColor: textColor,
@@ -618,11 +618,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               Expanded(
                 child: _buildModeCard(
                   isDark: isDark,
-                  icon: Icons.photo_camera_rounded,
+                  icon: Icons.fact_check_rounded,
                   iconColor: const Color(0xFF047857),
-                  title: 'Single Photo',
+                  title: 'Review & Submit',
                   description:
-                      'Capture a still road photo and verify detections before upload.',
+                      'Verify bounding boxes on the saved frame before GPS upload.',
                   borderColor: borderColor,
                   cardColor: cardColor,
                   textColor: textColor,

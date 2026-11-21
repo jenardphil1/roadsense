@@ -118,4 +118,21 @@ class AppSettings {
   bool mobileHighAccuracyGps = true;
   bool mobileDevMockLocationEnabled = false;
   String mobileGpsAccuracyMode = 'High Accuracy'; // 'High Accuracy', 'Balanced'
+
+  /// Navigation vehicle / travel profile ('car', 'motorcycle', 'walk')
+  final ValueNotifier<String> mobileNavVehicleModeNotifier =
+      ValueNotifier<String>('car');
+
+  String get mobileNavVehicleMode => mobileNavVehicleModeNotifier.value;
+
+  void setMobileNavVehicleMode(String mode) {
+    final normalized = switch (mode) {
+      'bike' || 'motorcycle' => 'motorcycle',
+      'foot' || 'walk' || 'walking' => 'walk',
+      _ => 'car',
+    };
+    if (mobileNavVehicleModeNotifier.value != normalized) {
+      mobileNavVehicleModeNotifier.value = normalized;
+    }
+  }
 }

@@ -1,0 +1,4 @@
+{
+  "errors": [],
+  "snapshot": "- dialog:\n  - group:\n    - text: \"Verify Your Account A verification link & security code were sent to: qa.browser.1793150570296@example.test Check your Spam / Junk folder if you do not see the email in your inbox within a minute. Option 1: Enter 6-Digit Code\"\n    - textbox \"• • • • • •\"\n    - button \"Verify Code\"\n    - text: \"OR Option 2: Click the link inside the email\"\n    - button \"I've Verified via Email Link ✓\"\n    - text: Verification email sent! Check your inbox and Spam folder.\n    - button \"Resend Email (40s)\" [disabled]\n    - button \"Cannot receive email? (View Code)\"\n    - button \"Cancel & Sign Out\"\n- paragraph: Running in emulator mode. Do not use with production credentials."
+}

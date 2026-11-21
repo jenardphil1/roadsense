@@ -1,0 +1,39 @@
+[
+  {
+    "type": "debug",
+    "message": "Injecting <script> tag. Using callback."
+  },
+  {
+    "type": "debug",
+    "message": "TrustedTypes available. Creating policy: gis-dart"
+  },
+  {
+    "type": "debug",
+    "message": "TrustedTypes available. Creating policy: flutterfire-firebase_core"
+  },
+  {
+    "type": "debug",
+    "message": "Initializing Firebase firebase_core"
+  },
+  {
+    "type": "debug",
+    "message": "TrustedTypes available. Creating policy: flutterfire-firebase_firestore"
+  },
+  {
+    "type": "debug",
+    "message": "Initializing Firebase firebase_firestore"
+  },
+  {
+    "type": "debug",
+    "message": "TrustedTypes available. Creating policy: flutterfire-firebase_auth"
+  },
+  {
+    "type": "debug",
+    "message": "Initializing Firebase firebase_auth"
+  },
+  {
+    "type": "error",
+    "message": "Error",
+    "stack": "Error\n    at http://127.0.0.1:8080/main.dart.js:109190:24\n    at b03.a (http://127.0.0.1:8080/main.dart.js:5627:63)\n    at b03.$2 (http://127.0.0.1:8080/main.dart.js:47152:14)\n    at b_8.$1 (http://127.0.0.1:8080/main.dart.js:47146:21)\n    at aWg.aMF (http://127.0.0.1:8080/main.dart.js:48309:34)\n    at aWg.w0 (http://127.0.0.1:8080/main.dart.js:48312:13)\n    at aQm.$0 (http://127.0.0.1:8080/main.dart.js:47620:11)\n    at Object.x9 (http://127.0.0.1:8080/main.dart.js:5756:40)\n    at aH.qq (http://127.0.0.1:8080/main.dart.js:47531:3)\n    at aQe.$0 (http://127.0.0.1:8080/main.dart.js:47584:13)"
+  }
+]

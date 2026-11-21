@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter_vision/flutter_vision.dart';
 import 'package:camera/camera.dart';
 import 'package:latlong2/latlong.dart';
@@ -27,11 +26,12 @@ import 'mobile_components.dart';
 import 'mobile_tour.dart';
 import 'model_detections.dart';
 import 'live_detection_snapshot.dart';
+import 'scan_frame_crop.dart';
 import 'onboarding_screen.dart';
 import 'pending_report_queue.dart';
 import 'upload_error.dart';
 import 'email_verification_view.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 
 late List<CameraDescription> cameras;
 
@@ -142,12 +142,13 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
-  final ImagePicker _picker = ImagePicker();
 
   bool _isModelLoaded = false;
   FlutterVision? vision;
 
   CameraController? _cameraController;
+  Size? _liveCameraViewSize;
+  double? _livePreviewAspectRatio;
   bool _isDetecting = false;
   bool _isCapturingScan = false;
   final _liveBuffer = LiveDetectionBuffer();
@@ -185,7 +186,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final GlobalKey _tourNavReportsKey = GlobalKey();
   final GlobalKey _tourNavProfileKey = GlobalKey();
   final GlobalKey _tourScannerStartKey = GlobalKey();
-  final GlobalKey _tourScannerGalleryKey = GlobalKey();
   final GlobalKey _tourScannerCloseKey = GlobalKey();
   final GlobalKey _tourScannerCaptureKey = GlobalKey();
   final GlobalKey _tourReviewSummaryKey = GlobalKey();
@@ -241,7 +241,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (!kIsWeb) {
       vision = FlutterVision();
       _initTTS();
-      _loadModel();
       _connectivitySubscription = watchSafeOfflineState((offline) {
         final wasOffline = _isOffline;
         if (mounted && _isOffline != offline) {
@@ -252,7 +251,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         }
       });
       _tourController.load().then((_) {
-        if (mounted) _maybeStartMainTour();
+        if (mounted) _maybeStartCurrentPageTour();
       });
     }
     _loadPotholesFromDB();
@@ -263,12 +262,22 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _cameraForeground = true;
       _retryPendingReports();
+      if (!kIsWeb && _currentIndex == 1 && !_isModelLoaded) {
+        unawaited(_loadModel());
+      }
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _cameraForeground = false;
       if (_isRealtimeMode || _scannerStarting || _cameraController != null) {
         unawaited(_stopRealtime());
+      }
+      if ((state == AppLifecycleState.paused ||
+              state == AppLifecycleState.detached) &&
+          _isModelLoaded &&
+          !_isAnalyzingPhoto) {
+        _isModelLoaded = false;
+        unawaited(vision?.closeYoloModel() ?? Future<void>.value());
       }
     }
   }
@@ -686,12 +695,31 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       _stopRealtime();
     }
     setState(() => _currentIndex = index);
-    if (!kIsWeb && index == 1) {
-      if (_staticImage != null) {
-        _maybeStartReviewTour();
-      } else {
-        _maybeStartScannerTour();
-      }
+    if (!kIsWeb && index == 1 && !_isModelLoaded) {
+      unawaited(_loadModel());
+    }
+    if (!kIsWeb) {
+      unawaited(_maybeStartCurrentPageTour());
+    }
+  }
+
+  Future<void> _maybeStartCurrentPageTour() async {
+    if (kIsWeb || !mounted) return;
+    switch (_currentIndex) {
+      case 0:
+        await _maybeStartMainTour();
+      case 1:
+        if (_staticImage != null) {
+          await _maybeStartReviewTour();
+        } else if (_isRealtimeMode) {
+          await _maybeStartLiveScannerTour();
+        } else {
+          await _maybeStartScannerTour();
+        }
+      case 2:
+        await _maybeStartReportsTour();
+      case 3:
+        await _maybeStartProfileTour();
     }
   }
 
@@ -700,99 +728,204 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       TourStepSpec(
         id: 'map_search',
         targetKey: _tourMapSearchKey,
-        title: 'Search nearby road hazards',
-        description: 'Search for a place to view nearby road reports.',
+        title: 'Search places & road hazards',
+        description:
+            'Search any barangay or road defect, or tap Directions to plan Point A to Point B.',
       ),
       TourStepSpec(
         id: 'map_filters',
         targetKey: _tourMapFiltersKey,
         title: 'Filters and defect layers',
         description:
-            'Filter by all 4 trained classes—potholes, alligator, longitudinal, and transverse cracks—or toggle pending vs. approved layers.',
+            'Filter by potholes, alligator, longitudinal, and transverse cracks, or toggle pending vs. approved layers.',
       ),
+      ...?_mapScreenKey.currentState?.mapControlGuideSteps,
       TourStepSpec(
         id: 'nav_scan',
         targetKey: _tourNavScanKey,
-        title: 'Scan a road defect',
-        description: 'Open the camera to scan for road defects.',
+        title: 'Live AI road scanner',
+        description:
+            'Open the live camera scanner to detect road defects and capture frames for review.',
       ),
       TourStepSpec(
         id: 'nav_reports',
         targetKey: _tourNavReportsKey,
         title: 'Track your reports',
-        description: 'View your submitted reports and their current status.',
+        description:
+            'View queued uploads, Pending review status, and Approved reports.',
       ),
       TourStepSpec(
         id: 'nav_profile',
         targetKey: _tourNavProfileKey,
-        title: 'Profile and tour settings',
+        title: 'Profile & page guides',
         description:
-            'Adjust display preferences, sign out, or replay this guide anytime from Help & app tour.',
+            'Manage your account, display preferences, voice alerts, and replay any page guide anytime.',
       ),
     ];
   }
 
-  Future<void> _maybeStartMainTour({bool force = false}) async {
+  List<TourStepSpec> _buildSectionSteps({required bool isReports}) {
+    final keys = isReports ? _reportGuideTargets : _profileGuideTargets;
+    final definitions = isReports
+        ? const [
+            (
+              'search',
+              'Search your report history',
+              'Filter saved and submitted reports by defect type or barangay. Tap Details on any card to inspect the photo and location.',
+            ),
+            (
+              'status',
+              'Understand report status',
+              'On Device means upload is queued; Retry sends it again. Pending Review awaits verification. Approved Live appears on the public map.',
+            ),
+            (
+              'active',
+              'Active submissions',
+              'Lists your local queued and cloud reports. Available edit and removal actions depend on review status.',
+            ),
+            (
+              'trash',
+              'Recover removed reports',
+              'Removed pending or rejected reports move to Trash where you can Restore or permanently delete them.',
+            ),
+          ]
+        : const [
+            (
+              'details',
+              'Your account details',
+              'Update your name and contact number, then tap Save Profile Details.',
+            ),
+            (
+              'settings',
+              'Display & map preferences',
+              'Customize theme, high contrast B&W mode, map markers, and voice hazard warnings.',
+            ),
+            (
+              'help',
+              'Help & page guides',
+              'Replay any section guide or reset all first-visit page guides whenever you need a refresher.',
+            ),
+            (
+              'signout',
+              'Signing out',
+              'Sign out safely on shared devices. Queued offline reports stay saved on this device for your account.',
+            ),
+          ];
+    return [
+      for (final step in definitions)
+        TourStepSpec(
+          id: 'section_${step.$1}',
+          targetKey: keys[step.$1]!,
+          title: step.$2,
+          description: step.$3,
+        ),
+    ];
+  }
+
+  Future<void> _startFirstVisitTourWhenReady({
+    required MobileTourId id,
+    required int expectedTabIndex,
+    required List<TourStepSpec> Function() stepsBuilder,
+    int maxAttempts = 1,
+    bool force = false,
+  }) async {
     if (kIsWeb || !mounted) return;
-    await Future.delayed(const Duration(milliseconds: 450));
-    if (!mounted || _currentIndex != 0) return;
+    await _tourController.ensureLoaded();
+    if (!force && _tourController.isCompleted(id)) return;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      await Future<void>.delayed(
+        Duration(milliseconds: attempt == 0 ? 380 : 250),
+      );
+      if (!mounted || _currentIndex != expectedTabIndex) return;
+      if (!force && _tourController.isCompleted(id)) return;
+      if (_tourController.startTour(id, stepsBuilder(), force: force)) {
+        return;
+      }
+    }
+  }
+
+  Future<void> _maybeStartMainTour({bool force = false}) =>
+      _startFirstVisitTourWhenReady(
+        id: MobileTourId.main,
+        expectedTabIndex: 0,
+        stepsBuilder: _buildMainTourSteps,
+        maxAttempts: 4,
+        force: force,
+      );
+
+  Future<void> _maybeStartScannerTour({bool force = false}) async {
+    if (kIsWeb || !mounted) return;
+    await _tourController.ensureLoaded();
+    if (!force && _tourController.isCompleted(MobileTourId.scanner)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted ||
+        _currentIndex != 1 ||
+        _isRealtimeMode ||
+        _staticImage != null) {
+      return;
+    }
     _tourController.startTour(
-      MobileTourId.main,
-      _buildMainTourSteps(),
+      MobileTourId.scanner,
+      [
+        TourStepSpec(
+          id: 'scanner_start',
+          targetKey: _tourScannerStartKey,
+          title: 'Start Live AI Scanner',
+          description:
+              'Opens the real-time 4-class camera scanner to detect potholes and road cracks. Camera permission is requested only when you start.',
+        ),
+        TourStepSpec(
+          id: 'scanner_close',
+          targetKey: _tourScannerCloseKey,
+          title: 'Return to map',
+          description:
+              'Close the scanner anytime without starting the camera or submitting anything.',
+        ),
+      ],
       force: force,
     );
   }
 
-  Future<void> _maybeStartScannerTour({bool force = false}) async {
+  Future<void> _maybeStartLiveScannerTour({bool force = false}) async {
     if (kIsWeb || !mounted) return;
-    await Future.delayed(const Duration(milliseconds: 350));
-    if (!mounted || _currentIndex != 1 || _staticImage != null) return;
-    final steps = _isRealtimeMode
-        ? <TourStepSpec>[
-            TourStepSpec(
-              id: 'scanner_capture',
-              targetKey: _tourScannerCaptureKey,
-              title: 'Save scan frame',
-              description:
-                  'Save the detected scan frame for review. Nothing is submitted yet.',
-            ),
-            TourStepSpec(
-              id: 'scanner_close',
-              targetKey: _tourScannerCloseKey,
-              title: 'Close live scanner',
-              description:
-                  'Stop the camera and return to the road map without saving anything.',
-            ),
-          ]
-        : <TourStepSpec>[
-            TourStepSpec(
-              id: 'scanner_start',
-              targetKey: _tourScannerStartKey,
-              title: 'Live camera scanner',
-              description:
-                  'Opens the camera when you tap to scan potholes and cracks. Camera permission is only requested when you start.',
-            ),
-            TourStepSpec(
-              id: 'scanner_manual',
-              targetKey: _tourScannerGalleryKey,
-              title: 'Take a manual photo',
-              description:
-                  'Capture a single road photo if you prefer framing one defect at a time.',
-            ),
-            TourStepSpec(
-              id: 'scanner_close',
-              targetKey: _tourScannerCloseKey,
-              title: 'Return to map',
-              description:
-                  'Close the scanner anytime without capturing or submitting anything.',
-            ),
-          ];
-    _tourController.startTour(MobileTourId.scanner, steps, force: force);
+    await _tourController.ensureLoaded();
+    if (!force && _tourController.isCompleted(MobileTourId.liveScanner)) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 380));
+    if (!mounted ||
+        _currentIndex != 1 ||
+        !_isRealtimeMode ||
+        _staticImage != null) {
+      return;
+    }
+    _tourController.startTour(
+      MobileTourId.liveScanner,
+      [
+        TourStepSpec(
+          id: 'live_scanner_capture',
+          targetKey: _tourScannerCaptureKey,
+          title: 'Save Scan Frame',
+          description:
+              'Hold steady over the defect, then tap Save Scan Frame to capture the visible cropped frame for review.',
+        ),
+        TourStepSpec(
+          id: 'live_scanner_close',
+          targetKey: _tourScannerCloseKey,
+          title: 'Stop live scanner',
+          description:
+              'Turn off the live camera and return to the road map without saving anything.',
+        ),
+      ],
+      force: force,
+    );
   }
 
   Future<void> _maybeStartReviewTour({bool force = false}) async {
     if (kIsWeb || !mounted) return;
-    await Future.delayed(const Duration(milliseconds: 350));
+    await _tourController.ensureLoaded();
+    if (!force && _tourController.isCompleted(MobileTourId.review)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 350));
     if (!mounted || _currentIndex != 1 || _staticImage == null) return;
     final steps = <TourStepSpec>[
       TourStepSpec(
@@ -800,28 +933,50 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         targetKey: _tourReviewSummaryKey,
         title: 'Detected defect & saved frame',
         description:
-            'Shows every detected class, confidence score, and saved scan frame. Nothing is submitted yet.',
-      ),
-      TourStepSpec(
-        id: 'review_retake',
-        targetKey: _tourReviewRetakeKey,
-        title: 'Retake capture',
-        description:
-            'Discard this saved photo and go back to scan or shoot again.',
+            'Shows every detected DPWH class, confidence score, and cropped scan frame. Tap the photo to zoom; nothing is submitted yet.',
       ),
       TourStepSpec(
         id: 'review_submit',
         targetKey: _tourReviewSubmitKey,
         title: 'Submit for admin approval',
         description:
-            'Attaches GPS and sends this report for admin verification. Reports appear on the public map only after approval.',
+            'Attaches your GPS location and queues this report for LGU/DPWH verification before it appears on the public map.',
+      ),
+      TourStepSpec(
+        id: 'review_retake',
+        targetKey: _tourReviewRetakeKey,
+        title: 'Retake scan',
+        description:
+            'Discard this saved frame and return to the live scanner to capture another.',
       ),
     ];
     _tourController.startTour(MobileTourId.review, steps, force: force);
   }
 
+  Future<void> _maybeStartReportsTour({bool force = false}) =>
+      _startFirstVisitTourWhenReady(
+        id: MobileTourId.reports,
+        expectedTabIndex: 2,
+        stepsBuilder: () => _buildSectionSteps(isReports: true),
+        maxAttempts: 8,
+        force: force,
+      );
+
+  Future<void> _maybeStartProfileTour({bool force = false}) =>
+      _startFirstVisitTourWhenReady(
+        id: MobileTourId.profile,
+        expectedTabIndex: 3,
+        stepsBuilder: () => _buildSectionSteps(isReports: false),
+        maxAttempts: 6,
+        force: force,
+      );
+
   Future<void> _replayAppTour() async {
     if (kIsWeb || !mounted) return;
+    final mapState = _mapScreenKey.currentState;
+    final bool hasDrivingGuide = mapState?.isDrivingActive ?? false;
+    final bool hasSearchGuide = mapState?.isSearchOrDirectionsActive ?? false;
+    final bool hasRoutePreviewGuide = mapState?.isRoutePreviewActive ?? false;
     final section = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -834,7 +989,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               const ListTile(
                 title: Text('Help & app guide'),
                 subtitle: Text(
-                  'Choose a short guide. Skip anytime; nothing is submitted or changed by the guide.',
+                  'Choose a short guide. Skip anytime; each page guide also shows automatically the first time you visit it.',
                 ),
               ),
               for (final item in [
@@ -842,13 +997,34 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   0,
                   Icons.map_outlined,
                   'Map & navigation',
-                  'Search, filters, route planning, compass, zoom and GPS',
+                  'Search, filters, Point A to B route, compass, zoom and GPS',
                 ),
+                if (hasSearchGuide)
+                  (
+                    5,
+                    Icons.search_rounded,
+                    'Search & directions page',
+                    'Point A/B inputs, swap, travel modes and Choose on map',
+                  ),
+                if (hasRoutePreviewGuide)
+                  (
+                    6,
+                    Icons.alt_route_rounded,
+                    'Route preview & comparison',
+                    'Start driving, find fewer potholes and compare routes',
+                  ),
+                if (hasDrivingGuide)
+                  (
+                    7,
+                    Icons.directions_car_rounded,
+                    'Driving mode HUD',
+                    'Camera angles, search, voice alerts, reroute and 3D vehicle drawer',
+                  ),
                 (
                   1,
                   Icons.camera_alt_outlined,
-                  'Scan & capture',
-                  'Live scanner, gallery and saving a photo',
+                  'Scan & live camera',
+                  'Live AI road scanner, Save Scan Frame and review workflow',
                 ),
                 (
                   2,
@@ -873,13 +1049,22 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               if (_staticImage != null)
                 ListTile(
                   leading: const Icon(Icons.fact_check_outlined),
-                  title: const Text('Review & submit this photo'),
+                  title: const Text('Review & submit this scan'),
                   onTap: () => Navigator.pop(context, 4),
                 ),
+              const Divider(height: 8),
+              ListTile(
+                leading: const Icon(Icons.restart_alt_rounded),
+                title: const Text('Reset all page guides'),
+                subtitle: const Text(
+                  'Show first-visit guides again whenever you enter any page',
+                ),
+                onTap: () => Navigator.pop(context, -1),
+              ),
               const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text(
-                  'These guides only replay when you ask. Driving guidance stays visible while navigating.',
+                  'These guides only auto-run once per page on your first visit, or anytime you replay them here.',
                 ),
               ),
             ],
@@ -889,6 +1074,34 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     );
     if (!mounted || section == null) return;
     _tourController.cancelWithoutCompleting();
+    if (section == -1) {
+      await _tourController.resetAllTours();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Page guides reset. Each page will show its guide on your next visit.',
+          ),
+        ),
+      );
+      await _maybeStartCurrentPageTour();
+      return;
+    }
+    if (section == 5 || section == 6 || section == 7) {
+      if (_isRealtimeMode) await _stopRealtime();
+      if (!mounted) return;
+      _onTabSelected(0);
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      if (!mounted || _currentIndex != 0) return;
+      if (section == 5) {
+        _mapScreenKey.currentState?.startSearchOrDirectionsGuide(force: true);
+      } else if (section == 6) {
+        _mapScreenKey.currentState?.startRoutePreviewGuide(force: true);
+      } else {
+        _mapScreenKey.currentState?.startDrivingGuide(force: true);
+      }
+      return;
+    }
     final targetIndex = section == 4 ? 1 : section;
     if (_isRealtimeMode && targetIndex != 1) await _stopRealtime();
     if (!mounted) return;
@@ -896,76 +1109,21 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     await Future<void>.delayed(const Duration(milliseconds: 450));
     if (!mounted || _currentIndex != targetIndex) return;
     if (section == 0) {
-      _tourController.startTour(MobileTourId.main, [
-        ..._buildMainTourSteps().take(2),
-        ...?_mapScreenKey.currentState?.mapControlGuideSteps,
-      ], force: true);
+      await _maybeStartMainTour(force: true);
     } else if (section == 1) {
       if (_staticImage != null) {
         await _maybeStartReviewTour(force: true);
+      } else if (_isRealtimeMode) {
+        await _maybeStartLiveScannerTour(force: true);
       } else {
         await _maybeStartScannerTour(force: true);
       }
     } else if (section == 4) {
       await _maybeStartReviewTour(force: true);
+    } else if (section == 2) {
+      await _maybeStartReportsTour(force: true);
     } else {
-      final reports = section == 2;
-      final keys = reports ? _reportGuideTargets : _profileGuideTargets;
-      final explanations = reports
-          ? [
-              (
-                'search',
-                'Your report history',
-                'Search by defect type or barangay. Each card shows its photo, class and status. Details opens the full report.',
-              ),
-              (
-                'status',
-                'Understand report status',
-                'On Device means upload is unfinished; Retry sends your saved report again. Pending Review awaits approval. Approved Live appears on the public map.',
-              ),
-              (
-                'active',
-                'Read and manage a report',
-                'Active lists your local and cloud reports. Open Details to inspect the photo, class and location. Available edit and removal actions depend on the report status.',
-              ),
-              (
-                'trash',
-                'Recover a removed report',
-                'Removed reports appear in Trash. Restore puts one back; permanent deletion cannot be undone. Viewing this guide does not remove or restore anything.',
-              ),
-            ]
-          : [
-              (
-                'details',
-                'Your account details',
-                'Edit your name and phone, then tap Save Profile Details. Your email and verification status identify the account that owns your reports.',
-              ),
-              (
-                'settings',
-                'Make the app comfortable',
-                'Change theme, high contrast, map layers and voice preferences here. The same settings are available from the header gear.',
-              ),
-              (
-                'help',
-                'Help when you need it',
-                'Return here for a short guide to any section. Skipping a tour closes it; it will not restart each time you open the app.',
-              ),
-              (
-                'signout',
-                'Signing out',
-                'Sign out on shared devices. Unsynced reports stay saved for this account and can retry after you sign back in.',
-              ),
-            ];
-      _tourController
-          .startTour(reports ? MobileTourId.reports : MobileTourId.profile, [
-            for (final step in explanations)
-              TourStepSpec(
-                id: 'section_${step.$1}',
-                targetKey: keys[step.$1]!,
-                title: step.$2,
-                description: step.$3,
-              ),
-          ], force: true);
+      await _maybeStartProfileTour(force: true);
     }
   }
 
@@ -1100,32 +1258,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _pickImage() async {
-    try {
-      if (!_isModelLoaded && !kIsWeb) {
-        await _loadModel();
-      }
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1280,
-        maxHeight: 1280,
-        imageQuality: 75,
-      );
-      if (photo != null) {
-        if (_isRealtimeMode) await _toggleRealtime();
-
-        _reportNoteController.clear();
-        setState(() {
-          _staticImage = File(photo.path);
-          _staticRecognitions = null;
-        });
-        await _detectPotholeOnStatic(photo.path);
-      }
-    } catch (e) {
-      print("Error picking picture: $e");
-    }
-  }
-
   Future<void> _toggleRealtime({bool recovering = false}) async {
     if (_scannerStarting || !_cameraForeground) return;
     if (!recovering) _cameraRecoveryAttempted = false;
@@ -1166,7 +1298,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           if (mounted) {
             setState(() {
               _cameraError =
-                  'Camera access is unavailable or denied. Allow camera permission in settings or take a manual photo instead.';
+                  'Camera access is unavailable or denied. Allow camera permission in system settings, then tap Retry Live Scanner.';
             });
           }
           return;
@@ -1179,6 +1311,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           _staticImage = null;
           _cameraRecognitionsNotifier.value = null;
         });
+        if (_tourController.activeTour == MobileTourId.scanner) {
+          _tourController.cancelWithoutCompleting();
+        }
+        unawaited(_maybeStartLiveScannerTour());
 
         final epoch = ++_scanEpoch;
         _liveBuffer.clear();
@@ -1255,7 +1391,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 'ids=${_liveBuffer.current(DateTime.now())?.detections.map((d) => d['trackId']).toList()}; '
                 'held=${_liveBuffer.isHeld}',
               );
-              if (result.isNotEmpty) {
+              if (kDebugMode && result.isNotEmpty) {
                 print('[YOLO LIVE] ${result.length} detections: $result');
               }
             }
@@ -1336,25 +1472,76 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
+  double _cameraPreviewDisplayAspectRatio(CameraController controller) {
+    final value = controller.value;
+    final rawRatio = value.aspectRatio;
+    if (!rawRatio.isFinite || rawRatio <= 0) {
+      return 3.0 / 4.0;
+    }
+    final orientation =
+        value.previewPauseOrientation ??
+        value.lockedCaptureOrientation ??
+        value.deviceOrientation;
+    final isLandscape =
+        orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight;
+    return isLandscape ? rawRatio : (1.0 / rawRatio);
+  }
+
   Future<void> _captureFromStream() async {
     if (!_isRealtimeMode || _isCapturingScan) return;
     _isCapturingScan = true;
+    final Size? captureViewSize = _liveCameraViewSize;
+    final double? capturePreviewAspect = _livePreviewAspectRatio;
     try {
       final snapshot = _liveBuffer.current(DateTime.now());
       if (snapshot != null) {
-        _isCapturingScan = true;
         try {
           final directory = await getTemporaryDirectory();
+          Uint8List outBytes = snapshot.bytes;
+          int outWidth = snapshot.width;
+          int outHeight = snapshot.height;
+          List<Map<String, dynamic>> outDetections = snapshot.detections;
+          String ext = 'jpg';
+
+          if (captureViewSize != null &&
+              captureViewSize.width > 0 &&
+              captureViewSize.height > 0) {
+            try {
+              final cropped = await cropImageBytesToVisibleScan(
+                snapshot.bytes,
+                viewSize: captureViewSize,
+                previewAspectRatio: capturePreviewAspect,
+              );
+              outBytes = cropped.bytes;
+              outWidth = cropped.width;
+              outHeight = cropped.height;
+              outDetections = remapDetectionsToCropRect(
+                snapshot.detections,
+                cropRect: cropped.cropRect,
+                sourceWidth: cropped.sourceWidth,
+                sourceHeight: cropped.sourceHeight,
+                detectionImageWidth: snapshot.width,
+                detectionImageHeight: snapshot.height,
+                outputWidth: cropped.width,
+                outputHeight: cropped.height,
+              );
+              ext = 'png';
+            } catch (e) {
+              debugPrint('[YOLO CAPTURE] Crop failed, using raw frame: $e');
+            }
+          }
+
           final file = File(
             p.join(
               directory.path,
-              'roadsense_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
+              'roadsense_scan_${DateTime.now().microsecondsSinceEpoch}.$ext',
             ),
           );
-          await file.writeAsBytes(snapshot.bytes, flush: true);
+          await file.writeAsBytes(outBytes, flush: true);
           debugPrint(
             '[YOLO CAPTURE] saved analyzed frame ${snapshot.detectedAt.toIso8601String()}; '
-            'detections=${snapshot.detections.length}; ageMs=${DateTime.now().difference(snapshot.detectedAt).inMilliseconds}',
+            'detections=${outDetections.length}; size=${outWidth}x$outHeight; ageMs=${DateTime.now().difference(snapshot.detectedAt).inMilliseconds}',
           );
           if (!mounted) return;
           await _stopRealtime();
@@ -1362,9 +1549,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           _reportNoteController.clear();
           setState(() {
             _staticImage = file;
-            _staticImageWidth = snapshot.width;
-            _staticImageHeight = snapshot.height;
-            _staticRecognitions = snapshot.detections;
+            _staticImageWidth = outWidth;
+            _staticImageHeight = outHeight;
+            _staticRecognitions = outDetections;
             _photoDetectionError = null;
           });
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1374,6 +1561,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               ),
             ),
           );
+          if (_tourController.activeTour == MobileTourId.liveScanner) {
+            _tourController.cancelWithoutCompleting();
+          }
           _maybeStartReviewTour();
         } catch (error) {
           if (mounted) {
@@ -1423,16 +1613,46 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         final XFile photo = await _cameraController!.takePicture();
         await _stopRealtime();
 
+        File imageFile = File(photo.path);
+        if (captureViewSize != null &&
+            captureViewSize.width > 0 &&
+            captureViewSize.height > 0) {
+          try {
+            final rawBytes = await imageFile.readAsBytes();
+            final cropped = await cropImageBytesToVisibleScan(
+              rawBytes,
+              viewSize: captureViewSize,
+              previewAspectRatio: capturePreviewAspect,
+            );
+            final directory = await getTemporaryDirectory();
+            final croppedFile = File(
+              p.join(
+                directory.path,
+                'roadsense_scan_${DateTime.now().microsecondsSinceEpoch}.png',
+              ),
+            );
+            await croppedFile.writeAsBytes(cropped.bytes, flush: true);
+            try {
+              await imageFile.delete();
+            } catch (_) {}
+            imageFile = croppedFile;
+          } catch (e) {
+            debugPrint(
+              '[YOLO CAPTURE] Static crop failed, using raw photo: $e',
+            );
+          }
+        }
+
         if (mounted) {
           _reportNoteController.clear();
           setState(() {
-            _staticImage = File(photo.path);
+            _staticImage = imageFile;
             _staticRecognitions = null;
             _photoDetectionError = null;
           });
         }
 
-        await _detectPotholeOnStatic(photo.path);
+        await _detectPotholeOnStatic(imageFile.path);
       } catch (e) {
         print('[YOLO] Capture error: $e');
         if (mounted) {
@@ -1868,107 +2088,120 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     required int imgHeight,
   }) async {
     final rawBytes = await imageFile.readAsBytes();
-    final codec = await ui.instantiateImageCodec(rawBytes);
-    final frame = await codec.getNextFrame();
-    final srcImage = frame.image;
+    ui.Codec? codec;
+    ui.Image? srcImage;
+    ui.Picture? picture;
+    ui.Image? annotated;
+    try {
+      codec = await ui.instantiateImageCodec(rawBytes);
+      final frame = await codec.getNextFrame();
+      srcImage = frame.image;
 
-    final double maxDim = 1280.0;
-    double scale = 1.0;
-    if (srcImage.width > maxDim || srcImage.height > maxDim) {
-      if (srcImage.width > srcImage.height) {
-        scale = maxDim / srcImage.width;
-      } else {
-        scale = maxDim / srcImage.height;
+      const double maxDim = 960.0;
+      double scale = 1.0;
+      if (srcImage.width > maxDim || srcImage.height > maxDim) {
+        if (srcImage.width > srcImage.height) {
+          scale = maxDim / srcImage.width;
+        } else {
+          scale = maxDim / srcImage.height;
+        }
       }
-    }
 
-    final int targetWidth = (srcImage.width * scale).round();
-    final int targetHeight = (srcImage.height * scale).round();
+      final int targetWidth = (srcImage.width * scale).round();
+      final int targetHeight = (srcImage.height * scale).round();
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
-    );
-
-    canvas.scale(scale);
-    canvas.drawImage(srcImage, Offset.zero, Paint());
-
-    for (final det in detections) {
-      if (!det.containsKey('box')) continue;
-      final box = det['box'] as List<dynamic>;
-      final left = (box[0] as num).toDouble();
-      final top = (box[1] as num).toDouble();
-      final right = (box[2] as num).toDouble();
-      final bottom = (box[3] as num).toDouble();
-      final conf = box.length > 4 ? (box[4] as num).toDouble() * 100 : 0.0;
-
-      final String rawTag = det['tag'] as String? ?? '';
-      final DpwhDefectClass defectClass = DpwhStandards.classify(rawTag);
-      final Color boxColor = defectClass.color;
-      final Color textColor = boxColor.computeLuminance() > 0.55
-          ? const Color(0xFF0F172A)
-          : Colors.white;
-
-      final boxPaint = Paint()
-        ..color = boxColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = (srcImage.width / 200).clamp(2.0, 8.0);
-
-      final bgPaint = Paint()..color = boxColor;
-
-      canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), boxPaint);
-
-      final fontSize = (srcImage.width / 36).clamp(11.0, 32.0);
-      final labelH = fontSize + 8;
-      final labelText =
-          '[${defectClass.code}] ${defectClass.name} • ${conf.toStringAsFixed(0)}%';
-      final labelW = fontSize * (labelText.length * 0.62);
-      canvas.drawRect(
-        Rect.fromLTWH(
-          left,
-          (top - labelH).clamp(0.0, srcImage.height.toDouble()),
-          labelW,
-          labelH,
-        ),
-        bgPaint,
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(
+        recorder,
+        Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
       );
 
-      final tp = TextPainter(
-        text: TextSpan(
-          text: labelText,
-          style: TextStyle(
-            color: textColor,
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
+      canvas.scale(scale);
+      canvas.drawImage(srcImage, Offset.zero, Paint());
+
+      for (final det in detections) {
+        if (!det.containsKey('box')) continue;
+        final box = det['box'] as List<dynamic>;
+        final left = (box[0] as num).toDouble();
+        final top = (box[1] as num).toDouble();
+        final right = (box[2] as num).toDouble();
+        final bottom = (box[3] as num).toDouble();
+        final conf = box.length > 4 ? (box[4] as num).toDouble() * 100 : 0.0;
+
+        final String rawTag = det['tag'] as String? ?? '';
+        final DpwhDefectClass defectClass = DpwhStandards.classify(rawTag);
+        final Color boxColor = defectClass.color;
+        final Color textColor = boxColor.computeLuminance() > 0.55
+            ? const Color(0xFF0F172A)
+            : Colors.white;
+
+        final boxPaint = Paint()
+          ..color = boxColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (srcImage.width / 200).clamp(2.0, 8.0);
+
+        final bgPaint = Paint()..color = boxColor;
+
+        canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), boxPaint);
+
+        final fontSize = (srcImage.width / 36).clamp(11.0, 32.0);
+        final labelH = fontSize + 8;
+        final labelText =
+            '[${defectClass.code}] ${defectClass.name} • ${conf.toStringAsFixed(0)}%';
+        final labelW = fontSize * (labelText.length * 0.62);
+        canvas.drawRect(
+          Rect.fromLTWH(
+            left,
+            (top - labelH).clamp(0.0, srcImage.height.toDouble()),
+            labelW,
+            labelH,
           ),
-        ),
-        textDirection: TextDirection.ltr,
+          bgPaint,
+        );
+
+        final tp = TextPainter(
+          text: TextSpan(
+            text: labelText,
+            style: TextStyle(
+              color: textColor,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        tp.layout(maxWidth: labelW);
+        tp.paint(
+          canvas,
+          Offset(
+            left + 4,
+            (top - labelH + 3).clamp(3.0, srcImage.height.toDouble()),
+          ),
+        );
+      }
+
+      picture = recorder.endRecording();
+      annotated = await picture.toImage(targetWidth, targetHeight);
+      final byteData = await annotated.toByteData(
+        format: ui.ImageByteFormat.png,
       );
-      tp.layout(maxWidth: labelW);
-      tp.paint(
-        canvas,
-        Offset(
-          left + 4,
-          (top - labelH + 3).clamp(3.0, srcImage.height.toDouble()),
-        ),
+      final pngBytes = byteData!.buffer.asUint8List();
+
+      final appDir = await getApplicationDocumentsDirectory();
+      final potholeDir = Directory(p.join(appDir.path, 'potholes'));
+      if (!potholeDir.existsSync()) potholeDir.createSync();
+      final savedPath = p.join(
+        potholeDir.path,
+        'pothole_${DateTime.now().millisecondsSinceEpoch}.png',
       );
+      await File(savedPath).writeAsBytes(pngBytes);
+      return savedPath;
+    } finally {
+      annotated?.dispose();
+      picture?.dispose();
+      srcImage?.dispose();
+      codec?.dispose();
     }
-
-    final picture = recorder.endRecording();
-    final annotated = await picture.toImage(targetWidth, targetHeight);
-    final byteData = await annotated.toByteData(format: ui.ImageByteFormat.png);
-    final pngBytes = byteData!.buffer.asUint8List();
-
-    final appDir = await getApplicationDocumentsDirectory();
-    final potholeDir = Directory(p.join(appDir.path, 'potholes'));
-    if (!potholeDir.existsSync()) potholeDir.createSync();
-    final savedPath = p.join(
-      potholeDir.path,
-      'pothole_${DateTime.now().millisecondsSinceEpoch}.png',
-    );
-    await File(savedPath).writeAsBytes(pngBytes);
-    return savedPath;
   }
 
   @override
@@ -1992,26 +2225,48 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   List<Widget> _liveDetectionBoxes(Size size, LiveDetectionSnapshot snapshot) {
-    final sx = size.width / snapshot.width;
-    final sy = size.height / snapshot.height;
+    final crop = computeVisibleScanCropRect(
+      imageWidth: snapshot.width,
+      imageHeight: snapshot.height,
+      viewWidth: size.width,
+      viewHeight: size.height,
+      previewAspectRatio: _livePreviewAspectRatio,
+    );
+    if (crop.width <= 0 || crop.height <= 0) return const [];
+    final sx = size.width / crop.width;
+    final sy = size.height / crop.height;
     return [
       for (final detection in snapshot.detections)
-        ..._liveDetectionBox(size, detection, sx, sy),
+        ..._liveDetectionBox(size, detection, crop, sx, sy),
     ];
   }
 
   List<Widget> _liveDetectionBox(
     Size size,
     Map<String, dynamic> detection,
+    Rect crop,
     double sx,
     double sy,
   ) {
     final box = detection['box'] as List;
     final cls = DpwhStandards.activeClassForDetection(detection)!;
-    final left = (box[0] as num).toDouble() * sx;
-    final top = (box[1] as num).toDouble() * sy;
-    final right = (box[2] as num).toDouble() * sx;
-    final bottom = (box[3] as num).toDouble() * sy;
+    final rawLeft = ((box[0] as num).toDouble() - crop.left) * sx;
+    final rawTop = ((box[1] as num).toDouble() - crop.top) * sy;
+    final rawRight = ((box[2] as num).toDouble() - crop.left) * sx;
+    final rawBottom = ((box[3] as num).toDouble() - crop.top) * sy;
+    if (rawRight <= 0 ||
+        rawBottom <= 0 ||
+        rawLeft >= size.width ||
+        rawTop >= size.height) {
+      return const [];
+    }
+    final left = rawLeft.clamp(0.0, size.width);
+    final top = rawTop.clamp(0.0, size.height);
+    final right = rawRight.clamp(0.0, size.width);
+    final bottom = rawBottom.clamp(0.0, size.height);
+    if (right - left < 2.0 || bottom - top < 2.0) {
+      return const [];
+    }
     return [
       Positioned(
         key: ValueKey('live-box-${detection['trackId']}'),
@@ -2052,12 +2307,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final double imgW = _staticImageWidth.toDouble();
     final double imgH = _staticImageHeight.toDouble();
 
-    // Calculate scale and offset for BoxFit.cover
-    final double scale = (viewW / imgW > viewH / imgH)
+    // Calculate scale and offset for BoxFit.contain
+    final double scale = (viewW / imgW < viewH / imgH)
         ? (viewW / imgW)
         : (viewH / imgH);
-    final double offsetX = (viewW - imgW * scale) / 2.0;
-    final double offsetY = (viewH - imgH * scale) / 2.0;
+    final double renderedW = imgW * scale;
+    final double renderedH = imgH * scale;
+    final double offsetX = (viewW - renderedW) / 2.0;
+    final double offsetY = (viewH - renderedH) / 2.0;
 
     final boxWidgets = <Widget>[];
     final labelWidgets = <Widget>[];
@@ -2065,10 +2322,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     for (final result in recs) {
       if (!result.containsKey("box")) continue;
       final box = result["box"] as List<dynamic>;
-      final double left = offsetX + (box[0] as num).toDouble() * scale;
-      final double top = offsetY + (box[1] as num).toDouble() * scale;
-      final double right = offsetX + (box[2] as num).toDouble() * scale;
-      final double bottom = offsetY + (box[3] as num).toDouble() * scale;
+      final double left = (offsetX + (box[0] as num).toDouble() * scale).clamp(
+        offsetX,
+        offsetX + renderedW,
+      );
+      final double top = (offsetY + (box[1] as num).toDouble() * scale).clamp(
+        offsetY,
+        offsetY + renderedH,
+      );
+      final double right = (offsetX + (box[2] as num).toDouble() * scale).clamp(
+        offsetX,
+        offsetX + renderedW,
+      );
+      final double bottom = (offsetY + (box[3] as num).toDouble() * scale)
+          .clamp(offsetY, offsetY + renderedH);
       final double confidence = box.length > 4
           ? (box[4] as num).toDouble() * 100
           : 0.0;
@@ -2081,8 +2348,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         Positioned(
           left: left,
           top: top,
-          width: (right - left).clamp(2.0, viewW),
-          height: (bottom - top).clamp(2.0, viewH),
+          width: (right - left).clamp(2.0, renderedW),
+          height: (bottom - top).clamp(2.0, renderedH),
           child: IgnorePointer(
             child: Container(
               decoration: BoxDecoration(
@@ -2372,8 +2639,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                     message: _cameraError!,
                                     primaryLabel: 'Retry Live Scanner',
                                     onPrimaryPressed: _toggleRealtime,
-                                    secondaryLabel: 'Take Manual Photo',
-                                    onSecondaryPressed: _pickImage,
                                   )
                                 : Column(
                                     mainAxisSize: MainAxisSize.min,
@@ -2453,46 +2718,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      SizedBox(
-                                        key: _tourScannerGalleryKey,
-                                        width: double.infinity,
-                                        child: OutlinedButton.icon(
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor:
-                                                AppDesign.textPrimary(true),
-                                            minimumSize: const Size.fromHeight(
-                                              52,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 12,
-                                            ),
-                                            side: BorderSide(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.22,
-                                              ),
-                                              width: 1.2,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                            ),
-                                          ),
-                                          onPressed: _pickImage,
-                                          icon: const Icon(
-                                            Icons.photo_camera_outlined,
-                                            size: 21,
-                                          ),
-                                          label: const Text(
-                                            'Take Manual Photo',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
                                     ],
                                   ),
                           ),
@@ -2513,12 +2738,30 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         constraints.maxWidth,
                         constraints.maxHeight,
                       );
+                      _liveCameraViewSize = cameraViewSize;
+                      _livePreviewAspectRatio =
+                          (_cameraController != null &&
+                              _cameraController!.value.isInitialized)
+                          ? _cameraPreviewDisplayAspectRatio(_cameraController!)
+                          : null;
                       return Stack(
                         children: [
                           if (_cameraController != null &&
                               _cameraController!.value.isInitialized)
                             Positioned.fill(
-                              child: CameraPreview(_cameraController!),
+                              child: ClipRect(
+                                child: FittedBox(
+                                  fit: BoxFit.cover,
+                                  child: SizedBox(
+                                    width:
+                                        (_livePreviewAspectRatio ??
+                                            (3.0 / 4.0)) *
+                                        1000.0,
+                                    height: 1000.0,
+                                    child: CameraPreview(_cameraController!),
+                                  ),
+                                ),
+                              ),
                             ),
                           ValueListenableBuilder<List<Map<String, dynamic>>?>(
                             valueListenable: _cameraRecognitionsNotifier,
@@ -2715,116 +2958,121 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               ),
                             );
                           },
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight: 200,
-                              maxHeight:
-                                  (MediaQuery.sizeOf(context).height * 0.42)
-                                      .clamp(200.0, 380.0),
-                            ),
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final viewSize = Size(
-                                  constraints.maxWidth,
-                                  constraints.maxHeight,
-                                );
-                                return Stack(
-                                  children: [
-                                    Positioned.fill(
-                                      child: Image.file(
-                                        _staticImage!,
-                                        fit: BoxFit.cover,
+                          child: Container(
+                            color: Colors.black,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: 220,
+                                maxHeight:
+                                    (MediaQuery.sizeOf(context).height * 0.48)
+                                        .clamp(220.0, 440.0),
+                              ),
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final viewSize = Size(
+                                    constraints.maxWidth,
+                                    constraints.maxHeight,
+                                  );
+                                  return Stack(
+                                    children: [
+                                      Positioned.fill(
+                                        child: Image.file(
+                                          _staticImage!,
+                                          fit: BoxFit.contain,
+                                        ),
                                       ),
-                                    ),
-                                    ...displayBoxesForStatic(
-                                      viewSize,
-                                      _staticRecognitions,
-                                    ),
-                                    Positioned(
-                                      top: 12,
-                                      left: 12,
-                                      right: 12,
-                                      child: Wrap(
-                                        spacing: 8,
-                                        runSpacing: 6,
-                                        alignment: WrapAlignment.spaceBetween,
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xCC0F172A),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                              border: Border.all(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.16,
+                                      ...displayBoxesForStatic(
+                                        viewSize,
+                                        _staticRecognitions,
+                                      ),
+                                      Positioned(
+                                        top: 12,
+                                        left: 12,
+                                        right: 12,
+                                        child: Wrap(
+                                          spacing: 8,
+                                          runSpacing: 6,
+                                          alignment: WrapAlignment.spaceBetween,
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xCC0F172A),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                border: Border.all(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.16),
                                                 ),
                                               ),
-                                            ),
-                                            child: const Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.save_alt_rounded,
-                                                  size: 14,
-                                                  color: Colors.white,
-                                                ),
-                                                SizedBox(width: 6),
-                                                Text(
-                                                  'Saved locally • Not submitted',
-                                                  style: TextStyle(
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.save_alt_rounded,
+                                                    size: 14,
                                                     color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w700,
                                                   ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xCC0F172A),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                              border: Border.all(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.16,
-                                                ),
+                                                  SizedBox(width: 6),
+                                                  Text(
+                                                    'Saved locally • Not submitted',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                            child: const Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.zoom_in_rounded,
-                                                  size: 14,
-                                                  color: Colors.white,
-                                                ),
-                                                SizedBox(width: 4),
-                                                Text(
-                                                  'Tap photo to zoom',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
                                                   ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xCC0F172A),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                border: Border.all(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.16),
                                                 ),
-                                              ],
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.zoom_in_rounded,
+                                                    size: 14,
+                                                    color: Colors.white,
+                                                  ),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    'Tap photo to zoom',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                );
-                              },
+                                    ],
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
@@ -3110,12 +3358,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   onPressed: _isAnalyzingPhoto || _isSending
                                       ? null
                                       : () {
+                                          if (_tourController.activeTour ==
+                                              MobileTourId.review) {
+                                            _tourController
+                                                .cancelWithoutCompleting();
+                                          }
                                           _reportNoteController.clear();
                                           setState(() {
                                             _staticImage = null;
                                             _staticRecognitions = null;
                                             _photoDetectionError = null;
                                           });
+                                          unawaited(_maybeStartScannerTour());
                                         },
                                   style:
                                       AppDesign.outlinedButtonStyle(
@@ -3173,6 +3427,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 onOpenProfile: () => _onTabSelected(3),
                 onOpenScanner: () => _onTabSelected(1),
                 onReplayTour: _replayAppTour,
+                tourController: _tourController,
                 tourSearchBarKey: _tourMapSearchKey,
                 tourLayersFilterKey: _tourMapFiltersKey,
                 isTourActive: _tourController.isRunning,

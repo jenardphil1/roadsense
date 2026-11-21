@@ -1,0 +1,27 @@
+{
+  "before": "- button\n- text: ROADSENSE GIS LIVE SENSOR MESH ACTIVE SECTOR BULACAN\n- button \"Zoom in\"\n- text: DPWH STD\n- button \"Zoom out\"\n- text: HAZARDS AI ENGINE LATENCY 3 Active YOLOv8 18 ms Interactive GIS Surface • Pan & Zoom freely\n- button \"Recenter Sector Bulacan\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Welcome Back Sign in to access Live Road Inspection & GIS Analytics AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"Email Address\" [invalid]: qa.user.1793150240101@example.test\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - group \"Remember me\":\n      - checkbox [checked]\n    - button \"Forgot Password?\"\n    - button \"Sign In to Portal\"\n    - text: Protected by Firebase Authentication\n- paragraph: Running in emulator mode. Do not use with production credentials.",
+  "after": "- button\n- text: ROADSENSE GIS LIVE SENSOR MESH ACTIVE SECTOR BULACAN\n- button \"Zoom in\"\n- text: DPWH STD\n- button \"Zoom out\"\n- text: HAZARDS AI ENGINE LATENCY 3 Active YOLOv8 18 ms Interactive GIS Surface • Pan & Zoom freely\n- button \"Recenter Sector Bulacan\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Welcome Back Sign in to access Live Road Inspection & GIS Analytics AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"Email Address\"\n    - textbox \"Password\"\n    - button \"Show password\"\n    - group \"Remember me\":\n      - checkbox [checked]\n    - button \"Forgot Password?\"\n    - button \"Sign In to Portal\"\n    - text: Protected by Firebase Authentication\n- paragraph: Running in emulator mode. Do not use with production credentials.",
+  "events": [
+    "Injecting <script> tag. Using callback.",
+    "TrustedTypes available. Creating policy: gis-dart",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_core",
+    "Initializing Firebase firebase_core",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_firestore",
+    "Initializing Firebase firebase_firestore",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_auth",
+    "Initializing Firebase firebase_auth",
+    "WARNING: You are using the Auth Emulator, which is intended for local testing only.  Do not use with production credentials.",
+    "  \u001b[1m[flutter_map]\u001b[0m\n    We want to help keep OpenStreetMap available for everyone. Our examples\n    and demo app use the public tile servers, but they are NOT free to use by\n    everyone! Please review whether the OpenStreetMap tile servers are suitable\n    for your project.\n    See:\n      * https://operations.osmfoundation.org/policies/tiles (OSM Tile Usage Policy)\n      * https://docs.fleaflet.dev/osm-warn for more information about this warning",
+    "Injecting <script> tag. Using callback.",
+    "TrustedTypes available. Creating policy: gis-dart",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_core",
+    "Initializing Firebase firebase_core",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_firestore",
+    "Initializing Firebase firebase_firestore",
+    "TrustedTypes available. Creating policy: flutterfire-firebase_auth",
+    "Initializing Firebase firebase_auth",
+    "WARNING: You are using the Auth Emulator, which is intended for local testing only.  Do not use with production credentials.",
+    "Using previously configured Auth emulator at http://127.0.0.1:9099 for [DEFAULT] \nTo switch back to production, restart your app with the emulator turned off.",
+    "  \u001b[1m[flutter_map]\u001b[0m\n    We want to help keep OpenStreetMap available for everyone. Our examples\n    and demo app use the public tile servers, but they are NOT free to use by\n    everyone! Please review whether the OpenStreetMap tile servers are suitable\n    for your project.\n    See:\n      * https://operations.osmfoundation.org/policies/tiles (OSM Tile Usage Policy)\n      * https://docs.fleaflet.dev/osm-warn for more information about this warning"
+  ]
+}

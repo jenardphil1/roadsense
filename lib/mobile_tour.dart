@@ -6,7 +6,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_design.dart';
 
 /// Identifies each guided tour flow in the mobile app.
-enum MobileTourId { main, scanner, review, reports, profile }
+enum MobileTourId {
+  main,
+  search,
+  directions,
+  routePreview,
+  driving,
+  scanner,
+  liveScanner,
+  review,
+  reports,
+  profile,
+}
 
 /// Declarative definition for a single spotlight step anchored to a real
 /// rendered widget via [targetKey].
@@ -37,10 +48,9 @@ class MobileTourController extends ChangeNotifier {
   static const String reviewPrefKey = 'mobile_tour_review_done_v1';
 
   bool _loaded = false;
+  Future<void>? _loadingFuture;
   final Map<MobileTourId, bool> _completed = {
-    MobileTourId.main: false,
-    MobileTourId.scanner: false,
-    MobileTourId.review: false,
+    for (final id in MobileTourId.values) id: false,
   };
 
   MobileTourId? _activeTour;
@@ -63,8 +73,18 @@ class MobileTourController extends ChangeNotifier {
     switch (id) {
       case MobileTourId.main:
         return mainPrefKey;
+      case MobileTourId.search:
+        return 'mobile_tour_search_done_v1';
+      case MobileTourId.directions:
+        return 'mobile_tour_directions_done_v1';
+      case MobileTourId.routePreview:
+        return 'mobile_tour_route_preview_done_v1';
+      case MobileTourId.driving:
+        return 'mobile_tour_driving_done_v1';
       case MobileTourId.scanner:
         return scannerPrefKey;
+      case MobileTourId.liveScanner:
+        return 'mobile_tour_live_scanner_done_v1';
       case MobileTourId.review:
         return reviewPrefKey;
       case MobileTourId.reports:
@@ -72,6 +92,12 @@ class MobileTourController extends ChangeNotifier {
       case MobileTourId.profile:
         return 'mobile_tour_profile_done_v1';
     }
+  }
+
+  /// Ensures completion flags have been loaded from local preferences.
+  Future<void> ensureLoaded() {
+    if (_loaded) return Future<void>.value();
+    return _loadingFuture ??= load().whenComplete(() => _loadingFuture = null);
   }
 
   Future<void> load() async {
@@ -116,7 +142,7 @@ class MobileTourController extends ChangeNotifier {
     List<TourStepSpec> candidates, {
     bool force = false,
   }) {
-    if (!force && isCompleted(id)) return false;
+    if (!force && (!_loaded || isCompleted(id))) return false;
     if (isRunning) return false;
 
     final available = candidates.where(_isKeyAttached).toList();

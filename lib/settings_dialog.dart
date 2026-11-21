@@ -1837,7 +1837,7 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                'Replay interactive spotlight walkthrough for Map, Scanner & Review',
+                                                'Replay or reset interactive spotlight guides for all app pages',
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   color: subtextColor,

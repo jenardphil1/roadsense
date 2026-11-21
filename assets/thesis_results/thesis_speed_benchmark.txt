@@ -1,11 +1,11 @@
 ========================================
 THESIS INFERENCE SPEED BENCHMARK REPORT
 ========================================
-Model: YOLOv8s (DPWH Road Defect Detector)
-Input Resolution: 640 x 640
+Model: yolov8m.pt (DPWH Road Defect Detector)
+Input Resolution: 608 x 608
 Hardware: Tesla T4
 Iterations Tested: 100
-Average Latency: 17.25 ms (+/- 0.33 ms)
-Throughput (FPS): 57.99 Frames/Second
-Real-Time Capability: YES (Exceeds 30 FPS threshold)
+Average Latency: 44.43 ms (+/- 0.81 ms)
+Throughput (FPS): 22.51 Frames/Second
+Real-Time Capability: Near Real-Time
 ========================================

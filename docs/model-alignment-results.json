@@ -1,0 +1,50 @@
+{
+  "project": "demo-roadsense-qa",
+  "results": [
+    {
+      "name": "create supported class Pothole",
+      "passed": true
+    },
+    {
+      "name": "create supported class Alligator crack",
+      "passed": true
+    },
+    {
+      "name": "create supported class Longitudinal crack",
+      "passed": true
+    },
+    {
+      "name": "create supported class Transverse crack",
+      "passed": true
+    },
+    {
+      "name": "reject unsupported/mismatched [2,\"Depression\",\"CODE 05\"]",
+      "passed": true
+    },
+    {
+      "name": "reject unsupported/mismatched [5,\"Edge break\",\"CODE 01\"]",
+      "passed": true
+    },
+    {
+      "name": "reject unsupported/mismatched [3,\"Transverse crack\",\"CODE 12\"]",
+      "passed": true
+    },
+    {
+      "name": "overview excludes depression from the trained-class breakdown",
+      "passed": true
+    },
+    {
+      "name": "four separate admin class filters",
+      "passed": true
+    },
+    {
+      "name": "both Code 12 classes are selectable and save independently",
+      "passed": true
+    },
+    {
+      "name": "no browser page exceptions",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

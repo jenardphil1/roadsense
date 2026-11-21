@@ -1,0 +1,72 @@
+[
+  {
+    "width": 1440,
+    "height": 900,
+    "scheme": "light",
+    "errors": [],
+    "checks": [
+      "login rendered",
+      "empty login rejected inline",
+      "registration opens and empty submission stays on form",
+      "password reset dialog opens and cancels",
+      "map zoom and recenter controls respond without new page exception"
+    ],
+    "registration": "- button\n- text: ROADSENSE GIS LIVE SENSOR MESH ACTIVE SECTOR BULACAN\n- button \"Zoom in\"\n- text: DPWH STD\n- button \"Zoom out\"\n- text: HAZARDS AI ENGINE LATENCY 3 Active YOLOv8 18 ms Interactive GIS Surface • Pan & Zoom freely\n- button \"Recenter Sector Bulacan\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Create Account Create your surveyor account to get started. AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"First Name\" [invalid]\n    - text: Required\n    - textbox \"Last Name\" [invalid]\n    - text: Required\n    - textbox \"Email Address\" [invalid]\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - textbox \"Confirm Password\" [invalid]\n    - button \"Show confirm password\"\n    - text: Please confirm your password A verification link will be sent to your email address immediately after registration.\n    - button \"Create Account & Verify Email\"\n    - text: Protected by Firebase Authentication"
+  },
+  {
+    "width": 375,
+    "height": 812,
+    "scheme": "light",
+    "errors": [],
+    "checks": [
+      "login rendered",
+      "empty login rejected inline",
+      "registration opens and empty submission stays on form",
+      "password reset dialog opens and cancels",
+      "public map exploration opens and returns to login"
+    ],
+    "registration": "- text: Required\n- button\n- button \"Explore Map\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Create Account Create your surveyor account to get started. AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"First Name\" [invalid]\n    - text: Required\n    - textbox \"Last Name\" [invalid]\n    - text: Required\n    - textbox \"Email Address\" [invalid]\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - textbox \"Confirm Password\" [invalid]\n    - button \"Show confirm password\"\n    - text: Please confirm your password A verification link will be sent to your email address immediately after registration.\n    - button \"Create Account & Verify Email\"\n    - text: Protected by Firebase Authentication\n- button \"Zoom in\"\n- button \"Zoom out\"\n- button \"Recenter Sector Bulacan\""
+  },
+  {
+    "width": 812,
+    "height": 375,
+    "scheme": "light",
+    "errors": [],
+    "checks": [
+      "login rendered",
+      "empty login rejected inline",
+      "registration opens and empty submission stays on form",
+      "password reset dialog opens and cancels",
+      "public map exploration opens and returns to login"
+    ],
+    "registration": "- text: Required\n- button\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Create Account Create your surveyor account to get started. AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"First Name\" [invalid]\n    - text: Required\n    - textbox \"Last Name\" [invalid]\n    - text: Required\n    - textbox \"Email Address\" [invalid]\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - textbox \"Confirm Password\" [invalid]\n    - button \"Show confirm password\"\n    - text: Please confirm your password A verification link will be sent to your email address immediately after registration.\n    - button \"Create Account & Verify Email\"\n    - text: Protected by Firebase Authentication\n- button \"Explore Map\"\n- button \"Zoom in\"\n- button \"Zoom out\"\n- button \"Recenter Sector Bulacan\""
+  },
+  {
+    "width": 1440,
+    "height": 900,
+    "scheme": "dark",
+    "errors": [],
+    "checks": [
+      "login rendered",
+      "empty login rejected inline",
+      "registration opens and empty submission stays on form",
+      "password reset dialog opens and cancels",
+      "map zoom and recenter controls respond without new page exception"
+    ],
+    "registration": "- button\n- text: ROADSENSE GIS LIVE SENSOR MESH ACTIVE SECTOR BULACAN\n- button \"Zoom in\"\n- text: DPWH STD\n- button \"Zoom out\"\n- text: HAZARDS AI ENGINE LATENCY 3 Active YOLOv8 18 ms Interactive GIS Surface • Pan & Zoom freely\n- button \"Recenter Sector Bulacan\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Create Account Create your surveyor account to get started. AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"First Name\" [invalid]\n    - text: Required\n    - textbox \"Last Name\" [invalid]\n    - text: Required\n    - textbox \"Email Address\" [invalid]\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - textbox \"Confirm Password\" [invalid]\n    - button \"Show confirm password\"\n    - text: Please confirm your password A verification link will be sent to your email address immediately after registration.\n    - button \"Create Account & Verify Email\"\n    - text: Protected by Firebase Authentication"
+  },
+  {
+    "width": 375,
+    "height": 812,
+    "scheme": "dark",
+    "errors": [],
+    "checks": [
+      "login rendered",
+      "empty login rejected inline",
+      "registration opens and empty submission stays on form",
+      "password reset dialog opens and cancels",
+      "public map exploration opens and returns to login"
+    ],
+    "registration": "- text: Required\n- button\n- button \"Explore Map\"\n- group:\n  - group:\n    - text: ROADSENSE GIS ENTERPRISE PLATFORM SECURE Create Account Create your surveyor account to get started. AI Detection Safe Routing Live Analytics\n    - button \"Sign In\"\n    - button \"Register\"\n    - button \"Continue with Google\"\n    - text: OR EMAIL\n    - textbox \"First Name\" [invalid]\n    - text: Required\n    - textbox \"Last Name\" [invalid]\n    - text: Required\n    - textbox \"Email Address\" [invalid]\n    - text: Enter a valid email address\n    - textbox \"Password\" [invalid]\n    - button \"Show password\"\n    - text: Please enter a password\n    - textbox \"Confirm Password\" [invalid]\n    - button \"Show confirm password\"\n    - text: Please confirm your password A verification link will be sent to your email address immediately after registration.\n    - button \"Create Account & Verify Email\"\n    - text: Protected by Firebase Authentication\n- button \"Zoom in\"\n- button \"Zoom out\"\n- button \"Recenter Sector Bulacan\""
+  }
+]

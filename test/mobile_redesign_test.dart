@@ -111,10 +111,10 @@ void main() {
                         iconColor: AppDesign.warning,
                         title: 'Camera unavailable',
                         message:
-                            'Allow camera permission or take a manual photo.',
+                            'Allow camera permission and retry live scanner.',
                         primaryLabel: 'Retry Live Scanner',
                         onPrimaryPressed: () => taps++,
-                        secondaryLabel: 'Take Manual Photo',
+                        secondaryLabel: 'Return to Map',
                         onSecondaryPressed: () {},
                       ),
                     ],
@@ -556,6 +556,70 @@ void main() {
     },
   );
 
+  testWidgets(
+    'every page MobileTourId waits for ensureLoaded, persists independently, and resets together',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final target = GlobalKey();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SizedBox(key: target, width: 100, height: 100)),
+        ),
+      );
+      final controller = MobileTourController();
+      addTearDown(controller.dispose);
+
+      List<TourStepSpec> buildStep(MobileTourId id) => [
+        TourStepSpec(
+          id: 'step_${id.name}',
+          targetKey: target,
+          title: 'Guide ${id.name}',
+          description: 'First-visit page guide for ${id.name}.',
+        ),
+      ];
+
+      // Before preferences load, auto-start safely defers; force still works.
+      expect(controller.isLoaded, isFalse);
+      expect(
+        controller.startTour(MobileTourId.main, buildStep(MobileTourId.main)),
+        isFalse,
+      );
+
+      await controller.ensureLoaded();
+      expect(controller.isLoaded, isTrue);
+
+      for (final id in MobileTourId.values) {
+        expect(controller.startTour(id, buildStep(id)), isTrue);
+        await controller.finish();
+        expect(controller.isCompleted(id), isTrue);
+        expect(controller.startTour(id, buildStep(id)), isFalse);
+      }
+
+      // Reload verifies all 10 per-page guides remain completed.
+      final reloaded = MobileTourController();
+      addTearDown(reloaded.dispose);
+      await reloaded.ensureLoaded();
+      for (final id in MobileTourId.values) {
+        expect(reloaded.isCompleted(id), isTrue);
+        expect(reloaded.startTour(id, buildStep(id)), isFalse);
+      }
+
+      // Reset clears all page completion flags so guides appear on next visit.
+      await reloaded.resetAllTours();
+      for (final id in MobileTourId.values) {
+        expect(reloaded.isCompleted(id), isFalse);
+      }
+      expect(
+        reloaded.startTour(
+          MobileTourId.liveScanner,
+          buildStep(MobileTourId.liveScanner),
+        ),
+        isTrue,
+      );
+      reloaded.cancelWithoutCompleting();
+    },
+  );
+
   group('MobileSettingsSheet tour replay & defect guide', () {
     testWidgets('invokes onReplayTour cleanly at 2.0x text scale', (
       tester,
@@ -690,7 +754,7 @@ void main() {
     );
 
     testWidgets(
-      'OnboardingScreen displays RoadSense header and slide navigation without overflow',
+      'OnboardingScreen displays RoadSense header, updated live scanner copy, and slide navigation without overflow',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(375, 812));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -705,6 +769,16 @@ void main() {
 
         expect(find.bySemanticsLabel('RoadSense AI logo'), findsWidgets);
         expect(find.text('NEXT'), findsOneWidget);
+        expect(find.text('Take Manual Photo'), findsNothing);
+
+        await tester.tap(find.text('NEXT'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(find.text('Live AI Scanner'), findsOneWidget);
+        expect(find.text('Review & Submit'), findsOneWidget);
+        expect(find.text('Single Photo'), findsNothing);
+        expect(find.text('Take Manual Photo'), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );

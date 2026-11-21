@@ -1,0 +1,26 @@
+{
+  "before": {
+    "local": [
+      {
+        "key": "firebase:authUser:AIzaSyCcTBNw_n10kmugOAtUAaKRGaKoDvpKIGs:[DEFAULT]",
+        "uid": "ENuE1Q36cP5ZPVALUp0HuhPTYDhZ",
+        "emailVerified": true
+      }
+    ],
+    "session": [
+      {
+        "key": "[DEFAULT]-firebaseEmulatorOrigin",
+        "value": "redacted"
+      }
+    ]
+  },
+  "after": {
+    "local": [],
+    "session": [
+      {
+        "key": "[DEFAULT]-firebaseEmulatorOrigin",
+        "value": "redacted"
+      }
+    ]
+  }
+}

@@ -82,9 +82,8 @@ class DpwhStandards {
   static const String modelName = 'YOLOv8m (DPWH Road Defect Detector)';
   static const String modelId = 'dpwh-v2-optimized';
   static const String modelAsset =
-      'assets/dpwh_thesis_optimized/best_float32.tflite';
-  static const String fallbackModelAsset =
       'assets/dpwh_thesis_optimized/best_float16.tflite';
+  static const String fallbackModelAsset = modelAsset;
   static const String labelsAsset = 'assets/dpwh_thesis_optimized/labels.txt';
   static const String inputResolution = '608 x 608';
   static const int inputSize = 608;

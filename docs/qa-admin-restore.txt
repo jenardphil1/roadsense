@@ -1,0 +1,21 @@
+- text: RoadSense Admin portal MAINTENANCE Trash bin / Archived
+- 'group "Manual Review is ACTIVE: New pothole reports require admin approval before appearing on the live map. MANUAL ACCEPT"':
+  - switch
+- text: ADMIN
+- button "Switch to Dark Mode"
+- button "Open Web Settings"
+- group:
+  - text: MONITORING
+  - button "Overview"
+  - button "GIS map 3"
+  - text: MODERATION
+  - button "Pending review 1"
+  - button "Approved hazards 2"
+  - text: MAINTENANCE
+  - button "Trash bin"
+  - text: REPORTING & GOVERNANCE
+  - button "Barangay & LGU"
+- 'textbox "Search deleted reports by road, reporter, email, coordinates, or #ID..."'
+- text: Showing 0 of 0 deleted reports in Recycle Bin Trash Bin is Empty Deleted pothole reports will appear here where you can restore or permanently delete them. CLOUD SYNC ACTIVE A ADMIN Admin account
+- button "Sign Out"
+- paragraph: Running in emulator mode. Do not use with production credentials.

@@ -1,0 +1,26 @@
+{
+ "mode": "slow",
+ "ts": "2026-10-17T07:55:24.414Z",
+ "slow": {
+  "ttfb": 678,
+  "fcp": 3332,
+  "load": 15313
+ },
+ "net": {
+  "req": 53,
+  "res": 45,
+  "types": {
+   "Document": 1,
+   "XHR": 1,
+   "Script": 10,
+   "Stylesheet": 1,
+   "Manifest": 1,
+   "Image": 32,
+   "Font": 3,
+   "Fetch": 1,
+   "Other": 3
+  },
+  "topHosts": "www.google.com:41 :6 fonts.gstatic.com:3 maps.gstatic.com:2 www.gstatic.com:1",
+  "pageErrors": 0
+ }
+}

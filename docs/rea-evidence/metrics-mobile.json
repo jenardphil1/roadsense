@@ -1,0 +1,14 @@
+{
+ "mode": "mobile",
+ "ts": "2026-10-17T07:55:45.567Z",
+ "mobile": {
+  "url": "https://www.google.com/maps/@14.8865024,120.9663488,12z?g_ep=Eg1tbF8yMDI2MTAxM18wIJvbDyoASAJQAQ%3D%3D",
+  "axHeadings": [
+   "button:Open app",
+   "button:Continue",
+   "button:Keep using web"
+  ],
+  "domNodes": 507,
+  "w": "390x844"
+ }
+}

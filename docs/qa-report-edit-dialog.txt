@@ -1,0 +1,14 @@
+- alertdialog:
+  - text: Edit Report
+  - group:
+    - text: Overall Severity
+    - button "Medium Severity"
+    - text: Potholes Detected in Frame
+    - button [disabled]
+    - text: "1"
+    - button
+    - text: Notes / Observations
+    - textbox "Add or update report notes..."
+  - button "Cancel"
+  - button "Save Changes"
+- paragraph: Running in emulator mode. Do not use with production credentials.
