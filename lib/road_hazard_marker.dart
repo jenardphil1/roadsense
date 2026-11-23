@@ -41,22 +41,16 @@ class _RoadDefectGlyphPainter extends CustomPainter {
     canvas.save();
     canvas.scale(s, s);
 
-    switch (classId) {
-      case 0:
-        _paintPothole(canvas);
-        break;
-      case 1:
-        _paintAlligatorCrack(canvas);
-        break;
-      case 3:
-        _paintLongitudinalCrack(canvas);
-        break;
-      case 4:
-        _paintTransverseCrack(canvas);
-        break;
-      default:
-        _paintFallbackWarning(canvas);
-        break;
+    if (classId == DpwhStandards.pothole.classId) {
+      _paintPothole(canvas);
+    } else if (classId == DpwhStandards.alligatorCrack.classId) {
+      _paintAlligatorCrack(canvas);
+    } else if (classId == DpwhStandards.longitudinalCrack.classId) {
+      _paintLongitudinalCrack(canvas);
+    } else if (classId == DpwhStandards.transverseCrack.classId) {
+      _paintTransverseCrack(canvas);
+    } else {
+      _paintFallbackWarning(canvas);
     }
 
     canvas.restore();
@@ -428,6 +422,7 @@ class RoadHazardMarker extends StatelessWidget {
   final bool isSelected;
   final bool compact;
   final bool showPendingOwnerBadge;
+  final List<String> secondaryDefects;
 
   const RoadHazardMarker({
     super.key,
@@ -438,19 +433,30 @@ class RoadHazardMarker extends StatelessWidget {
     this.isSelected = false,
     this.compact = false,
     this.showPendingOwnerBadge = true,
+    this.secondaryDefects = const [],
   });
+
+  static Color _colorForClass(DpwhDefectClass cls, bool dark) {
+    if (cls == DpwhStandards.pothole) {
+      return dark ? cls.color : const Color(0xFFB45309);
+    }
+    if (cls == DpwhStandards.alligatorCrack) {
+      return dark ? cls.color : const Color(0xFF0369A1);
+    }
+    if (cls == DpwhStandards.longitudinalCrack) {
+      return dark ? cls.color : const Color(0xFF047857);
+    }
+    if (cls == DpwhStandards.transverseCrack) {
+      return dark ? const Color(0xFFFDE047) : const Color(0xFF785A00);
+    }
+    return cls.color;
+  }
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final cls = DpwhStandards.classify(primaryDefect);
-    final classColor = switch (cls.classId) {
-      0 => dark ? cls.color : const Color(0xFFB45309),
-      1 => dark ? cls.color : const Color(0xFF0369A1),
-      3 => dark ? cls.color : const Color(0xFF047857),
-      4 => dark ? const Color(0xFFFDE047) : const Color(0xFF785A00),
-      _ => cls.color,
-    };
+    final classColor = _colorForClass(cls, dark);
     final color = status == 'pending'
         ? const Color(0xFFF59E0B)
         : status == 'rejected'
@@ -498,51 +504,128 @@ class RoadHazardMarker extends StatelessWidget {
       ),
     );
     final showPending = status == 'pending' && showPendingOwnerBadge;
-    if (compact || size < 24 || (!showPending && count <= 1)) return pin;
+    final List<DpwhDefectClass> secondaryClasses = [];
+    if (!compact && size >= 24 && secondaryDefects.isNotEmpty) {
+      for (final raw in secondaryDefects) {
+        final sec = DpwhStandards.tryClassify(raw);
+        if (sec != null &&
+            sec.classId != cls.classId &&
+            !secondaryClasses.any((c) => c.classId == sec.classId)) {
+          secondaryClasses.add(sec);
+        }
+      }
+    }
+    final bool showSecondary = secondaryClasses.isNotEmpty;
+    if (compact ||
+        size < 24 ||
+        (!showPending && count <= 1 && !showSecondary)) {
+      return pin;
+    }
     return Stack(
       clipBehavior: Clip.none,
       children: [
         pin,
-        Positioned(
-          top: -4,
-          right: -6,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white, width: 1.2),
-            ),
-            child: showPending
-                ? const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.schedule_rounded,
-                        size: 8,
+        if (showPending || count > 1)
+          Positioned(
+            top: -4,
+            right: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white, width: 1.2),
+              ),
+              child: showPending
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 8,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 2),
+                        Text(
+                          'YOU',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 7.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Text(
+                      '$count',
+                      style: const TextStyle(
                         color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
                       ),
-                      SizedBox(width: 2),
-                      Text(
-                        'YOU',
-                        style: TextStyle(
+                    ),
+            ),
+          ),
+        if (showSecondary)
+          Positioned(
+            bottom: -4,
+            right: -5,
+            child: Container(
+              width: 17,
+              height: 17,
+              decoration: BoxDecoration(
+                color: _colorForClass(secondaryClasses.first, dark),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.4),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 3,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: RoadDefectGlyph(
+                  classId: secondaryClasses.first.classId,
+                  color: Colors.white,
+                  size: 10.5,
+                ),
+              ),
+            ),
+          ),
+        if (secondaryClasses.length > 1)
+          Positioned(
+            bottom: -4,
+            left: -5,
+            child: Container(
+              width: 17,
+              height: 17,
+              decoration: BoxDecoration(
+                color: secondaryClasses.length > 2
+                    ? DpwhStandards.neutralClusterColor
+                    : _colorForClass(secondaryClasses[1], dark),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.4),
+              ),
+              child: Center(
+                child: secondaryClasses.length > 2
+                    ? Text(
+                        '+${secondaryClasses.length - 1}',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 7.5,
                           fontWeight: FontWeight.w900,
                         ),
+                      )
+                    : RoadDefectGlyph(
+                        classId: secondaryClasses[1].classId,
+                        color: Colors.white,
+                        size: 10.5,
                       ),
-                    ],
-                  )
-                : Text(
-                    '$count',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
+              ),
+            ),
           ),
-        ),
       ],
     );
   }

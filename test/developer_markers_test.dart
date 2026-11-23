@@ -140,6 +140,7 @@ void main() {
       );
       await tester.tap(find.text('Open editor'));
       await tester.pumpAndSettle();
+      expect(find.text('Developer custom markers'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('developer-defect-null')));
       await tester.pumpAndSettle();
       for (final cls in DpwhStandards.allClasses) {
@@ -151,6 +152,69 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Developer custom markers'), findsNothing);
       expect(DeveloperMarkers.instance.items.single.defect, 'Transverse crack');
+      await DeveloperMarkers.instance.remove(
+        DeveloperMarkers.instance.items.single.id,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'editor Choose location on map picks coordinates and reopens preserving defect class',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const picked = LatLng(14.845123, 120.971234);
+      LatLng? receivedInitial;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDeveloperMarkerEditor(
+                  context,
+                  location: const LatLng(14.82, 120.96),
+                  onPickLocationOnMap: (initial) async {
+                    receivedInitial = initial;
+                    return picked;
+                  },
+                ),
+                child: const Text('Open editor'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open editor'));
+      await tester.pumpAndSettle();
+      expect(find.text('Developer custom markers'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('developer-defect-null')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Alligator crack').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Choose location on map'));
+      await tester.pumpAndSettle();
+
+      expect(receivedInitial, const LatLng(14.82, 120.96));
+      expect(find.text('Developer custom markers'), findsOneWidget);
+      expect(find.text('Alligator crack'), findsOneWidget);
+      expect(find.text('14.845123'), findsOneWidget);
+      expect(find.text('120.971234'), findsOneWidget);
+
+      await tester.tap(find.text('Save local marker'));
+      await tester.pumpAndSettle();
+      expect(DeveloperMarkers.instance.items.single.defect, 'Alligator crack');
+      expect(
+        DeveloperMarkers.instance.items.single.location.latitude,
+        closeTo(picked.latitude, 1e-6),
+      );
+      expect(
+        DeveloperMarkers.instance.items.single.location.longitude,
+        closeTo(picked.longitude, 1e-6),
+      );
       await DeveloperMarkers.instance.remove(
         DeveloperMarkers.instance.items.single.id,
       );

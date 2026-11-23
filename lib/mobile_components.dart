@@ -24,34 +24,35 @@ class MobileDefectHelper {
   /// Returns an icon distinct per trained DPWH defect class so status/class
   /// cues never depend on color alone (aligned with WebDesign.defectIcon).
   static IconData iconForClass(DpwhDefectClass cls) {
-    switch (cls.classId) {
-      case 0:
-        return Icons.album_rounded; // Pothole (circular crater)
-      case 1:
-        return Icons.grid_on_rounded; // Alligator crack (mesh pattern)
-      case 3:
-        return Icons.swap_vert_rounded; // Longitudinal crack (vertical line)
-      case 4:
-        return Icons.swap_horiz_rounded; // Transverse crack (horizontal)
-      default:
-        return Icons.warning_amber_rounded;
+    if (cls.classId == DpwhStandards.pothole.classId) {
+      return Icons.album_rounded; // Pothole (circular crater)
     }
+    if (cls.classId == DpwhStandards.alligatorCrack.classId) {
+      return Icons.grid_on_rounded; // Alligator crack (mesh pattern)
+    }
+    if (cls.classId == DpwhStandards.longitudinalCrack.classId) {
+      return Icons.swap_vert_rounded; // Longitudinal crack (vertical line)
+    }
+    if (cls.classId == DpwhStandards.transverseCrack.classId) {
+      return Icons.swap_horiz_rounded; // Transverse crack (horizontal)
+    }
+    return Icons.warning_amber_rounded;
   }
 
   /// Adjusts [DpwhDefectClass.color] when needed so foreground text/icons keep
   /// at least ~4.5:1 contrast against both light and dark surfaces outdoors.
   static Color foregroundColor(DpwhDefectClass cls, bool isDark) {
-    if (cls.classId == 4) {
+    if (cls.classId == DpwhStandards.transverseCrack.classId) {
       // #F0E442 yellow needs darkening on light backgrounds to remain legible.
       return isDark ? const Color(0xFFFDE047) : const Color(0xFF785A00);
     }
-    if (!isDark && cls.classId == 1) {
+    if (!isDark && cls.classId == DpwhStandards.alligatorCrack.classId) {
       return const Color(0xFF0369A1);
     }
-    if (!isDark && cls.classId == 0) {
+    if (!isDark && cls.classId == DpwhStandards.pothole.classId) {
       return const Color(0xFFB45309);
     }
-    if (!isDark && cls.classId == 3) {
+    if (!isDark && cls.classId == DpwhStandards.longitudinalCrack.classId) {
       return const Color(0xFF047857);
     }
     return cls.color;
@@ -821,35 +822,49 @@ class MobileFloatingNavBar extends StatelessWidget {
       ),
       (index: 3, icon: Icons.person_rounded, label: 'Profile', key: profileKey),
     ];
+    final media = MediaQuery.of(context);
+    final bool isLandscape =
+        media.size.width > media.size.height && media.size.height < 560;
     return SafeArea(
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        constraints: const BoxConstraints(minHeight: 68),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: AppDesign.surface(isDark),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppDesign.border(isDark), width: 1),
-          boxShadow: AppDesign.shadowMd(isDark),
-        ),
-        child: Row(
-          children: [
-            for (final tab in tabs)
-              Expanded(
-                child: KeyedSubtree(
-                  key: tab.key,
-                  child: _MobileNavBarTab(
-                    icon: tab.icon,
-                    label: tab.label,
-                    isActive: currentIndex == tab.index,
-                    activeColor: activeColor,
-                    isDark: isDark,
-                    disableAnimations: disableAnimations,
-                    onTap: () => onTabSelected(tab.index),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1.0,
+        child: Container(
+          margin: EdgeInsets.fromLTRB(12, 0, 12, isLandscape ? 4 : 12),
+          constraints: BoxConstraints(
+            maxWidth: isLandscape ? 400 : double.infinity,
+            minHeight: isLandscape ? 40 : 68,
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: isLandscape ? 6 : 8,
+            vertical: isLandscape ? 2 : 6,
+          ),
+          decoration: BoxDecoration(
+            color: AppDesign.surface(isDark),
+            borderRadius: BorderRadius.circular(isLandscape ? 14 : 20),
+            border: Border.all(color: AppDesign.border(isDark), width: 1),
+            boxShadow: AppDesign.shadowMd(isDark),
+          ),
+          child: Row(
+            children: [
+              for (final tab in tabs)
+                Expanded(
+                  child: KeyedSubtree(
+                    key: tab.key,
+                    child: _MobileNavBarTab(
+                      icon: tab.icon,
+                      label: tab.label,
+                      isActive: currentIndex == tab.index,
+                      activeColor: activeColor,
+                      isDark: isDark,
+                      compact: isLandscape,
+                      disableAnimations: disableAnimations,
+                      onTap: () => onTabSelected(tab.index),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -862,6 +877,7 @@ class _MobileNavBarTab extends StatelessWidget {
   final bool isActive;
   final Color activeColor;
   final bool isDark;
+  final bool compact;
   final bool disableAnimations;
   final VoidCallback onTap;
 
@@ -871,6 +887,7 @@ class _MobileNavBarTab extends StatelessWidget {
     required this.isActive,
     required this.activeColor,
     required this.isDark,
+    this.compact = false,
     required this.disableAnimations,
     required this.onTap,
   });
@@ -886,51 +903,106 @@ class _MobileNavBarTab extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 48, minHeight: 50),
+          constraints: BoxConstraints(
+            minWidth: 48,
+            minHeight: compact ? 36 : 50,
+          ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: disableAnimations
-                      ? Duration.zero
-                      : const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isActive
-                        ? AppDesign.brandWash(isDark)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isActive
-                          ? AppDesign.brandBorder(isDark)
-                          : Colors.transparent,
-                    ),
-                  ),
-                  child: Icon(
-                    icon,
-                    size: 21,
-                    color: isActive ? activeColor : inactiveColor,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                    color: isActive ? activeColor : inactiveColor,
-                  ),
-                ),
-              ],
+            padding: EdgeInsets.symmetric(
+              horizontal: 4,
+              vertical: compact ? 2 : 4,
             ),
+            child: compact
+                ? AnimatedContainer(
+                    duration: disableAnimations
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? AppDesign.brandWash(isDark)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isActive
+                            ? AppDesign.brandBorder(isDark)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          icon,
+                          size: 18,
+                          color: isActive ? activeColor : inactiveColor,
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: isActive
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: isActive ? activeColor : inactiveColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedContainer(
+                        duration: disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? AppDesign.brandWash(isDark)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isActive
+                                ? AppDesign.brandBorder(isDark)
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Icon(
+                          icon,
+                          size: 21,
+                          color: isActive ? activeColor : inactiveColor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isActive
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: isActive ? activeColor : inactiveColor,
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ),
       ),

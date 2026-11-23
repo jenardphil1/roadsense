@@ -174,6 +174,172 @@ List<Map<String, dynamic>> remapDetectionsToCropRect(
   return remapped;
 }
 
+/// Computes a privacy-preserving pixel crop rectangle tightly framing the
+/// union of all valid [detections] in [sourceWidth]x[sourceHeight] with a
+/// proportional [paddingFraction] context margin. Returns `null` if no valid
+/// bounding boxes are present.
+ui.Rect? computeHazardPrivacyCropRect({
+  required List<Map<String, dynamic>> detections,
+  required int sourceWidth,
+  required int sourceHeight,
+  int? detectionImageWidth,
+  int? detectionImageHeight,
+  double paddingFraction = 0.22,
+  double minCropSide = 160.0,
+}) {
+  if (detections.isEmpty || sourceWidth <= 0 || sourceHeight <= 0) {
+    return null;
+  }
+  final double srcScaleX =
+      (detectionImageWidth != null && detectionImageWidth > 0)
+      ? sourceWidth / detectionImageWidth
+      : 1.0;
+  final double srcScaleY =
+      (detectionImageHeight != null && detectionImageHeight > 0)
+      ? sourceHeight / detectionImageHeight
+      : 1.0;
+
+  double minX = double.infinity;
+  double minY = double.infinity;
+  double maxX = double.negativeInfinity;
+  double maxY = double.negativeInfinity;
+
+  for (final det in detections) {
+    final box = det['box'];
+    if (box is! List || box.length < 4) continue;
+    final double x1 = ((box[0] as num).toDouble() * srcScaleX).clamp(
+      0.0,
+      sourceWidth.toDouble(),
+    );
+    final double y1 = ((box[1] as num).toDouble() * srcScaleY).clamp(
+      0.0,
+      sourceHeight.toDouble(),
+    );
+    final double x2 = ((box[2] as num).toDouble() * srcScaleX).clamp(
+      0.0,
+      sourceWidth.toDouble(),
+    );
+    final double y2 = ((box[3] as num).toDouble() * srcScaleY).clamp(
+      0.0,
+      sourceHeight.toDouble(),
+    );
+    if (x2 - x1 < 2.0 || y2 - y1 < 2.0) continue;
+    if (x1 < minX) minX = x1;
+    if (y1 < minY) minY = y1;
+    if (x2 > maxX) maxX = x2;
+    if (y2 > maxY) maxY = y2;
+  }
+
+  if (!minX.isFinite || !minY.isFinite || !maxX.isFinite || !maxY.isFinite) {
+    return null;
+  }
+
+  final double boxW = maxX - minX;
+  final double boxH = maxY - minY;
+  final double padX = math.max(boxW * paddingFraction, (minCropSide - boxW) / 2);
+  final double padY = math.max(boxH * paddingFraction, (minCropSide - boxH) / 2);
+
+  final int left = (minX - padX).floor().clamp(0, sourceWidth - 1);
+  final int top = (minY - padY).floor().clamp(0, sourceHeight - 1);
+  final int right = (maxX + padX).ceil().clamp(left + 1, sourceWidth);
+  final int bottom = (maxY + padY).ceil().clamp(top + 1, sourceHeight);
+
+  return ui.Rect.fromLTRB(
+    left.toDouble(),
+    top.toDouble(),
+    right.toDouble(),
+    bottom.toDouble(),
+  );
+}
+
+/// Decodes [rawBytes], physically crops to the detected hazard bounding box
+/// union (with context margin) for privacy, or falls back to the visible
+/// scanner viewport if no valid bounding boxes are present.
+Future<CroppedScanImage> cropImageBytesToHazardRegion(
+  Uint8List rawBytes, {
+  required List<Map<String, dynamic>> detections,
+  int? detectionImageWidth,
+  int? detectionImageHeight,
+  ui.Size? fallbackViewSize,
+  double? fallbackPreviewAspectRatio,
+  double paddingFraction = 0.22,
+  double maxDimension = 1280.0,
+}) async {
+  ui.Codec? codec;
+  ui.Image? src;
+  ui.Picture? picture;
+  ui.Image? cropped;
+  try {
+    codec = await ui.instantiateImageCodec(rawBytes);
+    final frame = await codec.getNextFrame();
+    src = frame.image;
+
+    final ui.Rect cropRect =
+        computeHazardPrivacyCropRect(
+          detections: detections,
+          sourceWidth: src.width,
+          sourceHeight: src.height,
+          detectionImageWidth: detectionImageWidth,
+          detectionImageHeight: detectionImageHeight,
+          paddingFraction: paddingFraction,
+        ) ??
+        (fallbackViewSize != null &&
+                fallbackViewSize.width > 0 &&
+                fallbackViewSize.height > 0
+            ? computeVisibleScanCropRect(
+                imageWidth: src.width,
+                imageHeight: src.height,
+                viewWidth: fallbackViewSize.width,
+                viewHeight: fallbackViewSize.height,
+                previewAspectRatio: fallbackPreviewAspectRatio,
+              )
+            : ui.Rect.fromLTWH(
+                0,
+                0,
+                src.width.toDouble(),
+                src.height.toDouble(),
+              ));
+
+    final double maxSide = math.max(cropRect.width, cropRect.height);
+    final double scale = maxSide > 0
+        ? math.min(1.0, maxDimension / maxSide)
+        : 1.0;
+    final int targetW = math.max(1, (cropRect.width * scale).round());
+    final int targetH = math.max(1, (cropRect.height * scale).round());
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(
+      recorder,
+      ui.Rect.fromLTWH(0, 0, targetW.toDouble(), targetH.toDouble()),
+    );
+    canvas.drawImageRect(
+      src,
+      cropRect,
+      ui.Rect.fromLTWH(0, 0, targetW.toDouble(), targetH.toDouble()),
+      ui.Paint()..filterQuality = ui.FilterQuality.medium,
+    );
+    picture = recorder.endRecording();
+    cropped = await picture.toImage(targetW, targetH);
+    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) {
+      throw StateError('Failed to encode hazard-cropped scan image as PNG.');
+    }
+    return CroppedScanImage(
+      bytes: byteData.buffer.asUint8List(),
+      width: targetW,
+      height: targetH,
+      cropRect: cropRect,
+      sourceWidth: src.width,
+      sourceHeight: src.height,
+    );
+  } finally {
+    cropped?.dispose();
+    picture?.dispose();
+    src?.dispose();
+    codec?.dispose();
+  }
+}
+
 /// Decodes [rawBytes], physically crops to the visible scanner area computed
 /// for [viewSize] (and optional [previewAspectRatio]), caps max dimension at
 /// [maxDimension], and encodes the resulting upright PNG.

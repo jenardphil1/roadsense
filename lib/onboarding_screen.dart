@@ -1,3 +1,5 @@
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -51,6 +53,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   final PageController _pageController = PageController();
   int _currentPage = 0;
   static const int _totalPages = 5;
+  bool _isRequestingPermissions = false;
 
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
@@ -112,11 +115,36 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 
   Future<void> _requestPermissionsAndFinish() async {
+    if (_isRequestingPermissions) return;
+    _isRequestingPermissions = true;
     HapticFeedback.mediumImpact();
     try {
-      await Geolocator.requestPermission();
-    } catch (_) {}
-    await _finishOnboarding();
+      try {
+        await Geolocator.requestPermission();
+      } catch (_) {}
+      if (!kIsWeb) {
+        CameraController? tempController;
+        try {
+          final cams = await availableCameras();
+          if (cams.isNotEmpty) {
+            tempController = CameraController(
+              cams.first,
+              ResolutionPreset.low,
+              enableAudio: false,
+            );
+            await tempController.initialize();
+          }
+        } catch (_) {
+        } finally {
+          try {
+            await tempController?.dispose();
+          } catch (_) {}
+        }
+      }
+      await _finishOnboarding();
+    } finally {
+      _isRequestingPermissions = false;
+    }
   }
 
   @override
@@ -355,7 +383,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           const SizedBox(height: 8),
 
           Text(
-            'Inspect live road conditions across Bulacan, scan defects with on-device AI, and track municipal repair reports in one unified platform.',
+            'Inspect live road conditions across Brgy. Poblacion, Santa Maria, Bulacan, scan defects with on-device AI, and track municipal repair reports in one unified platform.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, color: subtextColor, height: 1.5),
           ),
@@ -367,7 +395,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             iconColor: accentColor,
             title: 'Live AI Road Scanner',
             subtitle:
-                'Detects 4 DPWH distress classes directly from the live road scanner.',
+                'Detects 4 road defect classes directly from the live road scanner.',
             badgeText: 'ON-DEVICE AI',
             badgeColor: accentColor,
             textColor: textColor,
@@ -397,9 +425,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             isDark: isDark,
             icon: Icons.verified_rounded,
             iconColor: const Color(0xFFB45309),
-            title: 'DPWH Standards & SLA Tracking',
+            title: 'Civic Report Tracking',
             subtitle:
-                'Follows Department Order No. 41 categories and tracks Pending to Approved review.',
+                'Categorizes road defects clearly and tracks reports from Pending to Approved review.',
             badgeText: 'CIVIC REPORTS',
             badgeColor: const Color(0xFFB45309),
             textColor: textColor,
@@ -631,6 +659,22 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ),
             ],
           ),
+          const SizedBox(height: 10),
+
+          _buildStructuredCard(
+            isDark: isDark,
+            icon: Icons.screen_rotation_alt_rounded,
+            iconColor: const Color(0xFF0284C7),
+            title: 'Side of road vs. Along road',
+            subtitle:
+                'Use "Side of road" when standing safely beside the lane, or "Along road" when facing down the lane so Longitudinal and Transverse cracks stay accurate.',
+            badgeText: 'CRACK ANGLE',
+            badgeColor: const Color(0xFF0284C7),
+            textColor: textColor,
+            subtextColor: subtextColor,
+            borderColor: borderColor,
+            cardColor: cardColor,
+          ),
           const SizedBox(height: 14),
 
           Container(
@@ -644,7 +688,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'DETECTED DPWH DEFECT CLASSES',
+                  'DETECTED ROAD DEFECT CLASSES',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -974,7 +1018,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ),
             ),
             child: Text(
-              'REPORT LIFECYCLE & DPWH STANDARDS',
+              'REPORT LIFECYCLE & REVIEW',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -1000,7 +1044,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           const SizedBox(height: 8),
 
           Text(
-            'Saving a scan keeps it local for review. Submitted reports enter Pending review for LGU & DPWH verification before appearing to all drivers.',
+            'Saving a scan keeps it local for review. Submitted reports enter Pending review for LGU verification before appearing to all drivers.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13.5, color: subtextColor, height: 1.45),
           ),
@@ -1046,7 +1090,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '3-Day Urgent Repair SLA',
+                            'High-Priority Surface Defect',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 13.5,
@@ -1100,7 +1144,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '30-Day Routine Sealant SLA',
+                            'Routine Crack Maintenance',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 13.5,

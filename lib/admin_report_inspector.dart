@@ -590,10 +590,11 @@ class _AdminReportInspectorPanelState extends State<AdminReportInspectorPanel> {
                           SizedBox(
                             width: boxWidth,
                             child: _MetricFactBox(
-                              title: 'DPWH response SLA',
-                              subtitle: 'Statutory target for ${r.dpwhCode}',
+                              title: 'DPWH Recommended Solution',
+                              subtitle:
+                                  'Target response: ${r.responseTime} • ${r.dpwhCode}',
                               child: Text(
-                                r.responseTime,
+                                r.correctiveMeasure,
                                 style: theme.textTheme.titleSmall?.copyWith(
                                   color: WebDesign.brandOnSurface(isDark),
                                 ),

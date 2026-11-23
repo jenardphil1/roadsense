@@ -20,6 +20,11 @@ class AppSettings {
   final ValueNotifier<bool> manualPotholePlacementNotifier =
       ValueNotifier<bool>(false);
 
+  /// Triggers interactive center-crosshair map pin placement for manual markers.
+  final ValueNotifier<int> manualPinPickerRequestNotifier = ValueNotifier<int>(
+    0,
+  );
+
   /// Developer Mode: Edit Current GPS Location Notifier
   final ValueNotifier<bool> devEditLocationNotifier = ValueNotifier<bool>(
     false,
@@ -86,6 +91,10 @@ class AppSettings {
     manualPotholePlacementNotifier.value = enabled;
   }
 
+  void requestManualPinPicker() {
+    manualPinPickerRequestNotifier.value++;
+  }
+
   void toggleDevEditLocation(bool enabled) {
     devEditLocationNotifier.value = enabled;
   }
@@ -113,7 +122,12 @@ class AppSettings {
 
   // ── Mobile Platform Settings ───────────────────────────────────────────
   double mobileAiConfidenceThreshold = 0.25;
-  double mobileProximityDistanceMeters = 22.0;
+  final ValueNotifier<double> mobileProximityDistanceMetersNotifier =
+      ValueNotifier<double>(20.0);
+  double get mobileProximityDistanceMeters =>
+      mobileProximityDistanceMetersNotifier.value;
+  set mobileProximityDistanceMeters(double value) =>
+      mobileProximityDistanceMetersNotifier.value = value;
   bool mobileVoiceAlertsEnabled = true;
   bool mobileHighAccuracyGps = true;
   bool mobileDevMockLocationEnabled = false;
@@ -124,6 +138,16 @@ class AppSettings {
       ValueNotifier<String>('car');
 
   String get mobileNavVehicleMode => mobileNavVehicleModeNotifier.value;
+
+  /// Developer Option: Manual simulated drive speed in km/h (10..150)
+  final ValueNotifier<double> simulatedDriveSpeedKmhNotifier =
+      ValueNotifier<double>(60.0);
+
+  double get simulatedDriveSpeedKmh => simulatedDriveSpeedKmhNotifier.value;
+
+  void setSimulatedDriveSpeedKmh(double kmh) {
+    simulatedDriveSpeedKmhNotifier.value = kmh.clamp(10.0, 150.0);
+  }
 
   void setMobileNavVehicleMode(String mode) {
     final normalized = switch (mode) {

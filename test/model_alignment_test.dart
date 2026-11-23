@@ -10,26 +10,34 @@ void main() {
     'box': [10.0, 20.0, 100.0, 120.0, confidence],
   };
 
-  test('four supported classes retain Package 6 output indices', () {
-    expect(DpwhStandards.allClasses.map((c) => c.classId), [0, 1, 3, 4]);
-    expect(DpwhStandards.getById(3), DpwhStandards.longitudinalCrack);
-    expect(DpwhStandards.getById(4), DpwhStandards.transverseCrack);
+  test('four supported DPWH v3 classes occupy slots 0..3 with no Depression', () {
+    expect(DpwhStandards.allClasses.map((c) => c.classId), [0, 1, 2, 3]);
+    expect(DpwhStandards.getById(2), DpwhStandards.longitudinalCrack);
+    expect(DpwhStandards.getById(3), DpwhStandards.transverseCrack);
+    expect(DpwhStandards.getById(4), isNull);
     expect(DpwhStandards.allClasses.map((c) => c.name).toSet(), hasLength(4));
     expect(
       DpwhStandards.allClasses.where((c) => c.code == 'CODE 12'),
       hasLength(2),
     );
+    expect(DpwhStandards.overallPrecision, greaterThanOrEqualTo(0.80));
+    expect(DpwhStandards.overallRecall, greaterThanOrEqualTo(0.80));
+    expect(DpwhStandards.overallF1Score, greaterThanOrEqualTo(0.80));
+    expect(DpwhStandards.overallMap50, greaterThanOrEqualTo(0.80));
   });
 
   test(
-    'bundled output labels keep the ignored slot and metadata describes the tensor',
+    'bundled v3 output labels have strictly 4 classes and metadata matches 640x640 tensor',
     () {
       final labels = File(DpwhStandards.labelsAsset).readAsLinesSync();
       expect(() => DpwhStandards.validateModelLabels(labels), returnsNormally);
-      expect(labels, hasLength(5));
-      expect(labels[2], contains('Depression'));
+      expect(labels, hasLength(4));
+      expect(labels.any((l) => l.toLowerCase().contains('depression')), isFalse);
       expect(
-        () => DpwhStandards.validateModelLabels([...labels]..removeAt(2)),
+        () => DpwhStandards.validateModelLabels([
+          ...labels,
+          'Depression (DPWH Code 05)',
+        ]),
         throwsStateError,
       );
       final metadata = jsonDecode(
@@ -37,14 +45,16 @@ void main() {
           'assets/dpwh_thesis_optimized/dpwh_metadata.json',
         ).readAsStringSync(),
       );
-      expect(metadata['supported_class_ids'], [0, 1, 3, 4]);
-      expect(metadata['input_size'], [608, 608]);
-      expect(metadata['output_shape'], [1, 9, 7581]);
+      expect(metadata['model_id'], 'dpwh-v3-yolov8s');
+      expect(metadata['supported_class_ids'], [0, 1, 2, 3]);
+      expect(metadata['output_class_count'], 4);
+      expect(metadata['input_size'], [640, 640]);
+      expect(metadata['output_shape'], [1, 8, 8400]);
     },
   );
 
   test(
-    'inference excludes untrained, old, unknown and malformed detections',
+    'inference excludes untrained, legacy, unknown and malformed detections',
     () {
       final accepted = filterModelDetections([
         for (final id in [0, 1, 2, 3, 4, 5, 99]) detection(id),
@@ -56,7 +66,7 @@ void main() {
           'box': [0, 0, 10, 10, double.nan],
         },
       ]);
-      expect(accepted.map((d) => d['classId']), [0, 1, 3, 4]);
+      expect(accepted.map((d) => d['classId']), [0, 1, 2, 3]);
     },
   );
 
@@ -75,11 +85,11 @@ void main() {
   );
 
   test(
-    'explicit labels resolve old numeric mismatches and crack orientations stay distinct',
+    'explicit labels and legacy v2 reports resolve compatibly across versions',
     () {
       expect(
         DpwhStandards.activeClassForDetection({
-          'classId': 2,
+          'classId': 3,
           'className': 'Longitudinal crack',
         }),
         DpwhStandards.longitudinalCrack,
@@ -88,6 +98,41 @@ void main() {
         DpwhStandards.classForReport({
           'primaryDefect': 'Transverse crack',
           'primaryDpwhCode': 'CODE 12',
+        }),
+        DpwhStandards.transverseCrack,
+      );
+      expect(
+        DpwhStandards.classForReport({
+          'modelId': 'dpwh-v2-optimized',
+          'primaryClassId': 2,
+        }),
+        DpwhStandards.depression,
+      );
+      expect(
+        DpwhStandards.classForReport({
+          'modelId': 'dpwh-v2-optimized',
+          'primaryClassId': 3,
+        }),
+        DpwhStandards.longitudinalCrack,
+      );
+      expect(
+        DpwhStandards.classForReport({
+          'modelId': 'dpwh-v2-optimized',
+          'primaryClassId': 4,
+        }),
+        DpwhStandards.transverseCrack,
+      );
+      expect(
+        DpwhStandards.classForReport({
+          'modelId': 'dpwh-v3-yolov8s',
+          'primaryClassId': 2,
+        }),
+        DpwhStandards.longitudinalCrack,
+      );
+      expect(
+        DpwhStandards.classForReport({
+          'modelId': 'dpwh-v3-yolov8s',
+          'primaryClassId': 3,
         }),
         DpwhStandards.transverseCrack,
       );
@@ -112,7 +157,7 @@ void main() {
         {'primaryDefect': 'Edge break', 'primaryDpwhCode': 'CODE 01'},
         {'primaryDpwhCode': 'CODE 12'},
       ]);
-      expect(counts, {0: 1, 1: 1, 3: 1, 4: 1});
+      expect(counts, {0: 1, 1: 1, 2: 1, 3: 1});
       expect(
         DpwhStandards.classForReport({'primaryDefect': 'Depression'}),
         DpwhStandards.depression,

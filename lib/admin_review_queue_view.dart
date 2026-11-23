@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -573,7 +574,7 @@ class _AdminReviewQueueViewState extends State<AdminReviewQueueView> {
                                 decoration: InputDecoration(
                                   isDense: true,
                                   hintText:
-                                      'Search #ID, barangay, road, reporter, DPWH code, GPS...',
+                                      'Search #ID, barangay, road, reporter, defect code, GPS...',
                                   prefixIcon: const Icon(
                                     Icons.search_rounded,
                                     size: 18,
@@ -964,98 +965,130 @@ class _AdminReviewQueueViewState extends State<AdminReviewQueueView> {
         padding: const EdgeInsets.all(WebDesign.space4),
         child: WebCard(
           padding: EdgeInsets.zero,
-          child: Scrollbar(
-            controller: _tableHorizontal,
-            thumbVisibility: true,
-            trackVisibility: true,
-            scrollbarOrientation: ScrollbarOrientation.top,
-            notificationPredicate: (notification) =>
-                notification.metrics.axis == Axis.horizontal,
-            child: SingleChildScrollView(
-              controller: _tableHorizontal,
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(top: 12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 960),
-                child: DataTable(
-                  showCheckboxColumn: true,
-                  columnSpacing: 22,
-                  horizontalMargin: 16,
-                  headingRowHeight: 44,
-                  dataRowMinHeight: 62,
-                  dataRowMaxHeight: 74,
-                  headingRowColor: WidgetStatePropertyAll(
-                    WebDesign.sunken(isDark),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (MediaQuery.sizeOf(context).width < 900)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                  child: Text(
+                    'Swipe left/right to see all columns →',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: WebDesign.textSecondary(isDark),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  onSelectAll: (checked) {
-                    setState(() {
-                      if (checked == true) {
-                        _selectedIds.addAll(pageIds);
-                      } else {
-                        _selectedIds.removeAll(pageIds);
-                      }
-                    });
+                ),
+              ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: const {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
                   },
-                  columns: [
-                    DataColumn(
-                      label: Text(
-                        allPageSelected ? 'Report (page)' : 'Report',
-                        style: theme.textTheme.labelMedium,
-                      ),
+                ),
+                child: Scrollbar(
+                  controller: _tableHorizontal,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  scrollbarOrientation: ScrollbarOrientation.top,
+                  notificationPredicate: (notification) =>
+                      notification.metrics.axis == Axis.horizontal,
+                  child: SingleChildScrollView(
+                    controller: _tableHorizontal,
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
                     ),
-                    DataColumn(
-                      label: Text(
-                        'Actions',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                    ),
-                    DataColumn(
-                      label: Text(
-                        'Defect & DPWH',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                    ),
+                    padding: const EdgeInsets.only(top: 12),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 960),
+                      child: DataTable(
+                        showCheckboxColumn: true,
+                        columnSpacing: 22,
+                        horizontalMargin: 16,
+                        headingRowHeight: 44,
+                        dataRowMinHeight: 62,
+                        dataRowMaxHeight: 74,
+                        headingRowColor: WidgetStatePropertyAll(
+                          WebDesign.sunken(isDark),
+                        ),
+                        onSelectAll: (checked) {
+                          setState(() {
+                            if (checked == true) {
+                              _selectedIds.addAll(pageIds);
+                            } else {
+                              _selectedIds.removeAll(pageIds);
+                            }
+                          });
+                        },
+                        columns: [
+                          DataColumn(
+                            label: Text(
+                              allPageSelected ? 'Report (page)' : 'Report',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Actions',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Defect Class',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
 
-                    DataColumn(
-                      label: Text(
-                        'AI Conf',
-                        style: theme.textTheme.labelMedium,
+                          DataColumn(
+                            label: Text(
+                              'AI Conf',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Priority',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Location',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Submitted',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Status',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ),
+                        ],
+                        rows: [
+                          for (final r in slice.items)
+                            _buildDataRow(
+                              context,
+                              isDark,
+                              r,
+                              useDockedInspector: useDockedInspector,
+                            ),
+                        ],
                       ),
                     ),
-                    DataColumn(
-                      label: Text(
-                        'Priority',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                    ),
-                    DataColumn(
-                      label: Text(
-                        'Location',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                    ),
-                    DataColumn(
-                      label: Text(
-                        'Submitted',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                    ),
-                    DataColumn(
-                      label: Text('Status', style: theme.textTheme.labelMedium),
-                    ),
-                  ],
-                  rows: [
-                    for (final r in slice.items)
-                      _buildDataRow(
-                        context,
-                        isDark,
-                        r,
-                        useDockedInspector: useDockedInspector,
-                      ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),

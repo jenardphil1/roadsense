@@ -71,6 +71,8 @@ class ResilientTileProvider extends TileProvider {
 
   bool get hasFallbackTiles => _fallbackKeys.isNotEmpty;
 
+  int get fallbackTileCount => _fallbackKeys.length;
+
   /// Waits for all currently scheduled background disk writes to complete.
   Future<void> flushPendingDiskWrites() async {
     while (_pendingDiskWrites.isNotEmpty) {

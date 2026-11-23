@@ -12,7 +12,15 @@ import 'web_design.dart';
 /// ─────────────────────────────────────────────────────────────────────────────
 class WebSettingsDialog extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
-  const WebSettingsDialog({super.key, this.onSettingsChanged});
+  final VoidCallback? onPlacePinOnMap;
+  final bool showMapPinPicker;
+
+  const WebSettingsDialog({
+    super.key,
+    this.onSettingsChanged,
+    this.onPlacePinOnMap,
+    this.showMapPinPicker = true,
+  });
 
   @override
   State<WebSettingsDialog> createState() => _WebSettingsDialogState();
@@ -874,49 +882,87 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Open the local editor using the current map center:',
+                      'Open the local editor or drop a pin directly on the map:',
                       style: TextStyle(fontSize: 11.5, color: subtextColor),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      settings.toggleManualPotholePlacement(true);
-                      widget.onSettingsChanged?.call();
-                      Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Custom markers are saved locally. No report is submitted.',
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (widget.showMapPinPicker)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            settings.toggleDevMockMode(true);
+                            settings.requestManualPinPicker();
+                            widget.onSettingsChanged?.call();
+                            Navigator.of(context).pop();
+                            widget.onPlacePinOnMap?.call();
+                          },
+                          icon: const Icon(
+                            Icons.add_location_alt_rounded,
+                            size: 16,
                           ),
-                          backgroundColor: Color(0xFF10B981),
-                          duration: Duration(seconds: 4),
+                          label: const Text(
+                            'Pin on map',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF10B981),
+                            side: const BorderSide(color: Color(0xFF10B981)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
                         ),
-                      );
-                    },
-                    icon: const Icon(
-                      Icons.touch_app_rounded,
-                      size: 16,
-                      color: Colors.white,
-                    ),
-                    label: const Text(
-                      'Open editor',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          settings.toggleManualPotholePlacement(true);
+                          widget.onSettingsChanged?.call();
+                          Navigator.of(context).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Custom markers are saved locally. No report is submitted.',
+                              ),
+                              backgroundColor: Color(0xFF10B981),
+                              duration: Duration(seconds: 4),
+                            ),
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.touch_app_rounded,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                        label: const Text(
+                          'Open editor',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                        ),
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -1419,11 +1465,13 @@ class _WebSettingsDialogState extends State<WebSettingsDialog> {
 class MobileSettingsSheet extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
   final VoidCallback? onReplayTour;
+  final VoidCallback? onPlacePinOnMap;
 
   const MobileSettingsSheet({
     super.key,
     this.onSettingsChanged,
     this.onReplayTour,
+    this.onPlacePinOnMap,
   });
 
   @override
@@ -1458,10 +1506,11 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
               ),
             ),
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 // Drag Handle
                 Center(
                   child: Container(
@@ -1684,6 +1733,82 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                                 ],
                               ),
                               Divider(color: borderColor, height: 20),
+                              ValueListenableBuilder<double>(
+                                valueListenable: settings
+                                    .mobileProximityDistanceMetersNotifier,
+                                builder: (context, proximityMeters, _) {
+                                  return Row(
+                                    children: [
+                                      Icon(
+                                        Icons.radar_rounded,
+                                        color: accentColor,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Pothole proximity alert',
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Alert distance radius around nearby potholes',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: subtextColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Wrap(
+                                        spacing: 6,
+                                        children: [
+                                          for (final meters in const [
+                                            20.0,
+                                            50.0,
+                                          ])
+                                            ChoiceChip(
+                                              label: Text('${meters.round()} m'),
+                                              selected:
+                                                  (proximityMeters - meters)
+                                                      .abs() <
+                                                  5.0,
+                                              selectedColor: accentColor
+                                                  .withValues(alpha: 0.18),
+                                              labelStyle: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color:
+                                                    (proximityMeters - meters)
+                                                            .abs() <
+                                                        5.0
+                                                    ? accentColor
+                                                    : subtextColor,
+                                              ),
+                                              onSelected: (_) {
+                                                settings
+                                                        .mobileProximityDistanceMeters =
+                                                    meters;
+                                                widget.onSettingsChanged
+                                                    ?.call();
+                                              },
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              Divider(color: borderColor, height: 20),
                             ],
                           ),
                         ),
@@ -1702,54 +1827,213 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: borderColor),
                           ),
-                          child: Row(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: accentColor.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  Icons.developer_mode_rounded,
-                                  color: accentColor,
-                                  size: 22,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Developer options',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: textColor,
-                                      ),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: accentColor.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Show the Custom markers map button for local class and coordinate editing. Turn off to hide test markers.',
+                                    child: Icon(
+                                      Icons.developer_mode_rounded,
+                                      color: accentColor,
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Developer options',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Show the Custom markers map button for local class and coordinate editing. Turn off to hide test markers.',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: subtextColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable:
+                                        settings.devMockModeNotifier,
+                                    builder: (context, isDevMock, _) {
+                                      return Switch(
+                                        value: isDevMock,
+                                        activeTrackColor: accentColor,
+                                        onChanged: (val) {
+                                          settings.toggleDevMockMode(val);
+                                          widget.onSettingsChanged?.call();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Choose a spot on the map with a pin, then pick a defect class locally:',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: subtextColor,
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ),
-                              ValueListenableBuilder<bool>(
-                                valueListenable: settings.devMockModeNotifier,
-                                builder: (context, isDevMock, _) {
-                                  return Switch(
-                                    value: isDevMock,
-                                    activeTrackColor: accentColor,
-                                    onChanged: (val) {
-                                      settings.toggleDevMockMode(val);
+                                  ),
+                                  const SizedBox(width: 12),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      settings.toggleDevMockMode(true);
+                                      settings.requestManualPinPicker();
                                       widget.onSettingsChanged?.call();
+                                      Navigator.of(context).pop();
+                                      widget.onPlacePinOnMap?.call();
                                     },
+                                    icon: const Icon(
+                                      Icons.add_location_alt_rounded,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                    label: const Text(
+                                      'Pin on map',
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: accentColor,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                              ValueListenableBuilder<double>(
+                                valueListenable:
+                                    settings.simulatedDriveSpeedKmhNotifier,
+                                builder: (context, simSpeedKmh, _) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.speed_rounded,
+                                            color: accentColor,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              'Simulated drive speed',
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 9,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: accentColor.withValues(
+                                                alpha: 0.14,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              '${simSpeedKmh.round()} km/h',
+                                              style: TextStyle(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w800,
+                                                color: accentColor,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Slider(
+                                        value: simSpeedKmh.clamp(10.0, 150.0),
+                                        min: 10,
+                                        max: 150,
+                                        divisions: 28,
+                                        activeColor: accentColor,
+                                        label: '${simSpeedKmh.round()} km/h',
+                                        onChanged: (val) {
+                                          settings.setSimulatedDriveSpeedKmh(
+                                            val,
+                                          );
+                                        },
+                                      ),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 6,
+                                        children: [
+                                          for (final preset in const [
+                                            20.0,
+                                            40.0,
+                                            60.0,
+                                            100.0,
+                                          ])
+                                            ChoiceChip(
+                                              label: Text(
+                                                '${preset.round()} km/h',
+                                              ),
+                                              selected:
+                                                  (simSpeedKmh - preset).abs() <
+                                                  2.5,
+                                              selectedColor: accentColor
+                                                  .withValues(alpha: 0.18),
+                                              labelStyle: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color:
+                                                    (simSpeedKmh - preset)
+                                                            .abs() <
+                                                        2.5
+                                                    ? accentColor
+                                                    : subtextColor,
+                                              ),
+                                              onSelected: (_) {
+                                                settings
+                                                    .setSimulatedDriveSpeedKmh(
+                                                      preset,
+                                                    );
+                                              },
+                                            ),
+                                        ],
+                                      ),
+                                    ],
                                   );
                                 },
                               ),
@@ -1904,7 +2188,7 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                                                 CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                'Defect Guide & SLAs',
+                                                'Road Defect Guide',
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   fontWeight: FontWeight.w600,
@@ -1913,7 +2197,7 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                'Review DPWH classes (pothole, alligator, longitudinal & transverse cracks)',
+                                                'Review road defect classes (pothole, alligator, longitudinal & transverse cracks)',
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   color: subtextColor,
@@ -1956,6 +2240,7 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         );

@@ -857,6 +857,7 @@ class _WebUserHomeState extends State<_WebUserHome> {
         onSettingsChanged: () {
           if (mounted) setState(() {});
         },
+        onPlacePinOnMap: () => unawaited(_navigateToRoute(WebShellRoute.map)),
       ),
     );
   }

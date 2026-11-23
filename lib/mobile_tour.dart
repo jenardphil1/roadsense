@@ -538,6 +538,7 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
   }) {
     final screenW = viewportW;
     final screenH = viewportH;
+    final bool isLandscape = screenW > screenH && screenH < 560;
     final safeLeft = math.max(12.0, media.padding.left + 12.0);
     final safeRight = math.max(12.0, media.padding.right + 12.0);
     final safeTop = math.max(12.0, media.padding.top + 8.0);
@@ -563,16 +564,32 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
       0.0,
       (screenH - safeBottom) - rect.bottom - arrowHeight - gap,
     );
+    final spaceLeft = math.max(0.0, rect.left - safeLeft - gap);
+    final spaceRight = math.max(0.0, (screenW - safeRight) - rect.right - gap);
 
     final bool hasSpaceAboveOrBelow = spaceBelow >= 130 || spaceAbove >= 130;
+    final bool placeBesideInLandscape =
+        isLandscape &&
+        (!hasSpaceAboveOrBelow ||
+            (math.max(spaceLeft, spaceRight) >= 260 &&
+                math.max(spaceAbove, spaceBelow) < 170));
+    final bool placeRight = spaceRight >= spaceLeft;
+    final double effectiveWidth = placeBesideInLandscape
+        ? math.min(
+            340.0,
+            math.max(220.0, placeRight ? spaceRight : spaceLeft),
+          )
+        : tooltipWidth;
     final bool placeBelow = spaceBelow >= spaceAbove || spaceBelow >= 190;
     final double usableViewportH = math.max(
       110.0,
       screenH - safeTop - safeBottom,
     );
-    final double maxCardHeight = hasSpaceAboveOrBelow
-        ? (placeBelow ? spaceBelow : spaceAbove)
-        : math.min(usableViewportH * 0.65, usableViewportH);
+    final double maxCardHeight = placeBesideInLandscape
+        ? usableViewportH
+        : (hasSpaceAboveOrBelow
+              ? (placeBelow ? spaceBelow : spaceAbove)
+              : math.min(usableViewportH * 0.65, usableViewportH));
 
     final arrowLocalX = (rect.center.dx - left).clamp(
       24.0,
@@ -585,7 +602,7 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hasSpaceAboveOrBelow && placeBelow)
+        if (!placeBesideInLandscape && hasSpaceAboveOrBelow && placeBelow)
           Padding(
             padding: EdgeInsets.only(left: arrowLocalX - 9),
             child: CustomPaint(
@@ -599,7 +616,7 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
           ),
         ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: tooltipWidth,
+            maxWidth: effectiveWidth,
             maxHeight: maxCardHeight,
           ),
           child: Semantics(
@@ -615,7 +632,7 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
                 side: BorderSide(color: border, width: 1.0),
               ),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(placeBesideInLandscape ? 12 : 16),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -746,7 +763,7 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
             ),
           ),
         ),
-        if (hasSpaceAboveOrBelow && !placeBelow)
+        if (!placeBesideInLandscape && hasSpaceAboveOrBelow && !placeBelow)
           Padding(
             padding: EdgeInsets.only(left: arrowLocalX - 9),
             child: CustomPaint(
@@ -760,6 +777,25 @@ class _SpotlightTourOverlayState extends State<SpotlightTourOverlay>
           ),
       ],
     );
+
+    if (placeBesideInLandscape) {
+      final double sideLeft = placeRight
+          ? (rect.right + gap).clamp(
+              safeLeft,
+              math.max(safeLeft, screenW - safeRight - effectiveWidth),
+            )
+          : (rect.left - gap - effectiveWidth).clamp(
+              safeLeft,
+              math.max(safeLeft, screenW - safeRight - effectiveWidth),
+            );
+      return Positioned(
+        left: sideLeft,
+        top: safeTop,
+        bottom: safeBottom,
+        width: effectiveWidth,
+        child: Center(child: tooltipColumn),
+      );
+    }
 
     if (!hasSpaceAboveOrBelow) {
       return Positioned(

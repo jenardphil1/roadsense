@@ -60,7 +60,7 @@ class AdminMapView extends StatefulWidget {
 
 class _AdminMapViewState extends State<AdminMapView>
     with TickerProviderStateMixin {
-  static const LatLng _santaMariaCenter = LatLng(14.8197, 120.9575);
+  static const LatLng _santaMariaCenter = LatLng(14.8194, 120.9565);
   late final MapController _mapCtrl;
 
   String? _expandedClusterId;
@@ -542,77 +542,115 @@ class _AdminMapViewState extends State<AdminMapView>
 
             // Top Synchronized Filter Bar
             Positioned(
-              top: 12,
-              left: 12,
-              right: 12,
+              top: isWide ? 12 : 10,
+              left: isWide ? 12 : 10,
+              right: isWide ? 12 : 10,
               child: Align(
                 alignment: Alignment.topLeft,
                 child: WebCard(
-                  padding: const EdgeInsets.all(WebDesign.space3),
-                  child: Wrap(
-                    spacing: WebDesign.space2,
-                    runSpacing: WebDesign.space2,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('Pending'),
-                        selected:
-                            widget.filter.statuses.length == 1 &&
-                            widget.filter.statuses.contains(
-                              AdminReportStatus.pending,
+                  padding: isWide
+                      ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                      : const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Builder(
+                    builder: (context) {
+                      final chipDensity = isWide ? null : VisualDensity.compact;
+                      final tapSize = isWide
+                          ? null
+                          : MaterialTapTargetSize.shrinkWrap;
+                      final chips = <Widget>[
+                        ChoiceChip(
+                          visualDensity: chipDensity,
+                          materialTapTargetSize: tapSize,
+                          label: const Text('Pending'),
+                          selected:
+                              widget.filter.statuses.length == 1 &&
+                              widget.filter.statuses.contains(
+                                AdminReportStatus.pending,
+                              ),
+                          onSelected: (_) => widget.onFilterChanged(
+                            widget.filter.copyWith(
+                              statuses: {AdminReportStatus.pending},
                             ),
-                        onSelected: (_) => widget.onFilterChanged(
-                          widget.filter.copyWith(
-                            statuses: {AdminReportStatus.pending},
                           ),
                         ),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Approved'),
-                        selected:
-                            widget.filter.statuses.length == 1 &&
-                            widget.filter.statuses.contains(
-                              AdminReportStatus.approved,
+                        ChoiceChip(
+                          visualDensity: chipDensity,
+                          materialTapTargetSize: tapSize,
+                          label: const Text('Approved'),
+                          selected:
+                              widget.filter.statuses.length == 1 &&
+                              widget.filter.statuses.contains(
+                                AdminReportStatus.approved,
+                              ),
+                          onSelected: (_) => widget.onFilterChanged(
+                            widget.filter.copyWith(
+                              statuses: {AdminReportStatus.approved},
                             ),
-                        onSelected: (_) => widget.onFilterChanged(
-                          widget.filter.copyWith(
-                            statuses: {AdminReportStatus.approved},
                           ),
                         ),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Rejected'),
-                        selected:
-                            widget.filter.statuses.length == 1 &&
-                            widget.filter.statuses.contains(
-                              AdminReportStatus.rejected,
+                        ChoiceChip(
+                          visualDensity: chipDensity,
+                          materialTapTargetSize: tapSize,
+                          label: const Text('Rejected'),
+                          selected:
+                              widget.filter.statuses.length == 1 &&
+                              widget.filter.statuses.contains(
+                                AdminReportStatus.rejected,
+                              ),
+                          onSelected: (_) => widget.onFilterChanged(
+                            widget.filter.copyWith(
+                              statuses: {AdminReportStatus.rejected},
                             ),
-                        onSelected: (_) => widget.onFilterChanged(
-                          widget.filter.copyWith(
-                            statuses: {AdminReportStatus.rejected},
                           ),
                         ),
-                      ),
-                      ChoiceChip(
-                        label: Text('All active (${widget.activeRows.length})'),
-                        selected: widget.filter.statuses.isEmpty,
-                        onSelected: (_) => widget.onFilterChanged(
-                          widget.filter.copyWith(statuses: {}),
-                        ),
-                      ),
-
-                      if (widget.filter.barangayFilterKey != null &&
-                          widget.filter.barangayFilterKey!.isNotEmpty)
-                        InputChip(
+                        ChoiceChip(
+                          visualDensity: chipDensity,
+                          materialTapTargetSize: tapSize,
                           label: Text(
-                            widget.filter.barangayDisplayLabel ??
-                                widget.filter.barangayFilterKey!,
+                            'All active (${widget.activeRows.length})',
                           ),
-                          onDeleted: () => widget.onFilterChanged(
-                            widget.filter.copyWith(clearBarangay: true),
+                          selected: widget.filter.statuses.isEmpty,
+                          onSelected: (_) => widget.onFilterChanged(
+                            widget.filter.copyWith(statuses: {}),
                           ),
                         ),
-                    ],
+                        if (widget.filter.barangayFilterKey != null &&
+                            widget.filter.barangayFilterKey!.isNotEmpty)
+                          InputChip(
+                            visualDensity: chipDensity,
+                            materialTapTargetSize: tapSize,
+                            label: Text(
+                              widget.filter.barangayDisplayLabel ??
+                                  widget.filter.barangayFilterKey!,
+                            ),
+                            onDeleted: () => widget.onFilterChanged(
+                              widget.filter.copyWith(clearBarangay: true),
+                            ),
+                          ),
+                      ];
+
+                      if (isWide) {
+                        return Wrap(
+                          spacing: WebDesign.space2,
+                          runSpacing: WebDesign.space2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: chips,
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (int i = 0; i < chips.length; i++) ...[
+                              if (i > 0) const SizedBox(width: 6),
+                              chips[i],
+                            ],
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -620,24 +658,27 @@ class _AdminMapViewState extends State<AdminMapView>
 
             // Bottom-Left Legend + Fit Bounds Controls
             Positioned(
-              left: 12,
-              right: 76,
-              bottom: 12,
+              left: isWide ? 12 : 10,
+              right: isWide ? 76 : 62,
+              bottom: isWide ? 12 : 10,
               child: WebCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WebDesign.space3,
-                  vertical: WebDesign.space2,
-                ),
+                padding: isWide
+                    ? const EdgeInsets.symmetric(
+                        horizontal: WebDesign.space3,
+                        vertical: WebDesign.space2,
+                      )
+                    : const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                 child: Wrap(
-                  spacing: WebDesign.space3,
-                  runSpacing: 6,
+                  spacing: isWide ? WebDesign.space3 : 8,
+                  runSpacing: isWide ? 6 : 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
                       '${displaySet.length} pin(s) visible',
                       style: WebDesign.tabular(
-                        Theme.of(context).textTheme.labelMedium ??
-                            const TextStyle(),
+                        (Theme.of(context).textTheme.labelMedium ??
+                                const TextStyle())
+                            .copyWith(fontSize: isWide ? null : 11.5),
                       ),
                     ),
                     ...[
@@ -660,11 +701,14 @@ class _AdminMapViewState extends State<AdminMapView>
                         children: [
                           RoadHazardMarker(
                             primaryDefect: cls.name,
-                            size: 18,
+                            size: isWide ? 18 : 16,
                             showPendingOwnerBadge: false,
                           ),
                           const SizedBox(width: 3),
-                          Text(cls.name, style: const TextStyle(fontSize: 11)),
+                          Text(
+                            cls.name,
+                            style: TextStyle(fontSize: isWide ? 11 : 10.5),
+                          ),
                         ],
                       ),
                   ],
@@ -674,15 +718,23 @@ class _AdminMapViewState extends State<AdminMapView>
 
             // Bottom-Right Map Camera Controls
             Positioned(
-              right: 12,
-              bottom: 12,
+              right: isWide ? 12 : 10,
+              bottom: isWide ? 12 : 10,
               child: WebCard(
-                padding: const EdgeInsets.all(4),
+                padding: EdgeInsets.all(isWide ? 4 : 2),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
                       tooltip: 'Zoom in',
+                      visualDensity: isWide ? null : VisualDensity.compact,
+                      constraints: isWide
+                          ? null
+                          : const BoxConstraints.tightFor(
+                              width: 38,
+                              height: 38,
+                            ),
+                      iconSize: isWide ? 24 : 19,
                       onPressed: () {
                         try {
                           _animateTo(
@@ -695,6 +747,14 @@ class _AdminMapViewState extends State<AdminMapView>
                     ),
                     IconButton(
                       tooltip: 'Zoom out',
+                      visualDensity: isWide ? null : VisualDensity.compact,
+                      constraints: isWide
+                          ? null
+                          : const BoxConstraints.tightFor(
+                              width: 38,
+                              height: 38,
+                            ),
+                      iconSize: isWide ? 24 : 19,
                       onPressed: () {
                         try {
                           _animateTo(
@@ -707,11 +767,27 @@ class _AdminMapViewState extends State<AdminMapView>
                     ),
                     IconButton(
                       tooltip: 'Fit filtered pins',
+                      visualDensity: isWide ? null : VisualDensity.compact,
+                      constraints: isWide
+                          ? null
+                          : const BoxConstraints.tightFor(
+                              width: 38,
+                              height: 38,
+                            ),
+                      iconSize: isWide ? 24 : 19,
                       onPressed: () => _fitToRows(displaySet),
                       icon: const Icon(Icons.fit_screen_outlined),
                     ),
                     IconButton(
-                      tooltip: 'Center Santa Maria, Bulacan',
+                      tooltip: 'Center Brgy. Poblacion, Santa Maria',
+                      visualDensity: isWide ? null : VisualDensity.compact,
+                      constraints: isWide
+                          ? null
+                          : const BoxConstraints.tightFor(
+                              width: 38,
+                              height: 38,
+                            ),
+                      iconSize: isWide ? 24 : 19,
                       onPressed: () => _animateTo(_santaMariaCenter, 13.0),
                       icon: const Icon(Icons.home_work_outlined),
                     ),

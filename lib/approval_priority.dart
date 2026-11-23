@@ -474,22 +474,22 @@ class ApprovalPriority {
     // DPWH SLA Overdue Badge
     if (isSlaBreached) {
       final days = (waitH / 24).toStringAsFixed(1);
-      out.add('DPWH SLA OVERDUE (${days}d / ${(dpwhSlaHours / 24).round()}d)');
+      out.add('Pending Priority Review (${days}d)');
     }
 
     // DPWH Code & Standard SLA
     if (dpwhCode == 'CODE 01') {
-      out.add('DPWH Code 01: 3-Day Emergency SLA');
+      out.add('Pothole: High-Priority Surface Defect');
     } else if (dpwhCode == 'CODE 02') {
-      out.add('DPWH Code 02: 3-Day Structural SLA');
+      out.add('Alligator Crack: High-Priority Structural Defect');
     } else if (dpwhCode == 'CODE 05') {
-      out.add('DPWH Code 05: 30-Day Re-blocking');
+      out.add('Longitudinal Crack: Structural Crack');
     } else if (dpwhCode == 'CODE 12') {
-      out.add('DPWH Code 12: Routine Maintenance');
+      out.add('Transverse Crack: Routine Maintenance');
     }
 
     if (isOverdueEmergencyPothole) {
-      out.add('DPWH Critical Overdue Escalation');
+      out.add('High-Priority Pending Escalation');
     }
     if (isCorroboratedHazard) {
       out.add('Corroborated Hazard ($witnesses witnesses)');

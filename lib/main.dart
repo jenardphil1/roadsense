@@ -164,7 +164,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   // State Management
   final GlobalKey<MapScreenState> _mapScreenKey = GlobalKey<MapScreenState>();
   bool _isRealtimeMode = false;
+  bool _isSideOfRoadView = true;
   int _currentIndex = 0;
+
+  bool _shouldSwapCrackOrientation() => _isSideOfRoadView;
 
   // Guided spotlight tour controller and real widget anchors
   final Map<String, GlobalKey> _reportGuideTargets = {
@@ -188,6 +191,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final GlobalKey _tourScannerStartKey = GlobalKey();
   final GlobalKey _tourScannerCloseKey = GlobalKey();
   final GlobalKey _tourScannerCaptureKey = GlobalKey();
+  final GlobalKey _tourScannerPerspectiveKey = GlobalKey();
   final GlobalKey _tourReviewSummaryKey = GlobalKey();
   final GlobalKey _tourReviewRetakeKey = GlobalKey();
   final GlobalKey _tourReviewSubmitKey = GlobalKey();
@@ -357,7 +361,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
       final dpwhCode = data['primaryDpwhCode'] as String? ?? 'CODE 01';
       final defectName = DpwhStandards.reportDefectName(data);
-      final responseTime = data['responseTime'] as String? ?? '3 Days';
+      final responseTime = data['responseTime'] as String? ?? 'High Priority';
       final correctiveMeasure =
           data['correctiveMeasure'] as String? ??
           'Bituminous premix (hot) or penetration patching; add base material if needed.';
@@ -903,6 +907,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       MobileTourId.liveScanner,
       [
         TourStepSpec(
+          id: 'live_scanner_perspective',
+          targetKey: _tourScannerPerspectiveKey,
+          title: 'Side of road vs. Along road',
+          description:
+              'Pick "Side of road" when scanning from the roadside or "Along road" when facing down the lane so Longitudinal and Transverse cracks are labeled accurately.',
+        ),
+        TourStepSpec(
           id: 'live_scanner_capture',
           targetKey: _tourScannerCaptureKey,
           title: 'Save Scan Frame',
@@ -1238,14 +1249,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           });
           if (mounted) setState(() => _isModelLoaded = true);
           debugPrint(
-            '[YOLO] Optimized v2 model loaded ($model) in ${loadWatch.elapsedMilliseconds} ms; four supported classes (slots 0, 1, 3, 4).',
+            '[YOLO] DPWH v3 YOLOv8s model loaded ($model) in ${loadWatch.elapsedMilliseconds} ms; four supported classes (slots 0..3).',
           );
           return;
         } catch (error) {
           debugPrint('[YOLO] Could not load $model: $error');
         }
       }
-      throw StateError('No compatible Optimized v2 model could be loaded.');
+      throw StateError('No compatible YOLOv8s road defect model could be loaded.');
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1272,11 +1283,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             _cameraError = null;
           });
         }
-        if (!_isModelLoaded && !kIsWeb) {
-          await _loadModel();
-        }
         final startupEpoch = _scanEpoch;
-        await _initCamera();
+        await Future.wait([
+          if (!_isModelLoaded && !kIsWeb) _loadModel(),
+          _initCamera(),
+        ]);
         if (!mounted ||
             !_cameraForeground ||
             _currentIndex != 1 ||
@@ -1319,8 +1330,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         final epoch = ++_scanEpoch;
         _liveBuffer.clear();
         _liveExpiry?.cancel();
-        // Drop ticks while inference runs; never queue old camera frames.
+        // Drop ticks while inference runs or during cooldown; never queue old camera frames.
         _detectionTimer?.cancel();
+        DateTime? lastCycleFinishedAt;
+        bool lastCycleHadDetections = false;
         _detectionTimer = Timer.periodic(const Duration(milliseconds: 100), (
           timer,
         ) async {
@@ -1331,10 +1344,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             return;
           }
           if (!_cameraForeground || _isDetecting || _isCapturingScan) return;
+          if (lastCycleFinishedAt != null) {
+            final int cooldownMs = lastCycleHadDetections ? 350 : 550;
+            if (DateTime.now()
+                    .difference(lastCycleFinishedAt!)
+                    .inMilliseconds <
+                cooldownMs) {
+              return;
+            }
+          }
           final controller = _cameraController!;
           if (!controller.value.isInitialized ||
-              controller.value.isTakingPicture)
+              controller.value.isTakingPicture) {
             return;
+          }
           _isDetecting = true;
           XFile? photo;
           bool recoverCamera = false;
@@ -1352,29 +1375,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             final rawResult = (response['detections'] as List)
                 .map((d) => Map<String, dynamic>.from(d as Map))
                 .toList();
-            var result = _postProcessDetections(
+            final result = _postProcessDetections(
               rawResult,
               imageWidth: imageWidth,
               imageHeight: imageHeight,
             );
-            final detailRetry = result.isEmpty;
-            if (detailRetry &&
-                mounted &&
-                _isRealtimeMode &&
-                epoch == _scanEpoch) {
-              // Retry the same image, so changing views cannot erase a valid full-frame result.
-              final detail = await _inferNativePhoto(bytes, detailPass: true);
-              result = _postProcessDetections(
-                (detail['detections'] as List)
-                    .map((d) => Map<String, dynamic>.from(d as Map))
-                    .toList(),
-                imageWidth: imageWidth,
-                imageHeight: imageHeight,
-              );
-            }
+            lastCycleHadDetections = result.isNotEmpty;
 
             debugPrint(
-              '[YOLO LIVE] processing=${stopwatch.elapsedMilliseconds} ms; capture=$captureMs ms; total=${cycleWatch.elapsedMilliseconds} ms; detailRetry=$detailRetry; detections=${result.length}',
+              '[YOLO LIVE] processing=${stopwatch.elapsedMilliseconds} ms; capture=$captureMs ms; total=${cycleWatch.elapsedMilliseconds} ms; detailRetry=false; detections=${result.length}',
             );
             if (mounted && _isRealtimeMode && epoch == _scanEpoch) {
               _liveBuffer.update(
@@ -1435,6 +1444,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 await File(photo.path).delete();
               } catch (_) {}
             }
+            lastCycleFinishedAt = DateTime.now();
             _isDetecting = false;
           }
           if (recoverCamera &&
@@ -1460,7 +1470,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final now = DateTime.now();
     _liveBuffer.expire(now);
     final snapshot = _liveBuffer.current(now);
-    _cameraRecognitionsNotifier.value = List.of(snapshot?.detections ?? []);
+    _cameraRecognitionsNotifier.value =
+        DpwhStandards.remapDetectionsForPerspective(
+          List.of(snapshot?.detections ?? []),
+          swapLongitudinalTransverse: _shouldSwapCrackOrientation(),
+        );
     _liveExpiry?.cancel();
     final remaining = _liveBuffer.untilExpiry(now);
     if (remaining != null) {
@@ -1504,15 +1518,25 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           List<Map<String, dynamic>> outDetections = snapshot.detections;
           String ext = 'jpg';
 
-          if (captureViewSize != null &&
-              captureViewSize.width > 0 &&
-              captureViewSize.height > 0) {
+          if (snapshot.detections.isNotEmpty ||
+              (captureViewSize != null &&
+                  captureViewSize.width > 0 &&
+                  captureViewSize.height > 0)) {
             try {
-              final cropped = await cropImageBytesToVisibleScan(
-                snapshot.bytes,
-                viewSize: captureViewSize,
-                previewAspectRatio: capturePreviewAspect,
-              );
+              final cropped = snapshot.detections.isNotEmpty
+                  ? await cropImageBytesToHazardRegion(
+                      snapshot.bytes,
+                      detections: snapshot.detections,
+                      detectionImageWidth: snapshot.width,
+                      detectionImageHeight: snapshot.height,
+                      fallbackViewSize: captureViewSize,
+                      fallbackPreviewAspectRatio: capturePreviewAspect,
+                    )
+                  : await cropImageBytesToVisibleScan(
+                      snapshot.bytes,
+                      viewSize: captureViewSize!,
+                      previewAspectRatio: capturePreviewAspect,
+                    );
               outBytes = cropped.bytes;
               outWidth = cropped.width;
               outHeight = cropped.height;
@@ -1551,7 +1575,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             _staticImage = file;
             _staticImageWidth = outWidth;
             _staticImageHeight = outHeight;
-            _staticRecognitions = outDetections;
+            _staticRecognitions = DpwhStandards.remapDetectionsForPerspective(
+              outDetections,
+              swapLongitudinalTransverse: _shouldSwapCrackOrientation(),
+            );
             _photoDetectionError = null;
           });
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1710,7 +1737,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
       if (mounted) {
         setState(() {
-          _staticRecognitions = result;
+          _staticRecognitions = DpwhStandards.remapDetectionsForPerspective(
+            result,
+            swapLongitudinalTransverse: _isSideOfRoadView,
+          );
         });
       }
     } catch (e) {
@@ -2235,8 +2265,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (crop.width <= 0 || crop.height <= 0) return const [];
     final sx = size.width / crop.width;
     final sy = size.height / crop.height;
+    final detections = DpwhStandards.remapDetectionsForPerspective(
+      snapshot.detections,
+      swapLongitudinalTransverse: _shouldSwapCrackOrientation(),
+    );
     return [
-      for (final detection in snapshot.detections)
+      for (final detection in detections)
         ..._liveDetectionBox(size, detection, crop, sx, sy),
     ];
   }
@@ -2514,7 +2548,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final disableAnimations =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final bool appDark = Theme.of(context).brightness == Brightness.dark;
-    final bool scannerDark = _staticImage != null ? appDark : true;
+    final bool scannerDark = appDark;
     final String scannerTitle = _isRealtimeMode
         ? 'Live Scanner'
         : (_staticImage != null
@@ -2612,6 +2646,114 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
+                      final media = MediaQuery.of(context);
+                      final bool isLandscape =
+                          media.size.width > media.size.height &&
+                          media.size.height < 560;
+                      if (isLandscape &&
+                          !_isStartingCamera &&
+                          _cameraError == null) {
+                        return SafeArea(
+                          top: false,
+                          child: Center(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                24,
+                                12,
+                                24,
+                                56,
+                              ),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 640),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              RoadSenseLogo(
+                                                size: 52,
+                                                isDarkOverride: scannerDark,
+                                              ),
+                                              const SizedBox(width: 14),
+                                              Flexible(
+                                                child: Text(
+                                                  'Scan road defects',
+                                                  style: TextStyle(
+                                                    color: AppDesign.textPrimary(
+                                                      scannerDark,
+                                                    ),
+                                                    fontSize: 22,
+                                                    fontWeight: FontWeight.w800,
+                                                    height: 1.15,
+                                                    letterSpacing: -0.3,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Text(
+                                            'Hold steady in daylight to detect potholes and road cracks. Nothing is uploaded until you review.',
+                                            style: TextStyle(
+                                              color: AppDesign.textSecondary(
+                                                scannerDark,
+                                              ),
+                                              fontSize: 12.5,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    SizedBox(
+                                      key: _tourScannerStartKey,
+                                      width: 220,
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppDesign.brand,
+                                          foregroundColor: Colors.white,
+                                          minimumSize: const Size.fromHeight(48),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 12,
+                                          ),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                          ),
+                                        ),
+                                        onPressed: _toggleRealtime,
+                                        icon: const Icon(
+                                          Icons.radar_rounded,
+                                          size: 20,
+                                        ),
+                                        label: const Text(
+                                          'Start Live Scanner',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
                       return SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(24, 20, 24, 96),
                         child: ConstrainedBox(
@@ -2625,7 +2767,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             child: _isStartingCamera
                                 ? MobileStateCard(
                                     icon: Icons.cameraswitch_rounded,
-                                    iconColor: AppDesign.accent(true),
+                                    iconColor: AppDesign.accent(scannerDark),
                                     title: 'Preparing live scanner',
                                     message:
                                         'Loading the 4-class road defect detector and initializing camera preview.',
@@ -2643,16 +2785,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                 : Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const RoadSenseLogo(
+                                      RoadSenseLogo(
                                         size: 72,
-                                        isDarkOverride: true,
+                                        isDarkOverride: scannerDark,
                                       ),
                                       const SizedBox(height: 20),
-                                      const Text(
+                                      Text(
                                         'Scan road defects',
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
-                                          color: Colors.white,
+                                          color: AppDesign.textPrimary(
+                                            scannerDark,
+                                          ),
                                           fontSize: 26,
                                           fontWeight: FontWeight.w800,
                                           height: 1.15,
@@ -2663,7 +2807,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                       Text(
                                         'Hold steady in daylight to detect potholes, alligator cracks, longitudinal cracks, and transverse cracks. Nothing is uploaded until you review and submit.',
                                         style: TextStyle(
-                                          color: AppDesign.textSecondary(true),
+                                          color: AppDesign.textSecondary(
+                                            scannerDark,
+                                          ),
                                           fontSize: 13.5,
                                           height: 1.45,
                                         ),
@@ -2728,12 +2874,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 ),
               ] else if (_isRealtimeMode) ...[
                 Expanded(
-                  // LayoutBuilder gives the ACTUAL camera-preview area size,
-                  // which is smaller than MediaQuery.size (excludes header + capture bar).
-                  // Using the wrong (full-screen) size inflates scaleY and shifts
-                  // every bounding box downward.
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
+                  child: Builder(
+                    builder: (context) {
+                      final media = MediaQuery.of(context);
+                      final bool isLandscape =
+                          media.size.width > media.size.height &&
+                          media.size.height < 560;
+                      // LayoutBuilder gives the ACTUAL camera-preview area size,
+                      // which is smaller than MediaQuery.size (excludes header + capture bar).
+                      // Using the wrong (full-screen) size inflates scaleY and shifts
+                      // every bounding box downward.
+                      final Widget cameraStack = LayoutBuilder(
+                        builder: (context, constraints) {
                       final cameraViewSize = Size(
                         constraints.maxWidth,
                         constraints.maxHeight,
@@ -2855,65 +3007,220 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               );
                             },
                           ),
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: SafeArea(
+                              bottom: false,
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  key: _tourScannerPerspectiveKey,
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () {
+                                    setState(() {
+                                      _isSideOfRoadView = !_isSideOfRoadView;
+                                    });
+                                    _publishLiveSnapshot(_scanEpoch);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xCC0F172A),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: _isSideOfRoadView
+                                            ? AppDesign.accent(
+                                                true,
+                                              ).withValues(alpha: 0.75)
+                                            : Colors.white24,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.swap_horiz_rounded,
+                                          size: 15,
+                                          color: _isSideOfRoadView
+                                              ? AppDesign.accent(true)
+                                              : Colors.white70,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          _isSideOfRoadView
+                                              ? 'Side of road'
+                                              : 'Along road',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                      if (isLandscape) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(child: cameraStack),
+                            Container(
+                              width: 148,
+                              color: AppDesign.bg(scannerDark),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              child: SafeArea(
+                                left: false,
+                                top: false,
+                                child: Center(
+                                  child: SizedBox(
+                                    key: _tourScannerCaptureKey,
+                                    width: double.infinity,
+                                    child: ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppDesign.danger,
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size(0, 64),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 12,
+                                        ),
+                                        elevation: 0,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed: _captureFromStream,
+                                      child: const Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.camera_alt_rounded,
+                                            size: 24,
+                                          ),
+                                          SizedBox(height: 6),
+                                          Text(
+                                            'Save Frame',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                      return Column(
+                        children: [
+                          Expanded(child: cameraStack),
+                          Container(
+                            color: AppDesign.bg(scannerDark),
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                            child: SafeArea(
+                              top: false,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    key: _tourScannerCaptureKey,
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppDesign.danger,
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size.fromHeight(58),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
+                                        ),
+                                        elevation: 0,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed: _captureFromStream,
+                                      icon: const Icon(
+                                        Icons.camera_alt_rounded,
+                                        size: 22,
+                                      ),
+                                      label: const Text(
+                                        'Save Scan Frame',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Saves the detected frame for review — nothing is submitted yet.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: AppDesign.textSecondary(
+                                        scannerDark,
+                                      ),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ],
                       );
                     },
                   ),
                 ),
-                Container(
-                  color: AppDesign.bg(true),
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        key: _tourScannerCaptureKey,
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppDesign.danger,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(58),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                          ),
-                          onPressed: _captureFromStream,
-                          icon: const Icon(Icons.camera_alt_rounded, size: 24),
-                          label: const Text(
-                            'Save Scan Frame',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.4,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Saves the detected frame for review — nothing is submitted yet.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: AppDesign.textSecondary(true),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ] else if (_staticImage != null) ...[
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.only(bottom: 112),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
+                  child: Builder(
+                    builder: (context) {
+                      final media = MediaQuery.of(context);
+                      final bool isLandscape =
+                          media.size.width > media.size.height &&
+                          media.size.height < 560;
+                      return SafeArea(
+                        top: false,
+                        child: SingleChildScrollView(
+                          padding: EdgeInsets.only(
+                            bottom: isLandscape ? 72 : 112,
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: isLandscape ? 720 : double.infinity,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
                         GestureDetector(
                           onTap: () {
                             final imageFile = _staticImage;
@@ -2962,10 +3269,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             color: Colors.black,
                             child: ConstrainedBox(
                               constraints: BoxConstraints(
-                                minHeight: 220,
-                                maxHeight:
-                                    (MediaQuery.sizeOf(context).height * 0.48)
-                                        .clamp(220.0, 440.0),
+                                minHeight: isLandscape ? 150 : 220,
+                                maxHeight: isLandscape
+                                    ? (media.size.height * 0.52).clamp(
+                                        150.0,
+                                        220.0,
+                                      )
+                                    : (media.size.height * 0.48).clamp(
+                                        220.0,
+                                        440.0,
+                                      ),
                               ),
                               child: LayoutBuilder(
                                 builder: (context, constraints) {
@@ -3245,7 +3558,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                   CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  'DPWH ${topClass.code} • Action: ${topClass.responseTime}',
+                                                  '${topClass.name} • ${topClass.correctiveMeasure}',
                                                   style: TextStyle(
                                                     color:
                                                         AppDesign.textPrimary(
@@ -3398,6 +3711,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         ),
                       ],
                     ),
+                  ),
+                ),
+              ),
+            );
+                    },
                   ),
                 ),
               ],

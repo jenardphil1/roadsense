@@ -67,38 +67,38 @@ class DpwhDefectClass {
 }
 
 /// Official DPWH Road Distress Standards Catalog & Evaluation Metrics
-/// derived directly from the YOLOv8m Optimized v2 Thesis Results.
+/// derived directly from the DPWH v3 YOLOv8s Thesis Results.
 ///
-/// Four supported classes retain their 5-slot output indices:
+/// Four supported classes match the v3 4-class model output slots (nc = 4):
 ///   0 = Pothole (DPWH 01)
 ///   1 = Alligator crack (DPWH 02)
-///   3 = Longitudinal crack (DPWH 12)
-///   4 = Transverse crack (DPWH 12)
-/// Slot 2 is untrained depression. Older edge-break records are historical only.
+///   2 = Longitudinal crack (DPWH 12)
+///   3 = Transverse crack (DPWH 12)
+/// Legacy depression (Code 05) and edge-break records are historical only.
 class DpwhStandards {
   DpwhStandards._();
 
-  // Model Specs & Speed Benchmark from thesis_speed_benchmark.txt
-  static const String modelName = 'YOLOv8m (DPWH Road Defect Detector)';
-  static const String modelId = 'dpwh-v2-optimized';
+  // Model Specs & Speed Benchmark from speed_benchmark.txt (DPWH v3 YOLOv8s)
+  static const String modelName = 'YOLOv8s (DPWH Road Defect Detector)';
+  static const String modelId = 'dpwh-v3-yolov8s';
   static const String modelAsset =
       'assets/dpwh_thesis_optimized/best_float16.tflite';
   static const String fallbackModelAsset = modelAsset;
   static const String labelsAsset = 'assets/dpwh_thesis_optimized/labels.txt';
-  static const String inputResolution = '608 x 608';
-  static const int inputSize = 608;
+  static const String inputResolution = '640 x 640';
+  static const int inputSize = 640;
   static const double defaultConfidenceThreshold = 0.25;
-  static const double avgLatencyMs = 44.43;
-  static const double latencyStdMs = 0.81;
-  static const double throughputFps = 22.51;
+  static const double avgLatencyMs = 17.15;
+  static const double latencyStdMs = 0.0;
+  static const double throughputFps = 58.3;
   static const bool isRealtimeCapable = true;
 
-  // Global Evaluation Metrics from thesis_test_metrics.csv (Optimized v2)
-  static const double overallPrecision = 0.6991;
-  static const double overallRecall = 0.7562;
-  static const double overallF1Score = 0.7258;
-  static const double overallMap50 = 0.7755;
-  static const double overallMap50_95 = 0.4659;
+  // Global Evaluation Metrics from thesis_test_summary.csv (DPWH v3 YOLOv8s)
+  static const double overallPrecision = 0.8070;
+  static const double overallRecall = 0.8119;
+  static const double overallF1Score = 0.8084;
+  static const double overallMap50 = 0.8458;
+  static const double overallMap50_95 = 0.5050;
 
   // Okabe-Ito Colorblind-Safe Palette
   static const Color potholeColor = Color(0xFFD55E00); // Vermillion
@@ -112,11 +112,11 @@ class DpwhStandards {
     0xFF1E293B,
   ); // Neutral navy (never a class color)
 
-  // 1. Class 0: Bowl-shaped depression / Pothole (DPWH Code 01)
+  // 1. Class 0: Pothole (DPWH Code 01)
   static const DpwhDefectClass pothole = DpwhDefectClass(
     classId: 0,
     name: 'Pothole',
-    rawLabel: 'Bowl-shaped depression / Pothole (DPWH Code 01)',
+    rawLabel: 'Pothole (DPWH Code 01)',
     code: 'CODE 01',
     color: potholeColor,
     glyphDescription: 'filled irregular blob with jagged inner outline',
@@ -124,11 +124,11 @@ class DpwhStandards {
     correctiveMeasure:
         'Bituminous premix (hot) or penetration patching; add base material if needed.',
     unit: 'sq.m.',
-    precision: 0.6970,
-    recall: 0.8150,
-    f1Score: 0.7514,
-    map50: 0.8177,
-    map50_95: 0.5291,
+    precision: 0.7577,
+    recall: 0.6911,
+    f1Score: 0.7229,
+    map50: 0.7597,
+    map50_95: 0.4011,
   );
 
   // 2. Class 1: Alligator crack (DPWH Code 02)
@@ -143,16 +143,16 @@ class DpwhStandards {
     correctiveMeasure:
         'Bituminous premix (hot) or penetration patching of affected area.',
     unit: 'sq.m.',
-    precision: 0.7490,
-    recall: 0.7351,
-    f1Score: 0.7420,
-    map50: 0.7945,
-    map50_95: 0.5030,
+    precision: 0.8767,
+    recall: 0.8511,
+    f1Score: 0.8637,
+    map50: 0.9019,
+    map50_95: 0.5820,
   );
 
-  // 3. Class 2: Depression (DPWH Code 05)
+  // Legacy historical class (removed from DPWH v3 model outputs)
   static const DpwhDefectClass depression = DpwhDefectClass(
-    classId: 2,
+    classId: -2,
     name: 'Depression',
     rawLabel: 'Depression (DPWH Code 05)',
     code: 'CODE 05',
@@ -169,9 +169,9 @@ class DpwhStandards {
     map50_95: 0.1563,
   );
 
-  // 4. Class 3: Longitudinal crack (DPWH Code 12)
+  // 3. Class 2: Longitudinal crack (DPWH Code 12)
   static const DpwhDefectClass longitudinalCrack = DpwhDefectClass(
-    classId: 3,
+    classId: 2,
     name: 'Longitudinal crack',
     rawLabel: 'Longitudinal crack (DPWH Code 12)',
     code: 'CODE 12',
@@ -181,16 +181,16 @@ class DpwhStandards {
     correctiveMeasure:
         'Crack sealing with hot or cold applied elastomeric sealant.',
     unit: 'l.m.',
-    precision: 0.6594,
-    recall: 0.7268,
-    f1Score: 0.6914,
-    map50: 0.7529,
-    map50_95: 0.4330,
+    precision: 0.7649,
+    recall: 0.8473,
+    f1Score: 0.8040,
+    map50: 0.8344,
+    map50_95: 0.4966,
   );
 
-  // 5. Class 4: Transverse crack (DPWH Code 12)
+  // 4. Class 3: Transverse crack (DPWH Code 12)
   static const DpwhDefectClass transverseCrack = DpwhDefectClass(
-    classId: 4,
+    classId: 3,
     name: 'Transverse crack',
     rawLabel: 'Transverse crack (DPWH Code 12)',
     code: 'CODE 12',
@@ -200,14 +200,14 @@ class DpwhStandards {
     correctiveMeasure:
         'Crack sealing with hot or cold applied elastomeric sealant.',
     unit: 'l.m.',
-    precision: 0.6911,
-    recall: 0.7479,
-    f1Score: 0.7184,
-    map50: 0.7369,
-    map50_95: 0.3986,
+    precision: 0.8286,
+    recall: 0.8580,
+    f1Score: 0.8430,
+    map50: 0.8870,
+    map50_95: 0.5403,
   );
 
-  // 6. Class 5: Edge break (DPWH Code 01)
+  // Legacy historical class (Edge break, DPWH Code 01)
   static const DpwhDefectClass edgeBreak = DpwhDefectClass(
     classId: 5,
     name: 'Edge break',
@@ -226,7 +226,7 @@ class DpwhStandards {
     map50_95: 0.6175,
   );
 
-  /// Classes supported by the current model; excludes untrained/older classes.
+  /// Classes supported by the current v3 model; excludes legacy classes.
   static const List<DpwhDefectClass> allClasses = [
     pothole,
     alligatorCrack,
@@ -234,18 +234,12 @@ class DpwhStandards {
     transverseCrack,
   ];
   static const List<DpwhDefectClass> legacyClasses = [depression, edgeBreak];
-  static const List<DpwhDefectClass> modelOutputClasses = [
-    pothole,
-    alligatorCrack,
-    depression,
-    longitudinalCrack,
-    transverseCrack,
-  ];
+  static const List<DpwhDefectClass> modelOutputClasses = allClasses;
 
   static void validateModelLabels(List<String> labels) {
     if (labels.length != modelOutputClasses.length) {
       throw StateError(
-        'Model requires all five output labels, including the ignored depression slot.',
+        'DPWH v3 model requires strictly four trained output labels (0..3).',
       );
     }
     for (var i = 0; i < labels.length; i++) {
@@ -255,13 +249,25 @@ class DpwhStandards {
     }
   }
 
-  /// Look up defect class by numeric class ID (0..5)
+  /// Look up defect class by current v3 numeric class ID (0..3) or legacy slot 5.
   static DpwhDefectClass? getById(int? id) {
     if (id == null) return null;
-    for (final cls in [...allClasses, ...legacyClasses]) {
+    for (final cls in [...allClasses, edgeBreak]) {
       if (cls.classId == id) return cls;
     }
     return null;
+  }
+
+  static DpwhDefectClass? _getLegacyV2ById(int id) {
+    return switch (id) {
+      0 => pothole,
+      1 => alligatorCrack,
+      2 => depression,
+      3 => longitudinalCrack,
+      4 => transverseCrack,
+      5 => edgeBreak,
+      _ => null,
+    };
   }
 
   /// Classifies any detection string (tag, raw label, name, code) to its canonical DPWH standard.
@@ -335,7 +341,24 @@ class DpwhStandards {
         !(label ?? '').toLowerCase().contains('transverse');
     if (named != null && !ambiguousCrack) return named;
     final id = report['primaryClassId'];
-    if (id is num) return getById(id.toInt());
+    if (id is num) {
+      final intId = id.toInt();
+      final modelId = report['modelId']?.toString() ?? '';
+      if (modelId == 'dpwh-v2-optimized') {
+        return _getLegacyV2ById(intId);
+      }
+      if (modelId.startsWith('dpwh-v3')) {
+        return getById(intId);
+      }
+      // Reports without an explicit modelId use legacy slot 4/Code 05 slot 2 if present.
+      if (intId == 4) return transverseCrack;
+      if (intId == 2 &&
+          (report['primaryDpwhCode'] as String? ?? '').toUpperCase() ==
+              'CODE 05') {
+        return depression;
+      }
+      return getById(intId);
+    }
     final detections = report['detections'];
     if (detections is List &&
         detections.isNotEmpty &&
@@ -405,9 +428,9 @@ class DpwhStandards {
   /// DPWH Code short title
   static String getCodeTitle(String code) {
     final c = code.trim().toUpperCase();
-    if (c.contains('01')) return 'Pothole (Urgent 3-Day)';
-    if (c.contains('02')) return 'Alligator Crack (High 3-Day)';
-    if (c.contains('05')) return 'Depression (30-Day Re-blocking)';
+    if (c.contains('01')) return 'Pothole';
+    if (c.contains('02')) return 'Alligator Crack';
+    if (c.contains('05')) return 'Depression';
     if (c.contains('12')) return 'Crack (Routine Sealant)';
     return 'Road Surface Distress';
   }
@@ -558,6 +581,49 @@ class DpwhStandards {
     final classes = extractDetectionClassNames(detections);
     if (classes.isNotEmpty) return classes;
     return <String>[classify(fallbackPrimaryDefect).name];
+  }
+
+  /// Remaps Longitudinal <-> Transverse crack tags when the camera perspective
+  /// is rotated 90° relative to the road axis (e.g., scanning from the side of
+  /// the road). Pothole and Alligator Crack are orientation-invariant.
+  static String remapCrackTagForPerspective(
+    String rawTag, {
+    required bool swapLongitudinalTransverse,
+  }) {
+    if (!swapLongitudinalTransverse) return rawTag;
+    final DpwhDefectClass? cls = tryClassify(rawTag);
+    if (cls == null) return rawTag;
+    if (cls.classId == longitudinalCrack.classId) {
+      return transverseCrack.name;
+    }
+    if (cls.classId == transverseCrack.classId) {
+      return longitudinalCrack.name;
+    }
+    return rawTag;
+  }
+
+  /// Returns a fresh list of detections with Longitudinal <-> Transverse crack
+  /// tags remapped when [swapLongitudinalTransverse] is true.
+  static List<Map<String, dynamic>> remapDetectionsForPerspective(
+    List<Map<String, dynamic>> detections, {
+    required bool swapLongitudinalTransverse,
+  }) {
+    if (!swapLongitudinalTransverse || detections.isEmpty) {
+      return detections;
+    }
+    return detections
+        .map((det) {
+          final copy = Map<String, dynamic>.from(det);
+          final rawTag = copy['tag']?.toString();
+          if (rawTag != null && rawTag.isNotEmpty) {
+            copy['tag'] = remapCrackTagForPerspective(
+              rawTag,
+              swapLongitudinalTransverse: true,
+            );
+          }
+          return copy;
+        })
+        .toList(growable: false);
   }
 
   @Deprecated('Use getCodeColor() instead')

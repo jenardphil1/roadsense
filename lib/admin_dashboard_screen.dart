@@ -405,6 +405,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     showDialog<void>(
                                       context: context,
                                       builder: (_) => WebSettingsDialog(
+                                        showMapPinPicker: false,
                                         onSettingsChanged: () =>
                                             setState(() {}),
                                       ),
@@ -715,14 +716,7 @@ class _AdminSidebar extends StatelessWidget {
                 const SizedBox(height: WebDesign.space4),
                 const Padding(
                   padding: EdgeInsets.fromLTRB(12, 0, 12, 6),
-                  child: Eyebrow('Planning & Archive'),
-                ),
-                _SidebarNavTile(
-                  label: 'Barangay Insights',
-                  icon: Icons.location_city_outlined,
-                  activeIcon: Icons.location_city_rounded,
-                  selected: section == _AdminSection.barangay,
-                  onTap: () => onSelectSection(_AdminSection.barangay),
+                  child: Eyebrow('Archive'),
                 ),
                 _SidebarNavTile(
                   label: 'Trash',
@@ -934,38 +928,54 @@ class _AdminHeaderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      height: WebDesign.headerHeight,
-      padding: const EdgeInsets.symmetric(horizontal: WebDesign.space5),
-      decoration: BoxDecoration(
-        color: WebDesign.surface(isDark),
-        border: Border(bottom: BorderSide(color: WebDesign.border(isDark))),
-      ),
-      child: Row(
-        children: [
-          if (!isDesktop)
-            Padding(
-              padding: const EdgeInsets.only(right: WebDesign.space2),
-              child: IconButton(
-                tooltip: 'Open navigation menu',
-                icon: const Icon(Icons.menu_rounded),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-              ),
-            ),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Eyebrow(section.group),
-                Text(
-                  section.title,
-                  style: theme.textTheme.titleLarge,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+    final size = MediaQuery.sizeOf(context);
+    final isPhoneLandscape = size.width > size.height && size.height < 560;
+    return Material(
+      color: WebDesign.surface(isDark),
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          height: isPhoneLandscape
+              ? 48.0
+              : (isDesktop
+                    ? WebDesign.headerHeight
+                    : WebDesign.headerHeightMobile),
+          padding: EdgeInsets.symmetric(
+            horizontal: isDesktop ? WebDesign.space5 : WebDesign.space3,
           ),
+          decoration: BoxDecoration(
+            color: WebDesign.surface(isDark),
+            border: Border(bottom: BorderSide(color: WebDesign.border(isDark))),
+          ),
+          child: Row(
+            children: [
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: WebDesign.space2),
+                  child: IconButton(
+                    tooltip: 'Open navigation menu',
+                    icon: const Icon(Icons.menu_rounded),
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                ),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!isPhoneLandscape) Eyebrow(section.group),
+                    Text(
+                      section.title,
+                      style: isPhoneLandscape
+                          ? theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            )
+                          : theme.textTheme.titleLarge,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
           if (isDesktop) ...[
             InkWell(
               borderRadius: BorderRadius.circular(WebDesign.radiusPill),
@@ -1004,6 +1014,8 @@ class _AdminHeaderBar extends StatelessWidget {
             icon: const Icon(Icons.tune_rounded, size: 20),
           ),
         ],
+      ),
+        ),
       ),
     );
   }

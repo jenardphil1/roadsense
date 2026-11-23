@@ -10,6 +10,7 @@ import 'road_sense_brand.dart';
 import 'package:flutter/material.dart';
 
 import 'dpwh_standards.dart';
+import 'road_hazard_marker.dart';
 import 'web_design.dart';
 import 'web_report_query.dart';
 
@@ -725,12 +726,14 @@ class WebAppShellHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final width = MediaQuery.sizeOf(context).width;
+    final size = MediaQuery.sizeOf(context);
+    final width = size.width;
+    final isLandscapePhone = size.width > size.height && size.height < 560;
     final isCompact = width < 820;
     final isNarrow = width < 480;
-    final height = isCompact
-        ? WebDesign.headerHeightMobile
-        : WebDesign.headerHeight;
+    final height = isLandscapePhone
+        ? 48.0
+        : (isCompact ? WebDesign.headerHeightMobile : WebDesign.headerHeight);
 
     final initials = displayName.trim().isNotEmpty
         ? displayName.trim().characters.first.toUpperCase()
@@ -741,8 +744,10 @@ class WebAppShellHeader extends StatelessWidget {
       label: 'Primary navigation',
       child: Material(
         color: WebDesign.surface(isDark),
-        child: Container(
-          height: height,
+        child: SafeArea(
+          bottom: false,
+          child: Container(
+            height: height,
           padding: EdgeInsets.symmetric(
             horizontal: isNarrow ? WebDesign.space2 : WebDesign.space4,
           ),
@@ -1057,6 +1062,7 @@ class WebAppShellHeader extends StatelessWidget {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -1183,9 +1189,6 @@ class WebDefectBadge extends StatelessWidget {
       if (dpwhCode != null) 'primaryDpwhCode': dpwhCode,
     });
     final color = cls?.color ?? DpwhStandards.getClassColor(defectName);
-    final icon = cls != null
-        ? WebDesign.defectIcon(cls)
-        : Icons.warning_amber_rounded;
     final code = cls?.code ?? dpwhCode ?? '';
 
     return Container(
@@ -1203,7 +1206,18 @@ class WebDefectBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: dense ? 12 : 14, color: color),
+          if (cls != null)
+            RoadDefectGlyph(
+              classId: cls.classId,
+              size: dense ? 13 : 15,
+              color: color,
+            )
+          else
+            Icon(
+              Icons.warning_amber_rounded,
+              size: dense ? 12 : 14,
+              color: color,
+            ),
           const SizedBox(width: 5),
           Flexible(
             child: Text(
@@ -1325,10 +1339,12 @@ class WebMapLegendCard extends StatelessWidget {
                         shape: BoxShape.circle,
                         border: Border.all(color: cls.color, width: 1.5),
                       ),
-                      child: Icon(
-                        WebDesign.defectIcon(cls),
-                        size: 13,
-                        color: cls.color,
+                      child: Center(
+                        child: RoadDefectGlyph(
+                          classId: cls.classId,
+                          size: 14,
+                          color: cls.color,
+                        ),
                       ),
                     ),
                     const SizedBox(width: WebDesign.space2),

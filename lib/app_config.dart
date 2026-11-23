@@ -32,7 +32,7 @@ class AppConfig extends ChangeNotifier {
   AppConfig._();
 
   // ── Identifiers & Headers ───────────────────────────────────────────────
-  static const String appName = 'RoadSense DPWH';
+  static const String appName = 'RoadSense AI';
   static const String appVersion = '1.0.0';
   static const String userAgent =
       'RoadSense-DPWH/1.0 (contact: thesis-audit@roadsense.local)';

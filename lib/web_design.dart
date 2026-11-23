@@ -291,18 +291,19 @@ class WebDesign {
   /// Distinct icon shape paired with Okabe-Ito defect class colors so all four
   /// trained model classes remain distinguishable without relying on color alone.
   static IconData defectIcon(DpwhDefectClass cls) {
-    switch (cls.classId) {
-      case 0: // Pothole (CODE 01)
-        return Icons.album_rounded;
-      case 1: // Alligator crack (CODE 02)
-        return Icons.grid_on_rounded;
-      case 3: // Longitudinal crack (CODE 12)
-        return Icons.swap_vert_rounded;
-      case 4: // Transverse crack (CODE 12)
-        return Icons.swap_horiz_rounded;
-      default:
-        return Icons.warning_amber_rounded;
+    if (cls.classId == DpwhStandards.pothole.classId) {
+      return Icons.album_rounded;
     }
+    if (cls.classId == DpwhStandards.alligatorCrack.classId) {
+      return Icons.grid_on_rounded;
+    }
+    if (cls.classId == DpwhStandards.longitudinalCrack.classId) {
+      return Icons.swap_vert_rounded;
+    }
+    if (cls.classId == DpwhStandards.transverseCrack.classId) {
+      return Icons.swap_horiz_rounded;
+    }
+    return Icons.warning_amber_rounded;
   }
 
   // ── Decorations ───────────────────────────────────────────────────────────

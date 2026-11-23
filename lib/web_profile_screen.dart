@@ -9,6 +9,7 @@ import 'app_settings.dart';
 import 'cloud_service.dart';
 import 'dpwh_standards.dart';
 import 'email_verification_view.dart';
+import 'road_hazard_marker.dart';
 import 'settings_dialog.dart';
 import 'web_components.dart';
 import 'web_design.dart';
@@ -716,8 +717,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (context, _, _) {
         final theme = Theme.of(context);
         final isDark = theme.brightness == Brightness.dark;
-        final width = MediaQuery.sizeOf(context).width;
-        final isCompact = width < 700;
+        final media = MediaQuery.of(context);
+        final width = media.size.width;
+        final isPhoneLandscape =
+            media.size.width > media.size.height && media.size.height < 560;
+        final isCompact = width < 700 || isPhoneLandscape;
 
         return Scaffold(
           backgroundColor: WebDesign.bg(isDark),
@@ -753,6 +757,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   context: context,
                                   builder: (_) => WebSettingsDialog(
                                     onSettingsChanged: () => setState(() {}),
+                                    onPlacePinOnMap: widget.onSwitchToMap,
                                   ),
                                 );
                               },
@@ -776,9 +781,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               final isVerified = isGoogleAuth || user.emailVerified;
 
               return SingleChildScrollView(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isCompact ? WebDesign.space3 : WebDesign.space6,
-                  vertical: isCompact ? WebDesign.space4 : WebDesign.space6,
+                padding: EdgeInsets.fromLTRB(
+                  (isCompact ? WebDesign.space3 : WebDesign.space6) +
+                      media.padding.left,
+                  isPhoneLandscape
+                      ? WebDesign.space3
+                      : (isCompact ? WebDesign.space4 : WebDesign.space6),
+                  (isCompact ? WebDesign.space3 : WebDesign.space6) +
+                      media.padding.right,
+                  (isPhoneLandscape
+                          ? WebDesign.space4
+                          : (isCompact ? WebDesign.space4 : WebDesign.space6)) +
+                      media.padding.bottom,
                 ),
                 child: CenteredMaxWidth(
                   child: Column(
@@ -1442,6 +1456,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               context: context,
                               builder: (_) => WebSettingsDialog(
                                 onSettingsChanged: () => setState(() {}),
+                                onPlacePinOnMap: widget.onSwitchToMap,
                               ),
                             ),
                         icon: const Icon(Icons.layers_outlined, size: 16),
@@ -1750,9 +1765,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         for (final cls in DpwhStandards.allClasses)
                           ChoiceChip(
-                            avatar: Icon(
-                              WebDesign.defectIcon(cls),
-                              size: 15,
+                            avatar: RoadDefectGlyph(
+                              classId: cls.classId,
+                              size: 16,
                               color: cls.color,
                             ),
                             label: Text(cls.name),
@@ -2032,7 +2047,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ] else if (status == 'approved') ...[
           const SizedBox(height: WebDesign.space1),
           Text(
-            'Response target: ${item.responseTime} · Locked after approval.',
+            'Verified road hazard · Locked after approval.',
             style: theme.textTheme.bodySmall,
           ),
         ],

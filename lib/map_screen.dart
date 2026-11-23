@@ -73,22 +73,22 @@ class _ModernPinPainter extends CustomPainter {
     final h = size.height;
     final r = w / 2;
 
-    // 1. Realistic ground shadow at the base
-    final shadowWidth = isLifted ? w * 0.58 : w * 0.46;
-    final shadowHeight = isLifted ? 5.0 : 6.0;
-    final shadowAlpha = isLifted ? 0.20 : 0.38;
+    // 1. Realistic ground shadow directly under the pin tip
+    final pinH = h - 6;
+    final shadowWidth = isLifted ? w * 0.54 : w * 0.44;
+    final shadowHeight = isLifted ? 4.5 : 5.0;
+    final shadowAlpha = isLifted ? 0.22 : 0.38;
     final shadowRect = Rect.fromCenter(
-      center: Offset(w / 2, h - 2),
+      center: Offset(w / 2, pinH + 1),
       width: shadowWidth,
       height: shadowHeight,
     );
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: shadowAlpha)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 4.0 : 2.5);
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 3.5 : 2.5);
     canvas.drawOval(shadowRect, shadowPaint);
 
     // 2. Teardrop pin path
-    final pinH = h - 6;
     final path = Path();
     path.moveTo(w / 2, pinH);
     path.cubicTo(w * 0.08, pinH * 0.58, 0, r * 1.25, 0, r);
@@ -217,7 +217,7 @@ class PotholeMarker {
     this.reporterUid,
     this.primaryDpwhCode = 'CODE 01',
     this.primaryDefect = 'Pothole',
-    this.responseTime = '3 Days',
+    this.responseTime = 'High Priority',
     this.correctiveMeasure =
         'Bituminous premix (hot) or penetration patching; add base material if needed.',
     this.detections,
@@ -650,6 +650,8 @@ class MapScreenState extends State<MapScreen>
   final StreamController<void> _tileLayerResetController =
       StreamController<void>.broadcast();
   bool _hasPartialTileFallback = false;
+  Timer? _autoTileRetryTimer;
+  DateTime? _lastAutoTileRetryAt;
   late final ResilientTileProvider _tileProvider = ResilientTileProvider(
     httpClient: _httpClient,
     isOfflineCheck: () => _isOffline,
@@ -658,11 +660,27 @@ class MapScreenState extends State<MapScreen>
 
   void _onTileFallbackStateChanged() {
     if (!mounted) return;
-    final hasFallback = _tileProvider.hasFallbackTiles;
-    if (hasFallback == _hasPartialTileFallback) return;
+    final bool showFallbackChip = _tileProvider.fallbackTileCount >= 4;
+    if (!_isOffline && _tileProvider.hasFallbackTiles) {
+      final now = DateTime.now();
+      final bool cooldownElapsed =
+          _lastAutoTileRetryAt == null ||
+          now.difference(_lastAutoTileRetryAt!) > const Duration(seconds: 15);
+      if (_autoTileRetryTimer == null && cooldownElapsed) {
+        _autoTileRetryTimer = Timer(const Duration(seconds: 3), () {
+          _autoTileRetryTimer = null;
+          if (!mounted || _isOffline || !_tileProvider.hasFallbackTiles) {
+            return;
+          }
+          _lastAutoTileRetryAt = DateTime.now();
+          _refreshMapTiles();
+        });
+      }
+    }
+    if (showFallbackChip == _hasPartialTileFallback) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final nowFallback = _tileProvider.hasFallbackTiles;
+      final nowFallback = _tileProvider.fallbackTileCount >= 4;
       if (nowFallback != _hasPartialTileFallback) {
         setState(() => _hasPartialTileFallback = nowFallback);
       }
@@ -1049,7 +1067,9 @@ class MapScreenState extends State<MapScreen>
         _mapController.fitCamera(
           CameraFit.bounds(
             bounds: bounds,
-            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 120),
+            padding: _safeCameraFitPadding(
+              const EdgeInsets.symmetric(horizontal: 48, vertical: 120),
+            ),
             maxZoom: 17.0,
           ),
         );
@@ -1355,12 +1375,14 @@ class MapScreenState extends State<MapScreen>
   bool _isChoosingLocationOnMap = false;
   bool _isChoosingOriginOnMap = false;
   bool _isPlacingMarker = false;
-  bool _isSavingPlacedMarker = false;
   LatLng? _pendingMarkerLocation;
+  String _pendingMarkerDefect = DpwhStandards.pothole.name;
+  Completer<LatLng?>? _pinPickerCompleter;
 
   static const double _snapRadiusMeters =
       RouteCorridorConfig.defaultCorridorMeters;
-  static const double _proximityCircleRadiusMeters = 22.0;
+  double get _proximityCircleRadiusMeters =>
+      AppSettings.instance.mobileProximityDistanceMeters;
   static const double _offRouteRerouteThresholdMeters = 55.0;
   static const Duration _autoRerouteCooldown = Duration(seconds: 12);
 
@@ -1566,6 +1588,9 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.manualPotholePlacementNotifier.addListener(
       _onManualPotholePlacementSettingChanged,
     );
+    AppSettings.instance.manualPinPickerRequestNotifier.addListener(
+      _onManualPinPickerRequested,
+    );
     AppSettings.instance.devEditLocationNotifier.addListener(
       _onDevEditLocationSettingChanged,
     );
@@ -1689,6 +1714,11 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
+  void _onManualPinPickerRequested() {
+    if (!mounted) return;
+    _beginMapPinPicker();
+  }
+
   void _onDevEditLocationSettingChanged() {
     if (!mounted) return;
     final bool devLoc = AppSettings.instance.devEditLocationNotifier.value;
@@ -1747,13 +1777,21 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.manualPotholePlacementNotifier.removeListener(
       _onManualPotholePlacementSettingChanged,
     );
+    AppSettings.instance.manualPinPickerRequestNotifier.removeListener(
+      _onManualPinPickerRequested,
+    );
     AppSettings.instance.devEditLocationNotifier.removeListener(
       _onDevEditLocationSettingChanged,
     );
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+      _pinPickerCompleter = null;
+    }
     AppSettings.instance.mobileNavVehicleModeNotifier.removeListener(
       _onNavVehicleModeChanged,
     );
     _subPageTourTimer?.cancel();
+    _autoTileRetryTimer?.cancel();
     _navAutoRecenterTimer?.cancel();
     _drivingHudNoticeTimer?.cancel();
     _simulationTimer?.cancel();
@@ -1945,16 +1983,384 @@ class MapScreenState extends State<MapScreen>
       return route;
     }
 
-    final List<LatLng> remaining = [userPos];
-    if (distToProj > 1.0) {
-      remaining.add(projPoint);
-    }
+    final List<LatLng> remaining = [projPoint];
 
     for (int i = segIdx + 1; i < route.length; i++) {
+      if (remaining.length == 1) {
+        final double d = Geolocator.distanceBetween(
+          projPoint.latitude,
+          projPoint.longitude,
+          route[i].latitude,
+          route[i].longitude,
+        );
+        if (d < 0.5) continue;
+      }
       remaining.add(route[i]);
     }
 
     return remaining;
+  }
+
+  double _bearingBetweenDeg(LatLng a, LatLng b) {
+    final double lat1 = a.latitude * math.pi / 180.0;
+    final double lat2 = b.latitude * math.pi / 180.0;
+    final double dLon = (b.longitude - a.longitude) * math.pi / 180.0;
+    final double y = math.sin(dLon) * math.cos(lat2);
+    final double x =
+        math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    return (math.atan2(y, x) * 180.0 / math.pi + 360.0) % 360.0;
+  }
+
+  LatLng _interpolateLatLng(LatLng a, LatLng b, double t) {
+    final double clamped = t.clamp(0.0, 1.0);
+    return LatLng(
+      a.latitude + (b.latitude - a.latitude) * clamped,
+      a.longitude + (b.longitude - a.longitude) * clamped,
+    );
+  }
+
+  List<LatLng> _extractTurnArrowPoints(List<LatLng> displayRoute) {
+    if (displayRoute.length < 2) return const [];
+
+    // 1. Prefer the active/next maneuver step location if it lies within 350 m.
+    int? turnIdx;
+    final List<double> cumDist = List<double>.filled(displayRoute.length, 0.0);
+    for (int i = 1; i < displayRoute.length; i++) {
+      cumDist[i] =
+          cumDist[i - 1] +
+          Geolocator.distanceBetween(
+            displayRoute[i - 1].latitude,
+            displayRoute[i - 1].longitude,
+            displayRoute[i].latitude,
+            displayRoute[i].longitude,
+          );
+    }
+
+    if (_routeSteps.isNotEmpty) {
+      final int stepIdx =
+          (_selectedStepIndex != null &&
+              _selectedStepIndex! < _routeSteps.length)
+          ? _selectedStepIndex!
+          : 0;
+      final LatLng stepLoc = _routeSteps[stepIdx].location;
+      double bestDist = 30.0;
+      for (int i = 1; i < displayRoute.length - 1; i++) {
+        if (cumDist[i] > 350.0) break;
+        final double d = Geolocator.distanceBetween(
+          displayRoute[i].latitude,
+          displayRoute[i].longitude,
+          stepLoc.latitude,
+          stepLoc.longitude,
+        );
+        if (d < bestDist) {
+          bestDist = d;
+          turnIdx = i;
+        }
+      }
+    }
+
+    // 2. Fallback: first vertex within 350 m with a heading change >= 25 deg.
+    if (turnIdx == null) {
+      for (int i = 1; i < displayRoute.length - 1; i++) {
+        if (cumDist[i] > 350.0) break;
+        final double bIn = _bearingBetweenDeg(
+          displayRoute[i - 1],
+          displayRoute[i],
+        );
+        final double bOut = _bearingBetweenDeg(
+          displayRoute[i],
+          displayRoute[i + 1],
+        );
+        final double delta = ((bOut - bIn + 540.0) % 360.0) - 180.0;
+        if (delta.abs() >= 25.0) {
+          turnIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (turnIdx != null) {
+      final double targetBack = (cumDist[turnIdx] - 11.0).clamp(
+        0.0,
+        cumDist[turnIdx],
+      );
+      final double targetFwd = (cumDist[turnIdx] + 12.0).clamp(
+        cumDist[turnIdx],
+        cumDist.last,
+      );
+      final List<LatLng> pts = [];
+
+      // Walk backward to targetBack
+      for (int i = turnIdx; i > 0; i--) {
+        if (cumDist[i - 1] <= targetBack) {
+          final double segLen = cumDist[i] - cumDist[i - 1];
+          final double t = segLen > 0.01
+              ? (targetBack - cumDist[i - 1]) / segLen
+              : 0.0;
+          pts.add(_interpolateLatLng(displayRoute[i - 1], displayRoute[i], t));
+          for (int j = i; j <= turnIdx; j++) {
+            pts.add(displayRoute[j]);
+          }
+          break;
+        }
+      }
+      if (pts.isEmpty) {
+        pts.addAll(displayRoute.sublist(0, turnIdx + 1));
+      }
+
+      // Walk forward to targetFwd
+      for (int i = turnIdx; i < displayRoute.length - 1; i++) {
+        if (cumDist[i + 1] >= targetFwd) {
+          final double segLen = cumDist[i + 1] - cumDist[i];
+          final double t = segLen > 0.01
+              ? (targetFwd - cumDist[i]) / segLen
+              : 1.0;
+          pts.add(_interpolateLatLng(displayRoute[i], displayRoute[i + 1], t));
+          break;
+        } else {
+          pts.add(displayRoute[i + 1]);
+        }
+      }
+      return pts.length >= 2 ? pts : const [];
+    }
+
+    // 3. Straight road fallback: ~22 m segment starting ~8 m ahead of puck.
+    final double startDist = cumDist.last > 30.0 ? 8.0 : 0.0;
+    final double endDist = (startDist + 22.0).clamp(startDist, cumDist.last);
+    if (endDist - startDist < 3.0) return const [];
+    final List<LatLng> straight = [];
+    for (int i = 0; i < displayRoute.length - 1; i++) {
+      final double s0 = cumDist[i];
+      final double s1 = cumDist[i + 1];
+      if (s1 < startDist) continue;
+      if (straight.isEmpty) {
+        final double segLen = s1 - s0;
+        final double t = segLen > 0.01 ? (startDist - s0) / segLen : 0.0;
+        straight.add(
+          _interpolateLatLng(displayRoute[i], displayRoute[i + 1], t),
+        );
+      }
+      if (s1 >= endDist) {
+        final double segLen = s1 - s0;
+        final double t = segLen > 0.01 ? (endDist - s0) / segLen : 1.0;
+        straight.add(
+          _interpolateLatLng(displayRoute[i], displayRoute[i + 1], t),
+        );
+        break;
+      } else {
+        straight.add(displayRoute[i + 1]);
+      }
+    }
+    return straight.length >= 2 ? straight : const [];
+  }
+
+  List<LatLng> _extractTurnArrowAroundLocation(
+    List<LatLng> route,
+    LatLng targetLoc,
+  ) {
+    if (route.length < 2) return const [];
+    final List<double> cumDist = List<double>.filled(route.length, 0.0);
+    for (int i = 1; i < route.length; i++) {
+      cumDist[i] =
+          cumDist[i - 1] +
+          Geolocator.distanceBetween(
+            route[i - 1].latitude,
+            route[i - 1].longitude,
+            route[i].latitude,
+            route[i].longitude,
+          );
+    }
+    int bestIdx = 0;
+    double bestDist = double.infinity;
+    for (int i = 0; i < route.length; i++) {
+      final double d = Geolocator.distanceBetween(
+        route[i].latitude,
+        route[i].longitude,
+        targetLoc.latitude,
+        targetLoc.longitude,
+      );
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    final double targetBack = (cumDist[bestIdx] - 16.0).clamp(
+      0.0,
+      cumDist[bestIdx],
+    );
+    final double targetFwd = (cumDist[bestIdx] + 22.0).clamp(
+      cumDist[bestIdx],
+      cumDist.last,
+    );
+    final List<LatLng> rawPts = [];
+    for (int i = bestIdx; i > 0; i--) {
+      if (cumDist[i - 1] <= targetBack) {
+        final double segLen = cumDist[i] - cumDist[i - 1];
+        final double t = segLen > 0.01
+            ? (targetBack - cumDist[i - 1]) / segLen
+            : 0.0;
+        rawPts.add(_interpolateLatLng(route[i - 1], route[i], t));
+        for (int j = i; j <= bestIdx; j++) {
+          rawPts.add(route[j]);
+        }
+        break;
+      }
+    }
+    if (rawPts.isEmpty) {
+      rawPts.addAll(route.sublist(0, bestIdx + 1));
+    }
+    for (int i = bestIdx; i < route.length - 1; i++) {
+      if (cumDist[i + 1] >= targetFwd) {
+        final double segLen = cumDist[i + 1] - cumDist[i];
+        final double t = segLen > 0.01
+            ? (targetFwd - cumDist[i]) / segLen
+            : 1.0;
+        rawPts.add(_interpolateLatLng(route[i], route[i + 1], t));
+        break;
+      } else {
+        rawPts.add(route[i + 1]);
+      }
+    }
+
+    final List<LatLng> pts = [];
+    for (final p in rawPts) {
+      if (pts.isEmpty) {
+        pts.add(p);
+      } else {
+        final double d = Geolocator.distanceBetween(
+          pts.last.latitude,
+          pts.last.longitude,
+          p.latitude,
+          p.longitude,
+        );
+        if (d >= 0.2) {
+          pts.add(p);
+        }
+      }
+    }
+    if (pts.length < 2) {
+      final int startIdx = bestIdx > 0 ? bestIdx - 1 : 0;
+      final int endIdx = startIdx + 1 < route.length ? startIdx + 1 : startIdx;
+      if (startIdx != endIdx) {
+        return [route[startIdx], route[endIdx]];
+      }
+      return const [];
+    }
+    return pts;
+  }
+
+  List<Widget> _buildStepTurnArrowOverlay(List<LatLng> route, LatLng stepLoc) {
+    final List<LatLng> arrowPts = _extractTurnArrowAroundLocation(route, stepLoc);
+    if (arrowPts.length < 2) return const [];
+    final double bearingDeg = _bearingBetweenDeg(
+      arrowPts[arrowPts.length - 2],
+      arrowPts.last,
+    );
+    final double bearingRad = bearingDeg * math.pi / 180.0;
+    return [
+      PolylineLayer(
+        polylines: [
+          Polyline(
+            points: arrowPts,
+            color: const Color(0xFF1E3A8A),
+            strokeWidth: 10.5,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
+          ),
+          Polyline(
+            points: arrowPts,
+            color: Colors.white,
+            strokeWidth: 6.5,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
+          ),
+        ],
+      ),
+      MarkerLayer(
+        markers: [
+          Marker(
+            point: arrowPts.last,
+            width: 30,
+            height: 30,
+            rotate: false,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1D4ED8),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2.0),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black38,
+                        blurRadius: 4,
+                        offset: Offset(0, 1.5),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Transform.rotate(
+                      angle: bearingRad,
+                      child: const Icon(
+                        Icons.navigation_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _buildDrivingTurnArrowOverlay(List<LatLng> displayRoute) {
+    final List<LatLng> arrowPts = _extractTurnArrowPoints(displayRoute);
+    if (arrowPts.length < 2) return const [];
+    final double bearingDeg = _bearingBetweenDeg(
+      arrowPts[arrowPts.length - 2],
+      arrowPts.last,
+    );
+    final double bearingRad = bearingDeg * math.pi / 180.0;
+    return [
+      PolylineLayer(
+        polylines: [
+          Polyline(
+            points: arrowPts,
+            color: Colors.white,
+            strokeWidth: 7.5,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
+          ),
+        ],
+      ),
+      MarkerLayer(
+        markers: [
+          Marker(
+            point: arrowPts.last,
+            width: 22,
+            height: 22,
+            rotate: false,
+            child: IgnorePointer(
+              child: Transform.rotate(
+                angle: bearingRad,
+                child: const Icon(
+                  Icons.navigation_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ];
   }
 
   double _distancePointToRouteMeters(LatLng point, List<LatLng> route) {
@@ -2040,6 +2446,14 @@ class MapScreenState extends State<MapScreen>
         accuracy: LocationAccuracy.bestForNavigation,
         distanceFilter: 0,
         intervalDuration: const Duration(milliseconds: 500),
+        foregroundNotificationConfig: _isNavigating
+            ? const ForegroundNotificationConfig(
+                notificationTitle: 'RoadSense AI Navigation Active',
+                notificationText:
+                    'Monitoring road hazards and proximity alerts in the background',
+                enableWakeLock: true,
+              )
+            : null,
       );
     }
     if (!kIsWeb &&
@@ -2079,7 +2493,7 @@ class MapScreenState extends State<MapScreen>
           locationSettings: _buildTrackingLocationSettings(),
         ).listen(
           (Position position) {
-            if (!widget.isMapActive || !mounted) return;
+            if (!mounted || (!widget.isMapActive && !_isNavigating)) return;
             final gpsPos = LatLng(position.latitude, position.longitude);
             _lastRealGpsPosition = gpsPos;
             _lastGpsAccuracyMeters = position.accuracy;
@@ -2591,17 +3005,11 @@ class MapScreenState extends State<MapScreen>
 
     if (hasGesture && _followMode != FollowMode.none) {
       _followMode = FollowMode.none;
+      _navAutoRecenterTimer?.cancel();
       needsRebuild = true;
-      if (_isNavigating && !_isNavOverview) {
-        _navAutoRecenterTimer?.cancel();
-        _navAutoRecenterTimer = Timer(const Duration(seconds: 4), () {
-          if (!mounted || !_isNavigating || _isNavOverview) return;
-          _applyDrivingCameraAngle(_drivingCameraAngle, showNotice: false);
-        });
-      }
     }
 
-    if (_isPlacingMarker && hasGesture) {
+    if (_isPlacingMarker) {
       _pendingMarkerLocation = camera.center;
       needsRebuild = true;
     }
@@ -2635,23 +3043,68 @@ class MapScreenState extends State<MapScreen>
         context,
         location: marker?.location ?? _mapController.camera.center,
         markerId: marker?.docId,
+        onPickLocationOnMap: _pickManualMarkerLocationOnMap,
       );
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Could not open local developer markers.'),
           ),
         );
+      }
     } finally {
-      if (mounted) _cancelMarkerPlacement();
+      if (mounted && _pinPickerCompleter == null) {
+        _cancelMarkerPlacement();
+      }
     }
   }
 
+  void _beginMapPinPicker({LatLng? initialLocation}) {
+    if (!mounted) return;
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+      _pinPickerCompleter = null;
+    }
+    final seed = initialLocation ?? _mapController.camera.center;
+    setState(() {
+      _isPlacingMarker = true;
+      _pendingMarkerLocation = seed;
+      _isEditingDevLocation = false;
+      _pendingDevLocation = null;
+      _isChoosingLocationOnMap = false;
+      _isSearchPageActive = false;
+      _followMode = FollowMode.none;
+    });
+    if (initialLocation != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_isPlacingMarker) return;
+        try {
+          _mapController.move(initialLocation, _mapController.camera.zoom);
+        } catch (_) {}
+      });
+    }
+  }
+
+  Future<LatLng?> _pickManualMarkerLocationOnMap(LatLng initialLocation) {
+    if (!mounted) return Future.value(null);
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+    }
+    final completer = Completer<LatLng?>();
+    _pinPickerCompleter = completer;
+    _beginMapPinPicker(initialLocation: initialLocation);
+    return completer.future;
+  }
+
   void _cancelMarkerPlacement() {
+    final pendingCompleter = _pinPickerCompleter;
+    _pinPickerCompleter = null;
+    if (pendingCompleter != null && !pendingCompleter.isCompleted) {
+      pendingCompleter.complete(null);
+    }
     setState(() {
       _isPlacingMarker = false;
-      _isSavingPlacedMarker = false;
       _pendingMarkerLocation = null;
     });
     if (AppSettings.instance.manualPotholePlacementNotifier.value) {
@@ -2666,7 +3119,6 @@ class MapScreenState extends State<MapScreen>
       _pendingDevLocation = startPoint;
       _followMode = FollowMode.none;
       _isPlacingMarker = false;
-      _isSavingPlacedMarker = false;
       _pendingMarkerLocation = null;
     });
   }
@@ -2776,10 +3228,33 @@ class MapScreenState extends State<MapScreen>
   }
 
   Future<void> _confirmMarkerPlacement() async {
-    final location = _pendingMarkerLocation;
-    if (location == null) return;
-    await showDeveloperMarkerEditor(context, location: location);
-    if (mounted) _cancelMarkerPlacement();
+    LatLng location;
+    try {
+      location = _mapController.camera.center;
+    } catch (_) {
+      location = _pendingMarkerLocation ?? _bulacanCenter;
+    }
+    final pendingCompleter = _pinPickerCompleter;
+    _pinPickerCompleter = null;
+    setState(() {
+      _isPlacingMarker = false;
+      _pendingMarkerLocation = null;
+    });
+    if (AppSettings.instance.manualPotholePlacementNotifier.value) {
+      AppSettings.instance.manualPotholePlacementNotifier.value = false;
+    }
+    if (pendingCompleter != null) {
+      if (!pendingCompleter.isCompleted) {
+        pendingCompleter.complete(location);
+      }
+      return;
+    }
+    await showDeveloperMarkerEditor(
+      context,
+      location: location,
+      initialDefect: _pendingMarkerDefect,
+      onPickLocationOnMap: _pickManualMarkerLocationOnMap,
+    );
   }
 
   void _onSearchChanged(String query) {
@@ -3242,7 +3717,15 @@ class MapScreenState extends State<MapScreen>
       _simulatedChainMeters = 0.0;
       _currentPosition = path.first;
       _animatedPuckPositionNotifier.value = path.first;
+      _isRouteSheetExpanded = false;
+      _isRouteDockMinimized = true;
+      _selectedPothole = null;
+      _searchedPlace = null;
+      _isSearchPageActive = false;
     });
+    if (!_isNavigating) {
+      _startTurnByTurnNavigation(_potholesOnRoute.length);
+    }
     final double? simHeading = GpsTrackerSmoother.routeForwardBearingDeg(
       path,
       path.first,
@@ -3283,7 +3766,9 @@ class MapScreenState extends State<MapScreen>
         return;
       }
 
-      _simulatedChainMeters += 18.0;
+      final double speedKmh = AppSettings.instance.simulatedDriveSpeedKmh;
+      final double speedMps = (speedKmh / 3.6).clamp(1.0, 60.0);
+      _simulatedChainMeters += speedMps * 0.35;
       final LatLng? nextPos = _interpolatePointAlongRoute(
         activePath,
         _simulatedChainMeters,
@@ -3294,7 +3779,7 @@ class MapScreenState extends State<MapScreen>
       }
       _animatePuckTo(
         nextPos,
-        speedMps: 18.0 / 0.35,
+        speedMps: speedMps,
         isMock: true,
       );
       _checkPotholeProximity(nextPos);
@@ -3842,6 +4327,34 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
+  EdgeInsets _safeCameraFitPadding(EdgeInsets desired) {
+    final size = mounted
+        ? (MediaQuery.maybeSizeOf(context) ?? const Size(390, 844))
+        : const Size(390, 844);
+    final maxHorizontal = (size.width * 0.55).clamp(0.0, double.infinity);
+    final maxVertical = (size.height * 0.55).clamp(0.0, double.infinity);
+
+    double left = desired.left;
+    double right = desired.right;
+    final horizontalSum = left + right;
+    if (horizontalSum > maxHorizontal && horizontalSum > 0) {
+      final scale = maxHorizontal / horizontalSum;
+      left *= scale;
+      right *= scale;
+    }
+
+    double top = desired.top;
+    double bottom = desired.bottom;
+    final verticalSum = top + bottom;
+    if (verticalSum > maxVertical && verticalSum > 0) {
+      final scale = maxVertical / verticalSum;
+      top *= scale;
+      bottom *= scale;
+    }
+
+    return EdgeInsets.only(left: left, top: top, right: right, bottom: bottom);
+  }
+
   void _fitCameraToRoute(List<LatLng> points) {
     if (points.isEmpty) return;
 
@@ -3857,18 +4370,29 @@ class MapScreenState extends State<MapScreen>
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
 
+    if ((maxLat - minLat).abs() < 1e-6 && (maxLng - minLng).abs() < 1e-6) {
+      _animatedMapMove(points.first, 16.0);
+      return;
+    }
+
     final bounds = LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng));
+    final isLandscape =
+        mounted && MediaQuery.of(context).orientation == Orientation.landscape;
+    final desiredPadding = isLandscape
+        ? const EdgeInsets.only(top: 64, bottom: 48, left: 260, right: 72)
+        : EdgeInsets.only(
+            top: 150,
+            bottom: _alternativeRoutes.length > 1 ? 255 : 195,
+            left: 52,
+            right: 52,
+          );
 
     try {
       _mapController.fitCamera(
         CameraFit.bounds(
           bounds: bounds,
-          padding: EdgeInsets.only(
-            top: 150,
-            bottom: _alternativeRoutes.length > 1 ? 255 : 195,
-            left: 52,
-            right: 52,
-          ),
+          padding: _safeCameraFitPadding(desiredPadding),
+          maxZoom: 17.5,
         ),
       );
     } catch (_) {}
@@ -4666,11 +5190,11 @@ class MapScreenState extends State<MapScreen>
     'GEOAPIFY_API_KEY',
   );
 
-  // Bulacan Province Center & Coordinates
+  // Brgy. Poblacion, Santa Maria, Bulacan Center & Coordinates
   static const LatLng _bulacanCenter = LatLng(
-    14.8192,
-    120.9634,
-  ); // Santa Maria / Malolos Bulacan
+    14.8194,
+    120.9565,
+  ); // Brgy. Poblacion, Santa Maria, Bulacan
 
   Future<List<Map<String, dynamic>>> _fetchGeoapifyCandidates(
     String normalizedQuery,
@@ -6479,9 +7003,9 @@ class MapScreenState extends State<MapScreen>
                             child: _buildTelemetryCard(
                               icon: Icons.engineering_rounded,
                               iconColor: AppDesign.accent(isDarkNow),
-                              title: 'MAINTENANCE SLA',
+                              title: 'RECOMMENDED ACTION',
                               value:
-                                  '${defectCls.code} • ${pothole.responseTime}',
+                                  pothole.correctiveMeasure,
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -6551,7 +7075,7 @@ class MapScreenState extends State<MapScreen>
 
                       // Official DPWH Specifications Section
                       Text(
-                        'DPWH ROAD MAINTENANCE SPECIFICATIONS',
+                        'ROAD DEFECT DETAILS',
                         style: TextStyle(
                           color: AppDesign.textSecondary(isDarkNow),
                           fontSize: 11,
@@ -6602,7 +7126,7 @@ class MapScreenState extends State<MapScreen>
                                     ),
                                   ),
                                   child: Text(
-                                    'SLA: ${pothole.responseTime}',
+                                    pothole.correctiveMeasure,
                                     style: TextStyle(
                                       color: AppDesign.accent(isDarkNow),
                                       fontSize: 11,
@@ -7025,6 +7549,7 @@ class MapScreenState extends State<MapScreen>
         context,
         location: pothole.location,
         markerId: pothole.docId,
+        onPickLocationOnMap: _pickManualMarkerLocationOnMap,
       );
       return;
     }
@@ -7546,11 +8071,13 @@ class MapScreenState extends State<MapScreen>
     String status = 'approved',
     String severity = 'medium',
     String primaryDefect = 'Pothole',
+    List<String> secondaryDefects = const [],
     int count = 1,
     double size = 38,
     bool isSelected = false,
   }) => RoadHazardMarker(
     primaryDefect: primaryDefect,
+    secondaryDefects: secondaryDefects,
     status: status,
     count: count,
     size: size,
@@ -7835,8 +8362,10 @@ class MapScreenState extends State<MapScreen>
     required bool isDark,
   }) => RoadHazardMarker(
     primaryDefect: pothole.primaryDefect,
+    secondaryDefects: DpwhStandards.extractDetectionClassNames(
+      pothole.detections,
+    ),
     status: pothole.status,
-    count: pothole.potholeCount,
     size: 34,
     isSelected: isSelected,
     compact: false,
@@ -7856,7 +8385,14 @@ class MapScreenState extends State<MapScreen>
                 ? (MediaQuery.platformBrightnessOf(context) == Brightness.dark)
                 : (themeMode == ThemeMode.dark);
             final bool showMarkers = showPotholes;
-            final double viewportWidth = MediaQuery.sizeOf(context).width;
+            final media = MediaQuery.of(context);
+            final double viewportWidth = media.size.width;
+            final double viewportHeight = media.size.height;
+            final bool isLandscape =
+                viewportWidth > viewportHeight && viewportHeight < 560;
+            final double leftSafe = media.padding.left;
+            final double rightSafe = media.padding.right;
+            final double topSafe = media.padding.top;
             final bool isCompactViewport = viewportWidth < 420;
             final bool isClearAhead =
                 _nearestPotholeInfo.isEmpty ||
@@ -8036,9 +8572,7 @@ class MapScreenState extends State<MapScreen>
                           minZoom: 3.0,
                           maxZoom: 19.0,
                           interactionOptions: InteractionOptions(
-                            flags: (_isNavigating && !_isNavOverview)
-                                ? InteractiveFlag.none
-                                : InteractiveFlag.all,
+                            flags: InteractiveFlag.all,
                             pinchMoveThreshold: 35.0,
                             scrollWheelVelocity: 0.005,
                           ),
@@ -8047,6 +8581,10 @@ class MapScreenState extends State<MapScreen>
                             if (_isNavigating) return;
                             if (_isPlacingMarker) {
                               setState(() => _pendingMarkerLocation = point);
+                              _animatedMapMove(
+                                point,
+                                _mapController.camera.zoom,
+                              );
                             } else if (_isEditingDevLocation) {
                               setState(() => _pendingDevLocation = point);
                             } else if (_isChoosingLocationOnMap) {
@@ -8201,59 +8739,140 @@ class MapScreenState extends State<MapScreen>
                           ),
                           // Route Polylines (Google Maps Style: Bold Main + Cased Alternatives)
                           if (_alternativeRoutes.isNotEmpty)
-                            PolylineLayer(
-                              polylines: [
-                                // 1. Draw unselected alternative routes with subtle casing (hidden in 3D driving view)
-                                if (!_isNavigating || _isNavOverview)
-                                  for (final entry
-                                      in _alternativeRoutes.asMap().entries.where(
-                                        (e) => e.key != _selectedRouteIndex,
-                                      )) ...[
+                            if (_isNavigating && activeRoutePolyline.length >= 2)
+                              ValueListenableBuilder<LatLng?>(
+                                valueListenable: _animatedPuckPositionNotifier,
+                                builder: (context, puckPos, _) {
+                                  final List<LatLng> displayRoute =
+                                      puckPos != null
+                                      ? _remainingRouteFromUser(
+                                          activeRoutePolyline,
+                                          puckPos,
+                                        )
+                                      : activeRoutePolyline;
+                                  return Stack(
+                                    children: [
+                                      PolylineLayer(
+                                        polylines: [
+                                          if (!_isDraggingEndpoint &&
+                                              _isNavOverview)
+                                            for (final entry
+                                                in _alternativeRoutes
+                                                    .asMap()
+                                                    .entries
+                                                    .where(
+                                                      (e) =>
+                                                          e.key !=
+                                                          _selectedRouteIndex,
+                                                    )) ...[
+                                              Polyline(
+                                                points: entry.value,
+                                                color: isDark
+                                                    ? const Color(0xFF1E293B)
+                                                    : const Color(0xFFCBD5E1),
+                                                strokeWidth: 7.8,
+                                                strokeCap: StrokeCap.round,
+                                                strokeJoin: StrokeJoin.round,
+                                              ),
+                                              Polyline(
+                                                points: entry.value,
+                                                color: isDark
+                                                    ? const Color(0xFF64748B)
+                                                    : const Color(0xFF94A3B8),
+                                                strokeWidth: 4.8,
+                                                strokeCap: StrokeCap.round,
+                                                strokeJoin: StrokeJoin.round,
+                                              ),
+                                            ],
+                                          ..._buildEndpointConnectorPolylines(
+                                            displayRoute,
+                                          ),
+                                          Polyline(
+                                            points: displayRoute,
+                                            color: const Color(0xFF0B4DB8),
+                                            strokeWidth: 13.0,
+                                            strokeCap: StrokeCap.round,
+                                            strokeJoin: StrokeJoin.round,
+                                          ),
+                                          Polyline(
+                                            points: displayRoute,
+                                            color: const Color(0xFF00B8FF),
+                                            strokeWidth: 8.0,
+                                            strokeCap: StrokeCap.round,
+                                            strokeJoin: StrokeJoin.round,
+                                          ),
+                                        ],
+                                      ),
+                                      ..._buildDrivingTurnArrowOverlay(
+                                        displayRoute,
+                                      ),
+                                    ],
+                                  );
+                                },
+                              )
+                            else
+                              PolylineLayer(
+                                polylines: [
+                                  // 1. Draw unselected alternative routes with subtle casing (hidden while dragging endpoints or in 3D driving view)
+                                  if (!_isDraggingEndpoint &&
+                                      (!_isNavigating || _isNavOverview))
+                                    for (final entry
+                                        in _alternativeRoutes
+                                            .asMap()
+                                            .entries
+                                            .where(
+                                              (e) =>
+                                                  e.key != _selectedRouteIndex,
+                                            )) ...[
+                                      Polyline(
+                                        points: entry.value,
+                                        color: isDark
+                                            ? const Color(0xFF1E293B)
+                                            : const Color(0xFFCBD5E1),
+                                        strokeWidth: 7.8,
+                                        strokeCap: StrokeCap.round,
+                                        strokeJoin: StrokeJoin.round,
+                                      ),
+                                      Polyline(
+                                        points: entry.value,
+                                        color: isDark
+                                            ? const Color(0xFF64748B)
+                                            : const Color(0xFF94A3B8),
+                                        strokeWidth: 4.8,
+                                        strokeCap: StrokeCap.round,
+                                        strokeJoin: StrokeJoin.round,
+                                      ),
+                                    ],
+                                  ..._buildEndpointConnectorPolylines(
+                                    activeRoutePolyline,
+                                  ),
+                                  // 2. Draw selected main route with high-contrast driving casing & core
                                   Polyline(
-                                    points: entry.value,
-                                    color: isDark
-                                        ? const Color(0xFF1E293B)
-                                        : const Color(0xFFCBD5E1),
-                                    strokeWidth: 7.8,
+                                    points: activeRoutePolyline,
+                                    color: _isNavigating
+                                        ? const Color(0xFF0B4DB8)
+                                        : AppDesign.brandHover.withValues(
+                                            alpha: 0.55,
+                                          ),
+                                    strokeWidth: _isNavigating ? 13.0 : 11.5,
                                     strokeCap: StrokeCap.round,
                                     strokeJoin: StrokeJoin.round,
                                   ),
                                   Polyline(
-                                    points: entry.value,
-                                    color: isDark
-                                        ? const Color(0xFF64748B)
-                                        : const Color(0xFF94A3B8),
-                                    strokeWidth: 4.8,
+                                    points: activeRoutePolyline,
+                                    color: _isNavigating
+                                        ? const Color(0xFF00B8FF)
+                                        : AppDesign.brand,
+                                    strokeWidth: _isNavigating ? 8.0 : 6.5,
                                     strokeCap: StrokeCap.round,
                                     strokeJoin: StrokeJoin.round,
                                   ),
                                 ],
-                                // 2. Draw selected main route with high-contrast driving casing & core
-                                Polyline(
-                                  points: activeRoutePolyline,
-                                  color: _isNavigating
-                                      ? const Color(0xFF0B4DB8)
-                                      : AppDesign.brandHover.withValues(
-                                          alpha: 0.55,
-                                        ),
-                                  strokeWidth: _isNavigating ? 13.0 : 11.5,
-                                  strokeCap: StrokeCap.round,
-                                  strokeJoin: StrokeJoin.round,
-                                ),
-                                Polyline(
-                                  points: activeRoutePolyline,
-                                  color: _isNavigating
-                                      ? const Color(0xFF00B8FF)
-                                      : AppDesign.brand,
-                                  strokeWidth: _isNavigating ? 8.0 : 6.5,
-                                  strokeCap: StrokeCap.round,
-                                  strokeJoin: StrokeJoin.round,
-                                ),
-                              ],
-                            )
+                              )
                           else if (_routePoints.isNotEmpty)
                             PolylineLayer(
                               polylines: [
+                                ..._buildEndpointConnectorPolylines(_routePoints),
                                 Polyline(
                                   points: _routePoints,
                                   color: AppDesign.accent(
@@ -8271,6 +8890,13 @@ class MapScreenState extends State<MapScreen>
                                   strokeJoin: StrokeJoin.round,
                                 ),
                               ],
+                            ),
+                          if (_selectedStepIndex != null &&
+                              _selectedStepIndex! < _routeSteps.length &&
+                              activeRoutePolyline.length >= 2)
+                            ..._buildStepTurnArrowOverlay(
+                              activeRoutePolyline,
+                              _routeSteps[_selectedStepIndex!].location,
                             ),
                           // User proximity indicator circle (smoothly follows animated puck)
                           if (showMarkers)
@@ -8478,6 +9104,10 @@ class MapScreenState extends State<MapScreen>
                                               severity: pothole.overallSeverity,
                                               primaryDefect:
                                                   pothole.primaryDefect,
+                                              secondaryDefects: DpwhStandards
+                                                  .extractDetectionClassNames(
+                                                    pothole.detections,
+                                                  ),
                                               count: pothole.potholeCount,
                                               size: dynamicSize,
                                               isSelected: isSelected,
@@ -8631,8 +9261,7 @@ class MapScreenState extends State<MapScreen>
                                 ),
 
                               // Active Selected Turn-by-Turn Maneuver Waypoint Dot (Translucent Halo + High-Visibility Core Dot)
-                              if (!_isNavigating &&
-                                  _selectedStepIndex != null &&
+                              if (_selectedStepIndex != null &&
                                   _routeSteps.isNotEmpty &&
                                   _selectedStepIndex! < _routeSteps.length)
                                 Marker(
@@ -8934,27 +9563,6 @@ class MapScreenState extends State<MapScreen>
                                     ),
                               ],
 
-                              if (_isPlacingMarker &&
-                                  _pendingMarkerLocation != null)
-                                Marker(
-                                  key: const ValueKey(
-                                    'pending_marker_placement',
-                                  ),
-                                  point: _pendingMarkerLocation!,
-                                  width: 42,
-                                  height: 42,
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: const Color(0xFF0B6E4F),
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: _buildUnifiedPotholeIcon(),
-                                  ),
-                                ),
-
                               if (_isEditingDevLocation &&
                                   _pendingDevLocation != null)
                                 Marker(
@@ -9010,21 +9618,40 @@ class MapScreenState extends State<MapScreen>
                   if (_isSearchVisible &&
                       widget.isMapActive &&
                       !_isChoosingLocationOnMap &&
+                      !_isPlacingMarker &&
                       !_isSearchPageActive)
                     Positioned(
-                      top: 12,
-                      left: 16,
-                      right: isCompactViewport ? 16 : null,
+                      top: isLandscape ? 6 : 12,
+                      left: 16 + leftSafe,
+                      right: (isCompactViewport && !isLandscape)
+                          ? (16 + rightSafe)
+                          : null,
                       child: SafeArea(
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth: isCompactViewport
-                                ? (viewportWidth - 32 - (kIsWeb ? 175 : 0))
-                                : (viewportWidth > 640
-                                      ? 420.0
-                                      : (viewportWidth -
+                            maxWidth: isLandscape
+                                ? ((_routePoints.isNotEmpty || _isNavigating)
+                                      ? math.min(350.0, viewportWidth * 0.44)
+                                      : math.min(360.0, viewportWidth * 0.48))
+                                : (isCompactViewport
+                                      ? (viewportWidth -
                                             32 -
-                                            (kIsWeb ? 175 : 0))),
+                                            leftSafe -
+                                            rightSafe -
+                                            (kIsWeb ? 175 : 0))
+                                      : (viewportWidth > 640
+                                            ? math.min(
+                                                420.0,
+                                                viewportWidth -
+                                                    104 -
+                                                    leftSafe -
+                                                    rightSafe,
+                                              )
+                                            : (viewportWidth -
+                                                  32 -
+                                                  leftSafe -
+                                                  rightSafe -
+                                                  (kIsWeb ? 175 : 0)))),
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -9052,7 +9679,8 @@ class MapScreenState extends State<MapScreen>
                                 _buildMapStatusChips(isDark, showMarkers),
 
                               // 2. Natural Upper-Side Pothole Countdown Notification & Proactive Detour Cue
-                              if (!_isSearchingActive &&
+                              if (!isLandscape &&
+                                  !_isSearchingActive &&
                                   ((_isNavigating &&
                                           ((_upcomingHazard != null &&
                                                   _upcomingHazard!
@@ -9087,99 +9715,66 @@ class MapScreenState extends State<MapScreen>
                       ),
                     ),
 
-                  if (_isPlacingMarker && _pendingMarkerLocation != null)
+                  if (isLandscape &&
+                      widget.isMapActive &&
+                      !_isChoosingLocationOnMap &&
+                      !_isPlacingMarker &&
+                      !_isSearchPageActive &&
+                      !_isSearchingActive &&
+                      ((_isNavigating &&
+                              ((_upcomingHazard != null &&
+                                      _upcomingHazard!.distanceMeters <=
+                                          _proximityCircleRadiusMeters) ||
+                                  (_navHazardState?.distanceToNextMeters !=
+                                          null &&
+                                      _navHazardState!.distanceToNextMeters! <=
+                                          _proximityCircleRadiusMeters)) &&
+                              showMarkers) ||
+                          (!_isNavigating &&
+                              ((_routePoints.isNotEmpty ||
+                                      _destination != null) ||
+                                  (_upcomingHazard != null &&
+                                      showMarkers &&
+                                      !_isLocationDisabled &&
+                                      !_isPermissionDenied)))))
                     Positioned(
-                      left: 12,
-                      right: 12,
-                      bottom: baseBottomOffset,
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xF20F2C25),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: const Color(0x803EC9A7),
-                            width: 1,
+                      top: 6,
+                      left:
+                          16 +
+                          leftSafe +
+                          ((_routePoints.isNotEmpty || _isNavigating)
+                              ? math.min(350.0, viewportWidth * 0.44)
+                              : math.min(360.0, viewportWidth * 0.48)) +
+                          10,
+                      right: 76 + rightSafe,
+                      child: SafeArea(
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            child: ValueListenableBuilder(
+                              valueListenable: _warningBanner,
+                              builder: (context, warning, child) =>
+                                  _buildUpperPotholeCountdownNotification(
+                                    activePotholeCount: activePotholeCount,
+                                    isDark: isDark,
+                                    showMarkers: showMarkers,
+                                    isLandscape: true,
+                                  ),
+                            ),
                           ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black38,
-                              blurRadius: 12,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.add_location_alt_rounded,
-                              color: Colors.white,
-                              size: 22,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text(
-                                    'Place marker at crosshair',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${_pendingMarkerLocation!.latitude.toStringAsFixed(5)}, ${_pendingMarkerLocation!.longitude.toStringAsFixed(5)}',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 11.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: _isSavingPlacedMarker
-                                  ? null
-                                  : _cancelMarkerPlacement,
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            ElevatedButton(
-                              onPressed: _isSavingPlacedMarker
-                                  ? null
-                                  : _confirmMarkerPlacement,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF3EC9A7),
-                                foregroundColor: Colors.black,
-                              ),
-                              child: _isSavingPlacedMarker
-                                  ? const SizedBox(
-                                      height: 16,
-                                      width: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.black,
-                                      ),
-                                    )
-                                  : const Text('Add'),
-                            ),
-                          ],
                         ),
                       ),
                     ),
 
+                  if (_isPlacingMarker)
+                    ..._buildManualPinPickerOverlays(isDark, baseBottomOffset),
+
                   // DEV TOOLS LOCATION EDITING OVERLAY
                   if (_isEditingDevLocation && _pendingDevLocation != null)
                     Positioned(
-                      left: 12,
-                      right: 12,
+                      left: 12 + leftSafe,
+                      right: 12 + rightSafe,
                       bottom: baseBottomOffset,
                       child: Container(
                         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -9251,16 +9846,36 @@ class MapScreenState extends State<MapScreen>
                       !_isChoosingLocationOnMap &&
                       !_isSearchPageActive) ...[
                     Positioned(
-                      right: 16,
-                      bottom: (_isRouteSheetExpanded ? 290.0 : 112.0) +
+                      right: 16 + rightSafe,
+                      bottom: (isLandscape
+                              ? (_isRouteSheetExpanded ? 196.0 : 88.0)
+                              : (_isRouteSheetExpanded ? 290.0 : 112.0)) +
                           bottomInset,
-                      child: _buildDrivingRightControls(isDark),
+                      child: isLandscape
+                          ? ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight: math.max(
+                                  96.0,
+                                  viewportHeight -
+                                      topSafe -
+                                      ((_isRouteSheetExpanded ? 196.0 : 88.0) +
+                                          bottomInset) -
+                                      16.0,
+                                ),
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.bottomRight,
+                                child: _buildDrivingRightControls(isDark),
+                              ),
+                            )
+                          : _buildDrivingRightControls(isDark),
                     ),
-                    if (!_isNavOverview && !_isRouteSheetExpanded)
+                    if (!_isRouteSheetExpanded)
                       Positioned(
-                        left: 16,
-                        bottom: 112.0 + bottomInset,
-                        child: _buildDrivingSpeedometer(),
+                        left: 16 + leftSafe,
+                        bottom: (isLandscape ? 88.0 : 112.0) + bottomInset,
+                        child: _buildDrivingSpeedometer(isDark),
                       ),
                     if (_drivingHudNotice != null)
                       Positioned(
@@ -9307,12 +9922,29 @@ class MapScreenState extends State<MapScreen>
                   ] else if (!_isChoosingLocationOnMap &&
                       !_isSearchPageActive)
                     Positioned(
-                      right: 14,
-                      bottom: actionButtonsBottom,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
+                      right: 14 + rightSafe,
+                      bottom: isLandscape
+                          ? (media.viewPadding.bottom + 4.0)
+                          : actionButtonsBottom,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: isLandscape
+                              ? math.max(
+                                  140.0,
+                                  viewportHeight -
+                                      topSafe -
+                                      media.viewPadding.bottom -
+                                      16.0,
+                                )
+                              : double.infinity,
+                        ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.bottomRight,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
                           // Route Switcher / Cycle Controller
                           if (_alternativeRoutes.length > 1) ...[
                             Container(
@@ -9833,6 +10465,8 @@ class MapScreenState extends State<MapScreen>
                           ),
                         ],
                       ),
+                        ),
+                      ),
                     ),
 
                   // Zoom-based distance scale bar & subtle attribution (hidden in driving mode)
@@ -9845,42 +10479,79 @@ class MapScreenState extends State<MapScreen>
                       !_isPlacingMarker &&
                       !_isEditingDevLocation)
                     Positioned(
-                      left: 16,
-                      bottom: bottomInset + 8,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          MapScaleBar(
-                            controller: _mapController,
-                            isDark: isDark,
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
+                      left: 16 + leftSafe,
+                      bottom: isLandscape
+                          ? (media.viewPadding.bottom + 4.0)
+                          : (bottomInset + 8),
+                      child: isLandscape
+                          ? Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppDesign.surface(
+                                      isDark,
+                                    ).withValues(alpha: 0.88),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: AppDesign.border(isDark),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '© OpenStreetMap',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppDesign.textSecondary(isDark),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                MapScaleBar(
+                                  controller: _mapController,
+                                  isDark: isDark,
+                                ),
+                              ],
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                MapScaleBar(
+                                  controller: _mapController,
+                                  isDark: isDark,
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppDesign.surface(
+                                      isDark,
+                                    ).withValues(alpha: 0.88),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: AppDesign.border(isDark),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '© OpenStreetMap',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppDesign.textSecondary(isDark),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            decoration: BoxDecoration(
-                              color: AppDesign.surface(
-                                isDark,
-                              ).withValues(alpha: 0.88),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: AppDesign.border(isDark),
-                              ),
-                            ),
-                            child: Text(
-                              '© OpenStreetMap',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppDesign.textSecondary(isDark),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
 
                   // 4. Floating Inspector Details Overlay Card (When a Pothole Marker is Selected)
@@ -9888,19 +10559,41 @@ class MapScreenState extends State<MapScreen>
                       !_isChoosingLocationOnMap &&
                       !_isSearchPageActive)
                     Positioned(
-                      left: 16,
-                      right: isCompactViewport ? 16 : null,
-                      bottom: baseBottomOffset,
+                      left: 16 + leftSafe,
+                      right: (isCompactViewport && !isLandscape)
+                          ? (16 + rightSafe)
+                          : null,
+                      bottom: isLandscape
+                          ? (media.viewPadding.bottom + 4.0)
+                          : baseBottomOffset,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxWidth: isCompactViewport
-                              ? (viewportWidth - 32)
-                              : 440.0,
+                          maxWidth: isLandscape
+                              ? math.min(360.0, viewportWidth * 0.46)
+                              : (isCompactViewport
+                                    ? (viewportWidth - 32 - leftSafe - rightSafe)
+                                    : 440.0),
+                          maxHeight: isLandscape
+                              ? math.max(
+                                  160.0,
+                                  viewportHeight -
+                                      topSafe -
+                                      media.viewPadding.bottom -
+                                      12.0,
+                                )
+                              : double.infinity,
                         ),
-                        child: _buildSelectedPotholeCard(
-                          _selectedPothole!,
-                          isDark,
-                        ),
+                        child: isLandscape
+                            ? SingleChildScrollView(
+                                child: _buildSelectedPotholeCard(
+                                  _selectedPothole!,
+                                  isDark,
+                                ),
+                              )
+                            : _buildSelectedPotholeCard(
+                                _selectedPothole!,
+                                isDark,
+                              ),
                       ),
                     ),
 
@@ -9911,16 +10604,35 @@ class MapScreenState extends State<MapScreen>
                       !_isChoosingLocationOnMap &&
                       !_isSearchPageActive)
                     Positioned(
-                      left: 16,
-                      right: isCompactViewport ? 16 : null,
-                      bottom: baseBottomOffset,
+                      left: 16 + leftSafe,
+                      right: (isCompactViewport && !isLandscape)
+                          ? (16 + rightSafe)
+                          : null,
+                      bottom: isLandscape
+                          ? (media.viewPadding.bottom + 4.0)
+                          : baseBottomOffset,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxWidth: isCompactViewport
-                              ? (viewportWidth - 32)
-                              : 420.0,
+                          maxWidth: isLandscape
+                              ? math.min(360.0, viewportWidth * 0.46)
+                              : (isCompactViewport
+                                    ? (viewportWidth - 32 - leftSafe - rightSafe)
+                                    : 420.0),
+                          maxHeight: isLandscape
+                              ? math.max(
+                                  160.0,
+                                  viewportHeight -
+                                      topSafe -
+                                      media.viewPadding.bottom -
+                                      12.0,
+                                )
+                              : double.infinity,
                         ),
-                        child: _buildSearchedPlaceCard(isDark),
+                        child: isLandscape
+                            ? SingleChildScrollView(
+                                child: _buildSearchedPlaceCard(isDark),
+                              )
+                            : _buildSearchedPlaceCard(isDark),
                       ),
                     ),
 
@@ -9947,21 +10659,55 @@ class MapScreenState extends State<MapScreen>
                       !_isChoosingLocationOnMap &&
                       !_isSearchPageActive)
                     Positioned(
-                      left: isCompactViewport ? 12 : 16,
-                      right: isCompactViewport ? 12 : 16,
-                      bottom: baseBottomOffset,
+                      left: (isCompactViewport ? 12 : 16) + leftSafe,
+                      right: (isCompactViewport && !isLandscape)
+                          ? (12 + rightSafe)
+                          : null,
+                      bottom: isLandscape
+                          ? (media.viewPadding.bottom + 4.0)
+                          : baseBottomOffset,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxWidth: isCompactViewport
-                              ? (viewportWidth - 24)
-                              : 460.0,
+                          maxWidth: isLandscape
+                              ? (_isRouteSheetExpanded
+                                    ? math.min(380.0, viewportWidth * 0.48)
+                                    : math.min(350.0, viewportWidth * 0.44))
+                              : (isCompactViewport
+                                    ? (viewportWidth - 24 - leftSafe - rightSafe)
+                                    : 460.0),
+                          maxHeight: isLandscape
+                              ? (_isRouteSheetExpanded
+                                    ? math.max(
+                                        180.0,
+                                        viewportHeight -
+                                            topSafe -
+                                            media.viewPadding.bottom -
+                                            12.0,
+                                      )
+                                    : math.max(
+                                        140.0,
+                                        viewportHeight -
+                                            topSafe -
+                                            media.viewPadding.bottom -
+                                            108.0,
+                                      ))
+                              : double.infinity,
                         ),
-                        child: _buildGoogleMapsBottomDock(
-                          isDark: isDark,
-                          distStr: distStr,
-                          totalEtaStr: totalEtaStr,
-                          activePotholeCount: activePotholeCount,
-                        ),
+                        child: isLandscape
+                            ? SingleChildScrollView(
+                                child: _buildGoogleMapsBottomDock(
+                                  isDark: isDark,
+                                  distStr: distStr,
+                                  totalEtaStr: totalEtaStr,
+                                  activePotholeCount: activePotholeCount,
+                                ),
+                              )
+                            : _buildGoogleMapsBottomDock(
+                                isDark: isDark,
+                                distStr: distStr,
+                                totalEtaStr: totalEtaStr,
+                                activePotholeCount: activePotholeCount,
+                              ),
                       ),
                     ),
 
@@ -10254,11 +11000,16 @@ class MapScreenState extends State<MapScreen>
       child: Material(
         color: bgColor,
         child: SafeArea(
-          child: Column(
-            children: [
-              // ── Top Navigation & Input Bar (Google Maps Header + RoadSense Surface) ──
-              Container(
-                padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool isKeyboardTight = constraints.maxHeight < 240;
+              final Widget headerWidget = Container(
+                padding: EdgeInsets.fromLTRB(
+                  8,
+                  isKeyboardTight ? 4 : 8,
+                  12,
+                  isKeyboardTight ? 6 : 12,
+                ),
                 decoration: BoxDecoration(
                   color: AppDesign.surface(isDark),
                   border: Border(
@@ -10282,13 +11033,38 @@ class MapScreenState extends State<MapScreen>
                         textColor,
                         hintColor,
                       ),
-              ),
-
-              // ── Body Content (Quick Actions / Route Options / Suggestions / Recent) ──
-              Expanded(
-                child: _buildDedicatedSearchBody(isDark, textColor, hintColor),
-              ),
-            ],
+              );
+              if (isKeyboardTight) {
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      headerWidget,
+                      SizedBox(
+                        height: 220,
+                        child: _buildDedicatedSearchBody(
+                          isDark,
+                          textColor,
+                          hintColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return Column(
+                children: [
+                  headerWidget,
+                  Expanded(
+                    child: _buildDedicatedSearchBody(
+                      isDark,
+                      textColor,
+                      hintColor,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -12343,6 +13119,7 @@ class MapScreenState extends State<MapScreen>
     required int activePotholeCount,
     required bool isDark,
     required bool showMarkers,
+    bool isLandscape = false,
   }) {
     final bool isOnRoute = _destination != null || _routePoints.isNotEmpty;
     final NavigationHazardState? nav = _navHazardState;
@@ -12392,7 +13169,7 @@ class MapScreenState extends State<MapScreen>
             ? '$title $subtitle'
             : title,
         child: Padding(
-          padding: const EdgeInsets.only(top: 8),
+          padding: EdgeInsets.only(top: isLandscape ? 0 : 8),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
             decoration: BoxDecoration(
@@ -12530,33 +13307,33 @@ class MapScreenState extends State<MapScreen>
     final bool isClose = !isImmediate && meters <= 150;
 
     final Color surfaceBg = isImmediate
-        ? const Color(0xFFDC2626)
+        ? (isDark ? const Color(0xF50F172A) : const Color(0xFAFFFFFF))
         : (isClose
               ? (isDark ? const Color(0xF2331E09) : const Color(0xF7FFFBEB))
               : (isDark ? const Color(0xF2151922) : const Color(0xFAFFFFFF)));
     final Color borderColor = isImmediate
-        ? const Color(0xFFFCA5A5)
+        ? const Color(0xFFEF4444).withValues(alpha: 0.55)
         : (isClose
               ? (isDark ? const Color(0xFFD97706) : const Color(0xFFF59E0B))
               : (isDark ? const Color(0xFF2D3544) : const Color(0xFFE2E8F0)));
     final Color titleFg = isImmediate
-        ? Colors.white
+        ? (isDark ? Colors.white : const Color(0xFF0F172A))
         : (isDark ? Colors.white : const Color(0xFF0F172A));
     final Color subtitleFg = isImmediate
-        ? Colors.white.withValues(alpha: 0.92)
+        ? (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))
         : (isClose
               ? (isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E))
               : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)));
     final Color accentColor = isImmediate
-        ? Colors.white
+        ? const Color(0xFFEF4444)
         : (isClose ? const Color(0xFFF59E0B) : const Color(0xFF0EA5E9));
     final Color meterPillBg = isImmediate
-        ? Colors.white
+        ? const Color(0xFFEF4444)
         : (isClose
               ? const Color(0xFFF59E0B)
               : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)));
     final Color meterPillFg = isImmediate
-        ? const Color(0xFFB91C1C)
+        ? Colors.white
         : (isClose
               ? const Color(0xFF111827)
               : (isDark ? Colors.white : const Color(0xFF0F172A)));
@@ -12577,7 +13354,12 @@ class MapScreenState extends State<MapScreen>
       metaParts.add('Nearby ahead');
     }
     if (upcomingBarangay.isNotEmpty) {
-      metaParts.add('Brgy. $upcomingBarangay');
+      final lowerBrgy = upcomingBarangay.trim().toLowerCase();
+      metaParts.add(
+        (lowerBrgy.startsWith('brgy') || lowerBrgy.startsWith('barangay'))
+            ? upcomingBarangay.trim()
+            : 'Brgy. ${upcomingBarangay.trim()}',
+      );
     }
     if (isOnRoute && _nextPotholeEta != null && _nextPotholeEta!.isNotEmpty) {
       metaParts.add('~$_nextPotholeEta');
@@ -12599,39 +13381,129 @@ class MapScreenState extends State<MapScreen>
         onDismiss: _dismissWarningBanner,
         label: 'Pothole ahead, $formattedAhead. $metaLine',
         child: Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            decoration: BoxDecoration(
-              color: surfaceBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor, width: 1.15),
-              boxShadow: [
-                BoxShadow(
-                  color: isImmediate
-                      ? const Color(0xFFDC2626).withValues(alpha: 0.35)
-                      : Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+          padding: EdgeInsets.only(top: isLandscape ? 0 : 8),
+          child: _PulsingAlertFrame(
+            active: isImmediate,
+            borderRadius: BorderRadius.circular(
+              isLandscape ? 24 : (isImmediate ? 18 : 16),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
+            baseColor: surfaceBg,
+            glowColor: const Color(0xFFEF4444),
+            idleBorderColor: borderColor,
+            idleBorderWidth: isImmediate ? 1.2 : 1.15,
+            idleShadow: BoxShadow(
+              color: Colors.black.withValues(
+                alpha: isImmediate ? 0.32 : (isDark ? 0.40 : 0.12),
+              ),
+              blurRadius: isImmediate ? 18 : 14,
+              offset: Offset(0, isImmediate ? 6 : 4),
+            ),
+            child: isLandscape
+                ? SizedBox(
+                    height: 48,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 0, 2, 0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: isImmediate
+                                  ? const Color(
+                                      0xFFEF4444,
+                                    ).withValues(alpha: 0.18)
+                                  : accentColor.withValues(alpha: 0.14),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isImmediate
+                                  ? Icons.warning_amber_rounded
+                                  : Icons.remove_road_rounded,
+                              color: isImmediate
+                                  ? const Color(0xFFF87171)
+                                  : accentColor,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Pothole ahead',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: titleFg,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: meterPillBg,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              formattedAhead,
+                              style: TextStyle(
+                                color: meterPillFg,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Semantics(
+                            container: true,
+                            button: true,
+                            label: 'Dismiss pothole warning',
+                            child: InkWell(
+                              onTap: _dismissWarningBanner,
+                              borderRadius: BorderRadius.circular(24),
+                              child: SizedBox(
+                                width: 40,
+                                height: 48,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    color: isImmediate
+                                        ? (isDark
+                                              ? Colors.white60
+                                              : const Color(0xFF475569))
+                                        : titleFg.withValues(alpha: 0.6),
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 9, 10, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
                   child: Row(
                     children: [
                       Container(
-                        width: 32,
-                        height: 32,
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
                           color: isImmediate
-                              ? Colors.white.withValues(alpha: 0.2)
+                              ? const Color(0xFFEF4444).withValues(alpha: 0.18)
                               : accentColor.withValues(alpha: 0.14),
                           shape: BoxShape.circle,
                         ),
@@ -12639,82 +13511,94 @@ class MapScreenState extends State<MapScreen>
                           isImmediate
                               ? Icons.warning_amber_rounded
                               : Icons.remove_road_rounded,
-                          color: isImmediate ? Colors.white : accentColor,
-                          size: 17,
+                          color: isImmediate
+                              ? const Color(0xFFF87171)
+                              : accentColor,
+                          size: 19,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              'Pothole ahead',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: titleFg,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                              ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    'Pothole ahead',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: titleFg,
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: meterPillBg,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    formattedAhead,
+                                    style: TextStyle(
+                                      color: meterPillFg,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w800,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                             if (metaLine.isNotEmpty) ...[
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 3),
                               Text(
                                 metaLine,
-                                maxLines: 2,
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: subtitleFg,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: meterPillBg,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          formattedAhead,
-                          style: TextStyle(
-                            color: meterPillFg,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w900,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 2),
                       Semantics(
                         container: true,
                         button: true,
                         label: 'Dismiss pothole warning',
                         child: InkWell(
                           onTap: _dismissWarningBanner,
-                          borderRadius: BorderRadius.circular(22),
-                          child: Container(
+                          borderRadius: BorderRadius.circular(24),
+                          child: SizedBox(
                             width: 48,
                             height: 48,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: titleFg.withValues(alpha: 0.12),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.close_rounded,
-                              color: titleFg,
-                              size: 16,
+                            child: Center(
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: isImmediate
+                                    ? (isDark
+                                          ? Colors.white60
+                                          : const Color(0xFF475569))
+                                    : titleFg.withValues(alpha: 0.6),
+                                size: 18,
+                              ),
                             ),
                           ),
                         ),
@@ -12803,10 +13687,10 @@ class MapScreenState extends State<MapScreen>
                   value: approachProgress,
                   minHeight: 2.5,
                   backgroundColor: isImmediate
-                      ? Colors.white24
+                      ? Colors.white.withValues(alpha: 0.08)
                       : borderColor.withValues(alpha: 0.25),
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    isImmediate ? const Color(0xFFFDE047) : accentColor,
+                    isImmediate ? const Color(0xFFEF4444) : accentColor,
                   ),
                 ),
               ],
@@ -13196,9 +14080,22 @@ class MapScreenState extends State<MapScreen>
     required Widget icon,
     required String tooltip,
     required VoidCallback onPressed,
+    bool isDark = true,
     String? badgeText,
     Color badgeAccent = const Color(0xFF38BDF8),
   }) {
+    final Color surfaceColor = isDark
+        ? const Color(0xE60B0F17)
+        : Colors.white.withValues(alpha: 0.94);
+    final Color borderCol = isDark
+        ? const Color(0x33FFFFFF)
+        : AppDesign.border(false);
+    final Color badgeBg = isDark ? const Color(0xFF0B0F17) : Colors.white;
+    final Color effectiveAccent = isDark
+        ? badgeAccent
+        : (badgeAccent == const Color(0xFF38BDF8)
+              ? const Color(0xFF0284C7)
+              : badgeAccent);
     return Semantics(
       button: true,
       label: tooltip,
@@ -13210,12 +14107,12 @@ class MapScreenState extends State<MapScreen>
           children: [
             Material(
               key: targetKey,
-              color: const Color(0xE60B0F17),
-              shape: const CircleBorder(
-                side: BorderSide(color: Color(0x33FFFFFF), width: 1.1),
+              color: surfaceColor,
+              shape: CircleBorder(
+                side: BorderSide(color: borderCol, width: 1.1),
               ),
               elevation: 6,
-              shadowColor: Colors.black54,
+              shadowColor: isDark ? Colors.black54 : Colors.black26,
               child: InkWell(
                 onTap: onPressed,
                 customBorder: const CircleBorder(),
@@ -13236,17 +14133,17 @@ class MapScreenState extends State<MapScreen>
                       vertical: 1.5,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0B0F17),
+                      color: badgeBg,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: badgeAccent.withValues(alpha: 0.75),
+                        color: effectiveAccent.withValues(alpha: 0.75),
                         width: 1.0,
                       ),
                     ),
                     child: Text(
                       badgeText,
                       style: TextStyle(
-                        color: badgeAccent,
+                        color: effectiveAccent,
                         fontSize: 9.5,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.2,
@@ -13391,7 +14288,11 @@ class MapScreenState extends State<MapScreen>
       final int nextIndex =
           (_selectedRouteIndex + 1) % _alternativeRoutes.length;
       _selectActiveRoute(nextIndex);
-      _alignDrivingCameraToActiveRoute(livePos);
+      if (_routePoints.isNotEmpty) {
+        _applyDrivingCameraAngle(DrivingCameraAngle.overview, showNotice: false);
+      } else {
+        _alignDrivingCameraToActiveRoute(livePos);
+      }
       final int hazards = _selectedRouteIndex < _routePotholeCounts.length
           ? _routePotholeCounts[_selectedRouteIndex]
           : _potholesOnRoute.length;
@@ -13454,7 +14355,11 @@ class MapScreenState extends State<MapScreen>
         }
       }
 
-      _alignDrivingCameraToActiveRoute(livePos);
+      if (_routePoints.isNotEmpty) {
+        _applyDrivingCameraAngle(DrivingCameraAngle.overview, showNotice: false);
+      } else {
+        _alignDrivingCameraToActiveRoute(livePos);
+      }
       final int hazards = _selectedRouteIndex < _routePotholeCounts.length
           ? _routePotholeCounts[_selectedRouteIndex]
           : _potholesOnRoute.length;
@@ -13479,15 +14384,19 @@ class MapScreenState extends State<MapScreen>
   Widget _buildDrivingRightControls(bool isDark) {
     final bool voiceEnabled = AppSettings.instance.mobileVoiceAlertsEnabled;
     final bool isReroutingBusy = _isManualRerouting || _isRouting;
+    final Color iconFg = AppDesign.textPrimary(isDark);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDrivingCircleButton(
           targetKey: _drivingAngleGuideKey,
+          isDark: isDark,
           icon: _drivingCameraAngle == DrivingCameraAngle.overview
-              ? const Icon(
+              ? Icon(
                   Icons.zoom_out_map_rounded,
-                  color: Color(0xFF38BDF8),
+                  color: isDark
+                      ? const Color(0xFF38BDF8)
+                      : const Color(0xFF0284C7),
                   size: 22,
                 )
               : ValueListenableBuilder<double>(
@@ -13512,7 +14421,8 @@ class MapScreenState extends State<MapScreen>
         const SizedBox(height: 14),
         _buildDrivingCircleButton(
           targetKey: _drivingSearchGuideKey,
-          icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
+          isDark: isDark,
+          icon: Icon(Icons.search_rounded, color: iconFg, size: 22),
           tooltip: 'Search destination',
           onPressed: () {
             setState(() {
@@ -13526,9 +14436,12 @@ class MapScreenState extends State<MapScreen>
         const SizedBox(height: 14),
         _buildDrivingCircleButton(
           targetKey: _drivingVoiceGuideKey,
+          isDark: isDark,
           icon: Icon(
             voiceEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-            color: voiceEnabled ? Colors.white : const Color(0xFFFCA5A5),
+            color: voiceEnabled
+                ? iconFg
+                : (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFDC2626)),
             size: 22,
           ),
           tooltip: voiceEnabled ? 'Mute voice alerts' : 'Unmute voice alerts',
@@ -13547,18 +14460,21 @@ class MapScreenState extends State<MapScreen>
         const SizedBox(height: 14),
         _buildDrivingCircleButton(
           targetKey: _drivingRerouteGuideKey,
+          isDark: isDark,
           icon: isReroutingBusy
-              ? const SizedBox(
+              ? SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.2,
-                    color: Color(0xFF38BDF8),
+                    color: isDark
+                        ? const Color(0xFF38BDF8)
+                        : const Color(0xFF0284C7),
                   ),
                 )
-              : const Icon(
+              : Icon(
                   Icons.alt_route_rounded,
-                  color: Colors.white,
+                  color: iconFg,
                   size: 22,
                 ),
           badgeText: !isReroutingBusy && _alternativeRoutes.length > 1
@@ -13571,7 +14487,63 @@ class MapScreenState extends State<MapScreen>
     );
   }
 
-  Widget _buildDrivingSpeedometer() {
+  Widget _buildDrivingSpeedometer(bool isDark) {
+    final Color surfaceBg = isDark
+        ? const Color(0xE60B0F17)
+        : Colors.white.withValues(alpha: 0.94);
+    final Color borderCol = isDark ? Colors.white38 : AppDesign.border(false);
+    final Color fgPrimary = AppDesign.textPrimary(isDark);
+    final Color fgSecondary = AppDesign.textSecondary(isDark);
+    if (_followMode == FollowMode.none) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: const ValueKey('driving_recenter_button'),
+          borderRadius: BorderRadius.circular(28),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            _applyDrivingCameraAngle(
+              _drivingCameraAngle == DrivingCameraAngle.overview
+                  ? DrivingCameraAngle.chase3D
+                  : _drivingCameraAngle,
+              showNotice: false,
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              color: surfaceBg,
+              border: Border.all(color: borderCol, width: 1.4),
+              boxShadow: [
+                BoxShadow(
+                  color: isDark ? Colors.black54 : Colors.black26,
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.navigation_rounded, color: fgPrimary, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  'Re-center',
+                  style: TextStyle(
+                    color: fgPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return ValueListenableBuilder<LatLng?>(
       valueListenable: _animatedPuckPositionNotifier,
       builder: (context, _, _) {
@@ -13581,13 +14553,13 @@ class MapScreenState extends State<MapScreen>
           height: 56,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: const Color(0xE60B0F17),
-            border: Border.all(color: Colors.white38, width: 1.4),
-            boxShadow: const [
+            color: surfaceBg,
+            border: Border.all(color: borderCol, width: 1.4),
+            boxShadow: [
               BoxShadow(
-                color: Colors.black54,
+                color: isDark ? Colors.black54 : Colors.black26,
                 blurRadius: 10,
-                offset: Offset(0, 3),
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -13597,8 +14569,8 @@ class MapScreenState extends State<MapScreen>
               Text(
                 '$kmh',
                 style: AppDesign.tabular(
-                  const TextStyle(
-                    color: Colors.white,
+                  TextStyle(
+                    color: fgPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                     height: 1.0,
@@ -13606,10 +14578,10 @@ class MapScreenState extends State<MapScreen>
                 ),
               ),
               const SizedBox(height: 2),
-              const Text(
+              Text(
                 'km/h',
                 style: TextStyle(
-                  color: Colors.white70,
+                  color: fgSecondary,
                   fontSize: 9.5,
                   fontWeight: FontWeight.w600,
                   height: 1.0,
@@ -14704,10 +15676,21 @@ class MapScreenState extends State<MapScreen>
         '$hour:${arrivalTime.minute.toString().padLeft(2, '0')} $amPm';
 
     final Color etaColor = _routePoints.isEmpty
-        ? const Color(0xFF38BDF8)
+        ? (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7))
         : (activePotholeCount == 0
-              ? const Color(0xFF34D399)
-              : const Color(0xFFFBBF24));
+              ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669))
+              : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)));
+    final Color sheetBg = isDark
+        ? const Color(0xFF0A0D12)
+        : AppDesign.surface(false);
+    final Color cardInnerBg = isDark
+        ? const Color(0xFF141923)
+        : AppDesign.sunken(false);
+    final Color fgPrimary = AppDesign.textPrimary(isDark);
+    final Color fgSecondary = AppDesign.textSecondary(isDark);
+    final Color sheetBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : AppDesign.border(false);
 
     final String subtitleText = _routePoints.isEmpty
         ? (activePotholeCount == 0
@@ -14732,19 +15715,19 @@ class MapScreenState extends State<MapScreen>
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
         decoration: BoxDecoration(
-          color: const Color(0xFF0A0D12),
+          color: sheetBg,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           border: Border(
             top: BorderSide(
-              color: Colors.white.withValues(alpha: 0.14),
+              color: sheetBorder,
               width: 1.0,
             ),
           ),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
-              color: Colors.black54,
+              color: isDark ? Colors.black54 : Colors.black12,
               blurRadius: 18,
-              offset: Offset(0, -4),
+              offset: const Offset(0, -4),
             ),
           ],
         ),
@@ -14766,7 +15749,7 @@ class MapScreenState extends State<MapScreen>
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.white30,
+                          color: isDark ? Colors.white30 : Colors.black26,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -14782,18 +15765,18 @@ class MapScreenState extends State<MapScreen>
                         message: 'End navigation',
                         child: Material(
                           color: Colors.transparent,
-                          shape: const CircleBorder(
-                            side: BorderSide(color: Colors.white38, width: 1.4),
+                          shape: CircleBorder(
+                            side: BorderSide(color: sheetBorder, width: 1.4),
                           ),
                           child: InkWell(
                             onTap: _clearRouteState,
                             customBorder: const CircleBorder(),
-                            child: const SizedBox(
+                            child: SizedBox(
                               width: 46,
                               height: 46,
                               child: Icon(
                                 Icons.close_rounded,
-                                color: Colors.white,
+                                color: fgPrimary,
                                 size: 22,
                               ),
                             ),
@@ -14829,8 +15812,8 @@ class MapScreenState extends State<MapScreen>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppDesign.tabular(
-                                const TextStyle(
-                                  color: Colors.white70,
+                                TextStyle(
+                                  color: fgSecondary,
                                   fontSize: 13.5,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -14842,7 +15825,9 @@ class MapScreenState extends State<MapScreen>
                     ),
                     const SizedBox(width: 12),
                     Material(
-                      color: Colors.white.withValues(alpha: 0.08),
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.black.withValues(alpha: 0.05),
                       shape: const CircleBorder(),
                       child: InkWell(
                         onTap: () =>
@@ -14855,7 +15840,7 @@ class MapScreenState extends State<MapScreen>
                             _isRouteSheetExpanded
                                 ? Icons.keyboard_arrow_down_rounded
                                 : Icons.keyboard_arrow_up_rounded,
-                            color: Colors.white70,
+                            color: fgSecondary,
                             size: 24,
                           ),
                         ),
@@ -14865,12 +15850,12 @@ class MapScreenState extends State<MapScreen>
                 ),
                 if (_isRouteSheetExpanded) ...[
                   const SizedBox(height: 12),
-                  Divider(color: Colors.white.withValues(alpha: 0.12), height: 1),
+                  Divider(color: sheetBorder, height: 1),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'VEHICLE PROFILE (3D)',
                     style: TextStyle(
-                      color: Colors.white54,
+                      color: fgSecondary,
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.8,
@@ -14933,12 +15918,12 @@ class MapScreenState extends State<MapScreen>
                                       ? const Color(0xFF00B8FF).withValues(
                                           alpha: 0.16,
                                         )
-                                      : const Color(0xFF141923),
+                                      : cardInnerBg,
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(
                                     color: _travelMode == item.mode
                                         ? const Color(0xFF00B8FF)
-                                        : Colors.white12,
+                                        : sheetBorder,
                                     width: _travelMode == item.mode ? 1.6 : 1.0,
                                   ),
                                 ),
@@ -14961,8 +15946,10 @@ class MapScreenState extends State<MapScreen>
                                             ? FontWeight.w800
                                             : FontWeight.w600,
                                         color: _travelMode == item.mode
-                                            ? const Color(0xFF38BDF8)
-                                            : Colors.white70,
+                                            ? (isDark
+                                                  ? const Color(0xFF38BDF8)
+                                                  : const Color(0xFF0284C7))
+                                            : fgSecondary,
                                       ),
                                     ),
                                   ],
@@ -15000,12 +15987,16 @@ class MapScreenState extends State<MapScreen>
                             style: OutlinedButton.styleFrom(
                               minimumSize: const Size(0, 42),
                               backgroundColor: _isSimulatingRoute
-                                  ? const Color(0xFF451A03)
-                                  : const Color(0xFF141923),
+                                  ? (isDark
+                                        ? const Color(0xFF451A03)
+                                        : const Color(0xFFFEF3C7))
+                                  : cardInnerBg,
                               foregroundColor: _isSimulatingRoute
-                                  ? const Color(0xFFFBBF24)
-                                  : Colors.white,
-                              side: const BorderSide(color: Colors.white12),
+                                  ? (isDark
+                                        ? const Color(0xFFFBBF24)
+                                        : const Color(0xFFB45309))
+                                  : fgPrimary,
+                              side: BorderSide(color: sheetBorder),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -15018,9 +16009,9 @@ class MapScreenState extends State<MapScreen>
                           height: 42,
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF141923),
+                            color: cardInnerBg,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white12),
+                            border: Border.all(color: sheetBorder),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -15031,8 +16022,12 @@ class MapScreenState extends State<MapScreen>
                                     : Icons.warning_amber_rounded,
                                 size: 15,
                                 color: activePotholeCount == 0
-                                    ? const Color(0xFF34D399)
-                                    : const Color(0xFFFBBF24),
+                                    ? (isDark
+                                          ? const Color(0xFF34D399)
+                                          : const Color(0xFF059669))
+                                    : (isDark
+                                          ? const Color(0xFFFBBF24)
+                                          : const Color(0xFFB45309)),
                               ),
                               const SizedBox(width: 6),
                               Flexible(
@@ -15046,8 +16041,12 @@ class MapScreenState extends State<MapScreen>
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w700,
                                     color: activePotholeCount == 0
-                                        ? const Color(0xFF34D399)
-                                        : const Color(0xFFFBBF24),
+                                        ? (isDark
+                                              ? const Color(0xFF34D399)
+                                              : const Color(0xFF059669))
+                                        : (isDark
+                                              ? const Color(0xFFFBBF24)
+                                              : const Color(0xFFB45309)),
                                   ),
                                 ),
                               ),
@@ -15061,56 +16060,73 @@ class MapScreenState extends State<MapScreen>
                     const SizedBox(height: 10),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 165),
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: _routeSteps.length,
-                        separatorBuilder: (_, _) => Divider(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.08),
-                        ),
-                        itemBuilder: (_, i) {
-                          final step = _routeSteps[i];
-                          return ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 0,
-                            ),
-                            leading: Icon(
-                              _getStepIconData(step),
-                              color: i == 0
-                                  ? const Color(0xFF38BDF8)
-                                  : Colors.white70,
-                              size: 20,
-                            ),
-                            title: Text(
-                              step.instruction.isNotEmpty
-                                  ? step.instruction
-                                  : (step.roadName.isNotEmpty
-                                        ? step.roadName
-                                        : 'Proceed'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _routeSteps.length,
+                          separatorBuilder: (_, _) => Divider(
+                            height: 1,
+                            color: sheetBorder,
+                          ),
+                          itemBuilder: (_, i) {
+                            final step = _routeSteps[i];
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 0,
                               ),
-                            ),
-                            trailing: Text(
-                              RoutePotholeAdvisor.formatRouteDistance(
-                                step.distanceMeters,
+                              leading: Icon(
+                                _getStepIconData(step),
+                                color: i == 0
+                                    ? (isDark
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFF0284C7))
+                                    : fgSecondary,
+                                size: 20,
                               ),
-                              style: AppDesign.tabular(
-                                const TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
+                              title: Text(
+                                step.instruction.isNotEmpty
+                                    ? step.instruction
+                                    : (step.roadName.isNotEmpty
+                                          ? step.roadName
+                                          : 'Proceed'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: fgPrimary,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
-                          );
-                        },
+                              trailing: Text(
+                                RoutePotholeAdvisor.formatRouteDistance(
+                                  step.distanceMeters,
+                                ),
+                                style: AppDesign.tabular(
+                                  TextStyle(
+                                    color: fgSecondary,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              onTap: () {
+                                _setRouteSheetExpanded(false);
+                                setState(() {
+                                  _selectedStepIndex = i;
+                                  _followMode = FollowMode.none;
+                                });
+                                _animatedMapMoveToVisible(
+                                  step.location,
+                                  17.5,
+                                  isExpandedSheet: false,
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ],
@@ -15940,11 +16956,12 @@ class MapScreenState extends State<MapScreen>
                           final isSelected = _selectedStepIndex == i;
                           return InkWell(
                             onTap: () {
+                              _setRouteSheetExpanded(false);
                               setState(() => _selectedStepIndex = i);
                               _animatedMapMoveToVisible(
                                 step.location,
                                 17.5,
-                                isExpandedSheet: _isRouteSheetExpanded,
+                                isExpandedSheet: false,
                               );
                             },
                             borderRadius: BorderRadius.circular(10),
@@ -16535,7 +17552,7 @@ class MapScreenState extends State<MapScreen>
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              '${pothole.location.latitude.toStringAsFixed(5)}, ${pothole.location.longitude.toStringAsFixed(5)} • SLA: ${pothole.responseTime}',
+                              '${pothole.location.latitude.toStringAsFixed(5)}, ${pothole.location.longitude.toStringAsFixed(5)}',
                               style: TextStyle(
                                 color: AppDesign.textPrimary(isDark),
                                 fontWeight: FontWeight.w700,
@@ -16954,6 +17971,281 @@ class MapScreenState extends State<MapScreen>
     });
   }
 
+  List<Polyline> _buildEndpointConnectorPolylines(List<LatLng> route) {
+    if (_isDraggingEndpoint || route.length < 2) return const [];
+    final connectors = <Polyline>[];
+    final LatLng? startPin = _customOrigin ?? _currentPosition;
+    if (startPin != null) {
+      final d = Geolocator.distanceBetween(
+        startPin.latitude,
+        startPin.longitude,
+        route.first.latitude,
+        route.first.longitude,
+      );
+      if (d > 2.0 && d < 5000.0) {
+        connectors.add(
+          Polyline(
+            points: [startPin, route.first],
+            color: const Color(0xFF0284C7),
+            strokeWidth: 4.5,
+            pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+            strokeCap: StrokeCap.round,
+          ),
+        );
+      }
+    }
+    final LatLng? endPin = _destination;
+    if (endPin != null) {
+      final d = Geolocator.distanceBetween(
+        route.last.latitude,
+        route.last.longitude,
+        endPin.latitude,
+        endPin.longitude,
+      );
+      if (d > 2.0 && d < 5000.0) {
+        connectors.add(
+          Polyline(
+            points: [route.last, endPin],
+            color: const Color(0xFFE11D48),
+            strokeWidth: 4.5,
+            pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+            strokeCap: StrokeCap.round,
+          ),
+        );
+      }
+    }
+    return connectors;
+  }
+
+  List<Widget> _buildManualPinPickerOverlays(
+    bool isDark,
+    double baseBottomOffset,
+  ) {
+    final LatLng displayLoc = _pendingMarkerLocation ?? _bulacanCenter;
+    return [
+      Positioned(
+        top: 12,
+        left: 16,
+        right: 16,
+        child: SafeArea(
+          child: Container(
+            height: 52,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: AppDesign.surface(isDark),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: AppDesign.border(isDark),
+                width: 1.2,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  color: AppDesign.textPrimary(isDark),
+                  tooltip: 'Cancel pin placement',
+                  onPressed: _cancelMarkerPlacement,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Place hazard pin on map',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppDesign.textPrimary(isDark),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      Center(
+        child: IgnorePointer(
+          child: SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF10B981),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black38, blurRadius: 4),
+                    ],
+                  ),
+                ),
+                Transform.translate(
+                  offset: const Offset(0, -34),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Place pin here',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.location_on,
+                        color: Color(0xFF10B981),
+                        size: 44,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        left: 16,
+        right: 16,
+        bottom: baseBottomOffset,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppDesign.surface(isDark),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppDesign.border(isDark), width: 1.2),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 16,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final cls in DpwhStandards.allClasses)
+                    ChoiceChip(
+                      avatar: RoadDefectGlyph(
+                        classId: cls.classId,
+                        size: 14,
+                        color: cls.color,
+                      ),
+                      label: Text(
+                        cls.name,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      selected: _pendingMarkerDefect == cls.name,
+                      onSelected: (_) => setState(
+                        () => _pendingMarkerDefect = cls.name,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.touch_app_rounded,
+                    color: Color(0xFF10B981),
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Move map to choose location',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppDesign.textPrimary(isDark),
+                          ),
+                        ),
+                        Text(
+                          '${displayLoc.latitude.toStringAsFixed(5)}, ${displayLoc.longitude.toStringAsFixed(5)}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppDesign.textSecondary(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _cancelMarkerPlacement,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 4),
+                  ElevatedButton(
+                    onPressed: _confirmMarkerPlacement,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
   Marker _buildDraggableEndpointPin({
     required LatLng point,
     required int kind,
@@ -16971,12 +18263,26 @@ class MapScreenState extends State<MapScreen>
         ? const Color(0xFF0C4A6E)
         : const Color(0xFF881337);
 
+    const double markerW = 48.0;
+    const double markerH = 54.0;
+    const double tipTop = 46.0;
+    const Alignment tipTransformAlignment = Alignment(
+      0.0,
+      (tipTop * 2.0 / markerH) - 1.0,
+    );
+
     return Marker(
       key: ValueKey('endpoint_pin_$kind'),
       point: point,
-      width: 48,
-      height: 64,
-      alignment: Alignment.topCenter,
+      width: markerW,
+      height: markerH,
+      rotate: true,
+      alignment: Marker.computePixelAlignment(
+        width: markerW,
+        height: markerH,
+        left: markerW / 2,
+        top: tipTop,
+      ),
       child: Listener(
         onPointerCancel: (_) => _onEndpointPanCancel(),
         child: RawGestureDetector(
@@ -16997,13 +18303,10 @@ class MapScreenState extends State<MapScreen>
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOutCubic,
-            transform: Matrix4.translationValues(0, active ? -8 : 0, 0)
-              ..scaleByDouble(
-                active ? 1.14 : 1.0,
-                active ? 1.14 : 1.0,
-                1.0,
-                1.0,
-              ),
+            transformAlignment: tipTransformAlignment,
+            transform: active
+                ? Matrix4.diagonal3Values(1.08, 1.08, 1.0)
+                : Matrix4.identity(),
             child: Stack(
               clipBehavior: Clip.none,
               alignment: Alignment.topCenter,
@@ -17047,6 +18350,19 @@ class MapScreenState extends State<MapScreen>
                     isLifted: active,
                   ),
                 ),
+                if (active)
+                  Positioned(
+                    top: tipTop - 3,
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: gradient[1],
+                        border: Border.all(color: Colors.white, width: 1.2),
+                      ),
+                    ),
+                  ),
                 Positioned(
                   top: 7,
                   child: Container(
@@ -17125,4 +18441,129 @@ class VisionConePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _PulsingAlertFrame extends StatefulWidget {
+  final bool active;
+  final BorderRadius borderRadius;
+  final Color baseColor;
+  final Color glowColor;
+  final Color idleBorderColor;
+  final double idleBorderWidth;
+  final BoxShadow idleShadow;
+  final Widget child;
+
+  const _PulsingAlertFrame({
+    required this.active,
+    required this.borderRadius,
+    required this.baseColor,
+    required this.glowColor,
+    required this.idleBorderColor,
+    required this.idleBorderWidth,
+    required this.idleShadow,
+    required this.child,
+  });
+
+  @override
+  State<_PulsingAlertFrame> createState() => _PulsingAlertFrameState();
+}
+
+class _PulsingAlertFrameState extends State<_PulsingAlertFrame>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  );
+  late final Animation<double> _pulse = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.active) _controller.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulsingAlertFrame oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active != oldWidget.active) {
+      if (widget.active) {
+        _controller.repeat(reverse: true);
+      } else {
+        _controller.stop();
+        _controller.value = 0.0;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.active) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: widget.baseColor,
+          borderRadius: widget.borderRadius,
+          border: Border.all(
+            color: widget.idleBorderColor,
+            width: widget.idleBorderWidth,
+          ),
+          boxShadow: [widget.idleShadow],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: widget.child,
+      );
+    }
+
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, child) {
+        final double t = _pulse.value;
+        final bool isDark = widget.baseColor.computeLuminance() < 0.35;
+        return Container(
+          decoration: BoxDecoration(
+            color: widget.baseColor,
+            borderRadius: widget.borderRadius,
+            border: Border.all(
+              color: widget.glowColor.withValues(alpha: 0.65 + 0.35 * t),
+              width: 2.0 + 0.8 * t,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.14),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+              BoxShadow(
+                color: widget.glowColor.withValues(
+                  alpha: (isDark ? 0.55 : 0.48) + 0.35 * t,
+                ),
+                blurRadius: 10 + 10 * t,
+                spreadRadius: 1.5 + 2.5 * t,
+              ),
+              BoxShadow(
+                color: widget.glowColor.withValues(
+                  alpha: (isDark ? 0.35 : 0.28) + 0.30 * t,
+                ),
+                blurRadius: 24 + 18 * t,
+                spreadRadius: 3.0 + 4.5 * t,
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: child,
+        );
+      },
+      child: widget.child,
+    );
+  }
 }

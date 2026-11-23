@@ -20,6 +20,7 @@ import 'package:my_flutter_app/mobile_tour.dart';
 import 'package:my_flutter_app/road_report_cache.dart';
 import 'package:my_flutter_app/road_hazard_marker.dart';
 import 'package:my_flutter_app/route_pothole_advisor.dart';
+import 'package:my_flutter_app/settings_dialog.dart';
 import 'package:my_flutter_app/web_design.dart';
 import 'package:my_flutter_app/web_map_screen.dart' as web_map;
 import 'package:my_flutter_app/web_map_side_panel.dart';
@@ -1903,6 +1904,285 @@ void main() {
       await tester.tap(find.text('Skip'));
       await _pumpFrames(tester, count: 4);
       expect(tourController.isCompleted(MobileTourId.driving), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Mobile & Web Settings Pin on map opens crosshair pin picker and reopens marker editor',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1.0;
+      AppSettings.instance.toggleDevMockMode(false);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        AppSettings.instance.toggleDevMockMode(false);
+      });
+
+      var mobileCallbackFired = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => MobileSettingsSheet(
+                    onPlacePinOnMap: () => mobileCallbackFired = true,
+                  ),
+                ),
+                child: const Text('Open Settings'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester, count: 2);
+      await tester.tap(find.text('Open Settings'));
+      await _pumpFrames(tester, count: 4);
+      final beforeReq = AppSettings.instance.manualPinPickerRequestNotifier.value;
+      await tester.ensureVisible(find.text('Pin on map'));
+      await tester.tap(find.text('Pin on map'));
+      await _pumpFrames(tester, count: 4);
+      expect(mobileCallbackFired, isTrue);
+      expect(AppSettings.instance.devMockModeEnabled, isTrue);
+      expect(
+        AppSettings.instance.manualPinPickerRequestNotifier.value,
+        greaterThan(beforeReq),
+      );
+
+      for (final isWeb in [false, true]) {
+        tester.view.physicalSize = isWeb
+            ? const Size(1200, 900)
+            : const Size(390, 844);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: isWeb
+                  ? const web_map.MapScreen(detectedPotholes: [])
+                  : const mobile_map.MapScreen(detectedPotholes: []),
+            ),
+          ),
+        );
+        await _pumpFrames(tester, count: 6);
+        final controller = tester
+            .widget<FlutterMap>(find.byType(FlutterMap))
+            .mapController!;
+        AppSettings.instance.requestManualPinPicker();
+        await _pumpFrames(tester, count: 4);
+        expect(
+          find.text('Place hazard pin on map'),
+          findsOneWidget,
+          reason: 'Expected pin picker header on ${isWeb ? "web" : "mobile"}',
+        );
+        expect(find.text('Place pin here'), findsOneWidget);
+
+        const target = LatLng(14.83210, 120.96420);
+        controller.move(target, 16);
+        await _pumpFrames(tester, count: 3);
+        expect(find.text('14.83210, 120.96420'), findsOneWidget);
+
+        await tester.tap(find.text('OK'));
+        await _pumpFrames(tester, count: 6);
+        expect(find.text('Developer custom markers'), findsOneWidget);
+        expect(find.text('14.832100'), findsOneWidget);
+        expect(find.text('120.964200'), findsOneWidget);
+
+        await tester.tap(find.text('Cancel'));
+        await _pumpFrames(tester, count: 4);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pumpFrames(tester, count: 2);
+      }
+    },
+  );
+
+  testWidgets(
+    'Mobile and Web endpoint pins anchor Marker.point at exact teardrop tip (24, 46)',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final expectedAlignment = Marker.computePixelAlignment(
+        width: 48,
+        height: 54,
+        left: 24,
+        top: 46,
+      );
+
+      for (final isWeb in [false, true]) {
+        tester.view.physicalSize = isWeb
+            ? const Size(1200, 900)
+            : const Size(390, 844);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: isWeb
+                  ? const web_map.MapScreen(detectedPotholes: [])
+                  : const mobile_map.MapScreen(detectedPotholes: []),
+            ),
+          ),
+        );
+        await _pumpFrames(tester, count: 6);
+        if (isWeb) {
+          await tester.tapAt(tester.getCenter(find.byType(FlutterMap)));
+          await _pumpFrames(tester, count: 5);
+          await tester.tap(find.text('Directions'));
+          await _pumpFrames(tester, count: 8);
+        } else {
+          await tester.tap(find.byTooltip('Directions (Point A to B)'));
+          await _pumpFrames(tester, count: 5);
+          final caypomboChip = find.text('Brgy. Caypombo');
+          await tester.ensureVisible(caypomboChip);
+          await _pumpFrames(tester, count: 2);
+          await tester.tap(caypomboChip);
+          await _pumpFrames(tester, count: 10);
+        }
+
+        final destPin = tester
+            .widgetList<MarkerLayer>(find.byType(MarkerLayer))
+            .expand((layer) => layer.markers)
+            .firstWhere((m) => m.key == const ValueKey('endpoint_pin_2'));
+        expect(destPin.width, 48.0);
+        expect(destPin.height, 54.0);
+        expect(destPin.alignment, expectedAlignment);
+        expect(destPin.rotate, isTrue);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pumpFrames(tester, count: 2);
+      }
+    },
+  );
+
+  testWidgets(
+    'Mobile Driving Mode allows free camera panning and swaps km/h with Re-center',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: mobile_map.MapScreen(detectedPotholes: []),
+          ),
+        ),
+      );
+      await _pumpFrames(tester, count: 6);
+
+      // Start a route and enter Driving Mode
+      await tester.tap(find.byTooltip('Directions (Point A to B)'));
+      await _pumpFrames(tester, count: 5);
+      final caypomboChip = find.text('Brgy. Caypombo');
+      await tester.ensureVisible(caypomboChip);
+      await _pumpFrames(tester, count: 2);
+      await tester.tap(caypomboChip);
+      await _pumpFrames(tester, count: 10);
+
+      await tester.tap(find.text('Start driving'));
+      await _pumpFrames(tester, count: 6);
+
+      final flutterMap = tester.widget<FlutterMap>(find.byType(FlutterMap));
+      expect(flutterMap.options.interactionOptions.flags, InteractiveFlag.all);
+      expect(find.text('km/h'), findsOneWidget);
+      expect(find.byKey(const ValueKey('driving_recenter_button')), findsNothing);
+
+      // Drag the map to pan camera -> swaps km/h with Re-center
+      await tester.drag(find.byType(FlutterMap), const Offset(80, 100));
+      await _pumpFrames(tester, count: 4);
+      expect(find.byKey(const ValueKey('driving_recenter_button')), findsOneWidget);
+      expect(find.text('Re-center'), findsOneWidget);
+      expect(find.text('km/h'), findsNothing);
+
+      // Tap Re-center -> restores km/h
+      await tester.tap(find.byKey(const ValueKey('driving_recenter_button')));
+      await _pumpFrames(tester, count: 4);
+      expect(find.text('km/h'), findsOneWidget);
+      expect(find.byKey(const ValueKey('driving_recenter_button')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'MobileFloatingNavBar & Mobile MapScreen realign cleanly between portrait and landscape',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'roadsense_tour_v1_search_guide': true,
+        'roadsense_tour_v1_directions_guide': true,
+        'roadsense_tour_v1_driving_guide': true,
+      });
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetViewPadding();
+      });
+
+      int currentTab = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppDesign.buildTheme(isDark: false),
+          home: StatefulBuilder(
+            builder: (context, setState) => Scaffold(
+              extendBody: true,
+              body: const mobile_map.MapScreen(detectedPotholes: []),
+              bottomNavigationBar: MobileFloatingNavBar(
+                currentIndex: currentTab,
+                onTabSelected: (i) => setState(() => currentTab = i),
+                isDark: false,
+                disableAnimations: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester, count: 6);
+      expect(find.byType(FlutterMap), findsOneWidget);
+      expect(find.text('Map'), findsOneWidget);
+
+      // Start Driving Mode in Portrait
+      await tester.tap(find.byTooltip('Directions (Point A to B)'));
+      await _pumpFrames(tester, count: 5);
+      final caypomboChip = find.text('Brgy. Caypombo');
+      await tester.ensureVisible(caypomboChip);
+      await _pumpFrames(tester, count: 2);
+      await tester.tap(caypomboChip);
+      await _pumpFrames(tester, count: 10);
+
+      await tester.tap(find.text('Start driving'));
+      await _pumpFrames(tester, count: 6);
+      expect(find.text('km/h'), findsOneWidget);
+
+      // Rotate to Landscape with simulated side notch (844x390)
+      tester.view.physicalSize = const Size(844, 390);
+      tester.view.viewPadding = const FakeViewPadding(
+        left: 44,
+        right: 20,
+        top: 0,
+        bottom: 16,
+      );
+      await _pumpFrames(tester, count: 6);
+      expect(find.byType(FlutterMap), findsOneWidget);
+      expect(find.text('km/h'), findsOneWidget);
+
+      // Rotate back to Portrait
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.viewPadding = FakeViewPadding.zero;
+      await _pumpFrames(tester, count: 6);
+      expect(find.text('km/h'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

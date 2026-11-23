@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'dpwh_standards.dart';
+import 'road_hazard_marker.dart';
 import 'web_components.dart';
 import 'web_design.dart';
 import 'web_report_query.dart';
@@ -80,6 +81,7 @@ class WebMapWorkspacePanel extends StatelessWidget {
   final ValueChanged<WebReportItem>? onDeleteReport;
   final Future<void> Function(WebReportItem, String status)? onAdminModerate;
   final VoidCallback? onCollapsePanel;
+  final VoidCallback? onEnableGps;
 
   const WebMapWorkspacePanel({
     super.key,
@@ -129,6 +131,7 @@ class WebMapWorkspacePanel extends StatelessWidget {
     this.onDeleteReport,
     this.onAdminModerate,
     this.onCollapsePanel,
+    this.onEnableGps,
   });
 
   @override
@@ -424,11 +427,9 @@ class WebMapWorkspacePanel extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(
-                  WebDesign.defectIcon(
-                    DpwhStandards.classifyByName(r.primaryDefect),
-                  ),
-                  size: 18,
+                RoadDefectGlyph(
+                  classId: DpwhStandards.classifyByName(r.primaryDefect).classId,
+                  size: 20,
                   color: DpwhStandards.getClassColor(r.primaryDefect),
                 ),
                 const SizedBox(width: WebDesign.space2 + 2),
@@ -899,20 +900,47 @@ class WebMapWorkspacePanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(WebDesign.radiusSm),
           border: Border.all(color: info.outline),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.my_location_rounded, size: 16, color: info.fg),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                hasUserLocation
-                    ? 'Sorted by distance from your GPS position.'
-                    : 'Your GPS location is off. Enable location or select a place so Nearest can sort from your position.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: WebDesign.textPrimary(isDark),
+            Row(
+              children: [
+                Icon(Icons.my_location_rounded, size: 16, color: info.fg),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasUserLocation
+                        ? 'Sorted by distance from your GPS position.'
+                        : 'Your GPS location is off. Enable location or select a place so Nearest can sort from your position.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: WebDesign.textPrimary(isDark),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
+            if (!hasUserLocation && onEnableGps != null) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                key: const ValueKey('web_enable_gps_button'),
+                onPressed: onEnableGps,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                icon: const Icon(Icons.my_location_rounded, size: 15),
+                label: const Text('Enable GPS'),
+              ),
+            ],
           ],
         ),
       ),
@@ -1064,9 +1092,9 @@ class WebMapFilterControls extends StatelessWidget {
             children: [
               for (final cls in DpwhStandards.allClasses)
                 FilterChip(
-                  avatar: Icon(
-                    WebDesign.defectIcon(cls),
-                    size: 14,
+                  avatar: RoadDefectGlyph(
+                    classId: cls.classId,
+                    size: 16,
                     color: cls.color,
                   ),
                   label: Text(cls.name),
@@ -1451,10 +1479,8 @@ class WebReportDetailPanel extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Eyebrow('DPWH MAINTENANCE STANDARD'),
+                        const Eyebrow('RECOMMENDED ACTION'),
                         const SizedBox(height: WebDesign.space2),
-                        _kvRow(context, 'Target SLA', report.responseTime),
-                        const SizedBox(height: 6),
                         Text(
                           report.correctiveMeasure,
                           style: theme.textTheme.bodySmall?.copyWith(
@@ -1606,7 +1632,11 @@ class _DetectionBreakdownRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(WebDesign.defectIcon(cls), size: 15, color: cls.color),
+          RoadDefectGlyph(
+            classId: cls.classId,
+            size: 17,
+            color: cls.color,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

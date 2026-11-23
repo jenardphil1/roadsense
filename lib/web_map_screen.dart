@@ -69,22 +69,22 @@ class _ModernPinPainter extends CustomPainter {
     final h = size.height;
     final r = w / 2;
 
-    // 1. Realistic ground shadow at the base
-    final shadowWidth = isLifted ? w * 0.58 : w * 0.46;
-    final shadowHeight = isLifted ? 5.0 : 6.0;
-    final shadowAlpha = isLifted ? 0.20 : 0.38;
+    // 1. Realistic ground shadow directly under the pin tip
+    final pinH = h - 6;
+    final shadowWidth = isLifted ? w * 0.54 : w * 0.44;
+    final shadowHeight = isLifted ? 4.5 : 5.0;
+    final shadowAlpha = isLifted ? 0.22 : 0.38;
     final shadowRect = Rect.fromCenter(
-      center: Offset(w / 2, h - 2),
+      center: Offset(w / 2, pinH + 1),
       width: shadowWidth,
       height: shadowHeight,
     );
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: shadowAlpha)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 4.0 : 2.5);
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, isLifted ? 3.5 : 2.5);
     canvas.drawOval(shadowRect, shadowPaint);
 
     // 2. Teardrop pin path
-    final pinH = h - 6;
     final path = Path();
     path.moveTo(w / 2, pinH);
     path.cubicTo(w * 0.08, pinH * 0.58, 0, r * 1.25, 0, r);
@@ -210,7 +210,7 @@ class PotholeMarker {
     this.reporterUid,
     this.primaryDpwhCode = 'CODE 01',
     this.primaryDefect = 'Pothole',
-    this.responseTime = '3 Days',
+    this.responseTime = 'High Priority',
     this.correctiveMeasure =
         'Bituminous premix (hot) or penetration patching; add base material if needed.',
     this.barangay = '',
@@ -1072,7 +1072,6 @@ class MapScreenState extends State<MapScreen>
   late final FlutterTts _tts = FlutterTts();
   String _nearestPotholeInfo = '';
   String? _nextPotholeEta;
-  bool _inProximityWarning = false;
   final Set<String> _alertedAt50m = {};
   bool _isInitialStartup = true;
   bool _showWarningBanner = false;
@@ -1154,8 +1153,13 @@ class MapScreenState extends State<MapScreen>
   int _p2pHazardCount = 0;
 
   bool _isPlacingMarker = false;
-  bool _isSavingPlacedMarker = false;
   LatLng? _pendingMarkerLocation;
+  String _pendingMarkerDefect = DpwhStandards.pothole.name;
+
+  void _setPendingMarkerDefect(String defect) {
+    setState(() => _pendingMarkerDefect = defect);
+  }
+  Completer<LatLng?>? _pinPickerCompleter;
 
   static const double _snapRadiusMeters = 35.0;
   static const double _proximityCircleRadiusMeters = 22.0;
@@ -1316,6 +1320,9 @@ class MapScreenState extends State<MapScreen>
     }
     AppSettings.instance.manualPotholePlacementNotifier.addListener(
       _onManualPotholePlacementSettingChanged,
+    );
+    AppSettings.instance.manualPinPickerRequestNotifier.addListener(
+      _onManualPinPickerRequested,
     );
     AppSettings.instance.devEditLocationNotifier.addListener(
       _onDevEditLocationSettingChanged,
@@ -1949,6 +1956,11 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
+  void _onManualPinPickerRequested() {
+    if (!mounted) return;
+    _beginMapPinPicker();
+  }
+
   void _onDevEditLocationSettingChanged() {
     if (!mounted) return;
     final bool devLoc = AppSettings.instance.devEditLocationNotifier.value;
@@ -1993,9 +2005,16 @@ class MapScreenState extends State<MapScreen>
     AppSettings.instance.manualPotholePlacementNotifier.removeListener(
       _onManualPotholePlacementSettingChanged,
     );
+    AppSettings.instance.manualPinPickerRequestNotifier.removeListener(
+      _onManualPinPickerRequested,
+    );
     AppSettings.instance.devEditLocationNotifier.removeListener(
       _onDevEditLocationSettingChanged,
     );
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+      _pinPickerCompleter = null;
+    }
     _simulationTimer?.cancel();
     _searchFocusNode.removeListener(_onFocusChanged);
     _originFocusNode.removeListener(_onFocusChanged);
@@ -2652,7 +2671,6 @@ class MapScreenState extends State<MapScreen>
     }
 
     setState(() {
-      _inProximityWarning = inProximity;
       _nearestPotholeInfo = nearestInfo;
       _nextPotholeEta = nextPotholeEta;
       _upcomingHazard = upcoming;
@@ -2703,7 +2721,7 @@ class MapScreenState extends State<MapScreen>
       needsRebuild = true;
     }
 
-    if (_isPlacingMarker && hasGesture) {
+    if (_isPlacingMarker) {
       _pendingMarkerLocation = camera.center;
       needsRebuild = true;
     }
@@ -2737,23 +2755,65 @@ class MapScreenState extends State<MapScreen>
         context,
         location: marker?.location ?? _mapController.camera.center,
         markerId: marker?.docId,
+        onPickLocationOnMap: _pickManualMarkerLocationOnMap,
       );
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Could not open local developer markers.'),
           ),
         );
+      }
     } finally {
-      if (mounted) _cancelMarkerPlacement();
+      if (mounted && _pinPickerCompleter == null) {
+        _cancelMarkerPlacement();
+      }
     }
   }
 
+  void _beginMapPinPicker({LatLng? initialLocation}) {
+    if (!mounted) return;
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+      _pinPickerCompleter = null;
+    }
+    final seed = initialLocation ?? _mapController.camera.center;
+    setState(() {
+      _isPlacingMarker = true;
+      _pendingMarkerLocation = seed;
+      _isEditingDevLocation = false;
+      _pendingDevLocation = null;
+    });
+    if (initialLocation != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_isPlacingMarker) return;
+        try {
+          _mapController.move(initialLocation, _mapController.camera.zoom);
+        } catch (_) {}
+      });
+    }
+  }
+
+  Future<LatLng?> _pickManualMarkerLocationOnMap(LatLng initialLocation) {
+    if (!mounted) return Future.value(null);
+    if (_pinPickerCompleter != null && !_pinPickerCompleter!.isCompleted) {
+      _pinPickerCompleter!.complete(null);
+    }
+    final completer = Completer<LatLng?>();
+    _pinPickerCompleter = completer;
+    _beginMapPinPicker(initialLocation: initialLocation);
+    return completer.future;
+  }
+
   void _cancelMarkerPlacement() {
+    final pendingCompleter = _pinPickerCompleter;
+    _pinPickerCompleter = null;
+    if (pendingCompleter != null && !pendingCompleter.isCompleted) {
+      pendingCompleter.complete(null);
+    }
     setState(() {
       _isPlacingMarker = false;
-      _isSavingPlacedMarker = false;
       _pendingMarkerLocation = null;
     });
     if (AppSettings.instance.manualPotholePlacementNotifier.value) {
@@ -2769,7 +2829,6 @@ class MapScreenState extends State<MapScreen>
       _pendingDevLocation = startPoint;
       _followMode = FollowMode.none;
       _isPlacingMarker = false;
-      _isSavingPlacedMarker = false;
       _pendingMarkerLocation = null;
     });
   }
@@ -2873,10 +2932,33 @@ class MapScreenState extends State<MapScreen>
   }
 
   Future<void> _confirmMarkerPlacement() async {
-    final location = _pendingMarkerLocation;
-    if (location == null) return;
-    await showDeveloperMarkerEditor(context, location: location);
-    if (mounted) _cancelMarkerPlacement();
+    LatLng location;
+    try {
+      location = _mapController.camera.center;
+    } catch (_) {
+      location = _pendingMarkerLocation ?? _bulacanCenter;
+    }
+    final pendingCompleter = _pinPickerCompleter;
+    _pinPickerCompleter = null;
+    setState(() {
+      _isPlacingMarker = false;
+      _pendingMarkerLocation = null;
+    });
+    if (AppSettings.instance.manualPotholePlacementNotifier.value) {
+      AppSettings.instance.manualPotholePlacementNotifier.value = false;
+    }
+    if (pendingCompleter != null) {
+      if (!pendingCompleter.isCompleted) {
+        pendingCompleter.complete(location);
+      }
+      return;
+    }
+    await showDeveloperMarkerEditor(
+      context,
+      location: location,
+      initialDefect: _pendingMarkerDefect,
+      onPickLocationOnMap: _pickManualMarkerLocationOnMap,
+    );
   }
 
   void _onSearchChanged(String query) {
@@ -3592,7 +3674,6 @@ class MapScreenState extends State<MapScreen>
     _routeUsingCachedGeometry = false;
     _nearestPotholeInfo = '';
     _nextPotholeEta = null;
-    _inProximityWarning = false;
     _showWarningBanner = false;
     AppSettings.instance.setRouteActive(false);
   }
@@ -4779,11 +4860,11 @@ class MapScreenState extends State<MapScreen>
     'GEOAPIFY_API_KEY',
   );
 
-  // Bulacan Province Center & Coordinates
+  // Brgy. Poblacion, Santa Maria, Bulacan Center & Coordinates
   static const LatLng _bulacanCenter = LatLng(
-    14.8192,
-    120.9634,
-  ); // Santa Maria / Malolos Bulacan
+    14.8194,
+    120.9565,
+  ); // Brgy. Poblacion, Santa Maria, Bulacan
 
   Future<List<Map<String, dynamic>>> _fetchGeoapifyCandidates(
     String normalizedQuery,
@@ -6031,6 +6112,21 @@ class MapScreenState extends State<MapScreen>
     );
   }
 
+  Future<void> _activateWebGps() async {
+    await _determinePosition(requestPermission: true);
+    if (!mounted) return;
+    if (_isPermissionDenied || _isLocationDisabled || _currentPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Allow Location access in your browser address bar, then tap Enable GPS again.',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
   Future<void> _determinePosition({bool requestPermission = true}) async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -6586,7 +6682,7 @@ class MapScreenState extends State<MapScreen>
                         ),
                         const SizedBox(height: 18),
                         Text(
-                          'DPWH ROAD MAINTENANCE SPECIFICATIONS',
+                          'ROAD DEFECT DETAILS',
                           style: TextStyle(
                             color: isDark
                                 ? const Color(0xFF94A3B8)
@@ -6664,7 +6760,7 @@ class MapScreenState extends State<MapScreen>
                                       ),
                                     ),
                                     child: Text(
-                                      'SLA: ${pothole.responseTime}',
+                                      pothole.correctiveMeasure,
                                       style: const TextStyle(
                                         color: Color(0xFF2563EB),
                                         fontSize: 10.5,
@@ -7006,6 +7102,7 @@ class MapScreenState extends State<MapScreen>
         context,
         location: pothole.location,
         markerId: pothole.docId,
+        onPickLocationOnMap: _pickManualMarkerLocationOnMap,
       );
       return;
     }
@@ -7563,6 +7660,212 @@ class MapScreenState extends State<MapScreen>
     }
   }
 
+  double _bearingBetweenDeg(LatLng a, LatLng b) {
+    final double lat1 = a.latitude * math.pi / 180.0;
+    final double lat2 = b.latitude * math.pi / 180.0;
+    final double dLon = (b.longitude - a.longitude) * math.pi / 180.0;
+    final double y = math.sin(dLon) * math.cos(lat2);
+    final double x =
+        math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    return (math.atan2(y, x) * 180.0 / math.pi + 360.0) % 360.0;
+  }
+
+  LatLng _interpolateLatLng(LatLng a, LatLng b, double t) {
+    final double clamped = t.clamp(0.0, 1.0);
+    return LatLng(
+      a.latitude + (b.latitude - a.latitude) * clamped,
+      a.longitude + (b.longitude - a.longitude) * clamped,
+    );
+  }
+
+  List<Widget> _buildStepTurnArrowOverlay(List<LatLng> route, LatLng stepLoc) {
+    if (route.length < 2) return const [];
+    final List<double> cumDist = List<double>.filled(route.length, 0.0);
+    for (int i = 1; i < route.length; i++) {
+      cumDist[i] =
+          cumDist[i - 1] +
+          Geolocator.distanceBetween(
+            route[i - 1].latitude,
+            route[i - 1].longitude,
+            route[i].latitude,
+            route[i].longitude,
+          );
+    }
+    int bestIdx = 0;
+    double bestDist = double.infinity;
+    for (int i = 0; i < route.length; i++) {
+      final double d = Geolocator.distanceBetween(
+        route[i].latitude,
+        route[i].longitude,
+        stepLoc.latitude,
+        stepLoc.longitude,
+      );
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    final double targetBack = (cumDist[bestIdx] - 10.0).clamp(
+      0.0,
+      cumDist[bestIdx],
+    );
+    final double targetFwd = (cumDist[bestIdx] + 12.0).clamp(
+      cumDist[bestIdx],
+      cumDist.last,
+    );
+    final List<LatLng> arrowPts = [];
+    for (int i = bestIdx; i > 0; i--) {
+      if (cumDist[i - 1] <= targetBack) {
+        final double segLen = cumDist[i] - cumDist[i - 1];
+        final double t = segLen > 0.01
+            ? (targetBack - cumDist[i - 1]) / segLen
+            : 0.0;
+        arrowPts.add(_interpolateLatLng(route[i - 1], route[i], t));
+        for (int j = i; j <= bestIdx; j++) {
+          arrowPts.add(route[j]);
+        }
+        break;
+      }
+    }
+    if (arrowPts.isEmpty) {
+      arrowPts.addAll(route.sublist(0, bestIdx + 1));
+    }
+    for (int i = bestIdx; i < route.length - 1; i++) {
+      if (cumDist[i + 1] >= targetFwd) {
+        final double segLen = cumDist[i + 1] - cumDist[i];
+        final double t = segLen > 0.01
+            ? (targetFwd - cumDist[i]) / segLen
+            : 1.0;
+        arrowPts.add(_interpolateLatLng(route[i], route[i + 1], t));
+        break;
+      } else {
+        arrowPts.add(route[i + 1]);
+      }
+    }
+    if (arrowPts.length < 2) return const [];
+    final double bearingDeg = _bearingBetweenDeg(
+      arrowPts[arrowPts.length - 2],
+      arrowPts.last,
+    );
+    final double bearingRad = bearingDeg * math.pi / 180.0;
+    return [
+      PolylineLayer(
+        polylines: [
+          Polyline(
+            points: arrowPts,
+            color: Colors.white,
+            strokeWidth: 7.5,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
+          ),
+        ],
+      ),
+      MarkerLayer(
+        markers: [
+          Marker(
+            point: arrowPts.last,
+            width: 24,
+            height: 24,
+            rotate: false,
+            child: IgnorePointer(
+              child: Transform.rotate(
+                angle: bearingRad,
+                child: const Icon(
+                  Icons.navigation_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<LatLng> _computeDistinctRouteBadgePoints(List<List<LatLng>> routes) {
+    if (routes.isEmpty) return const [];
+
+    List<LatLng> sampleRoute(List<LatLng> pts) {
+      if (pts.length <= 2) return pts;
+      final int start = (pts.length * 0.12).floor().clamp(1, pts.length - 2);
+      final int end = (pts.length * 0.88).ceil().clamp(
+        start + 1,
+        pts.length - 1,
+      );
+      final int span = end - start;
+      final int step = math.max(1, (span / 40).ceil());
+      final List<LatLng> sampled = [];
+      for (int i = start; i < end; i += step) {
+        sampled.add(pts[i]);
+      }
+      if (sampled.isEmpty) {
+        sampled.add(pts[pts.length ~/ 2]);
+      }
+      return sampled;
+    }
+
+    double approxMeters(LatLng a, LatLng b) {
+      final double dLat = (a.latitude - b.latitude) * 111320.0;
+      final double cosLat = math.cos(a.latitude * math.pi / 180.0);
+      final double dLon = (a.longitude - b.longitude) * 111320.0 * cosLat;
+      return math.sqrt(dLat * dLat + dLon * dLon);
+    }
+
+    final List<List<LatLng>> samples = routes.map(sampleRoute).toList();
+    final List<LatLng> placed = [];
+    const List<double> fallbackFractions = [0.35, 0.65, 0.50];
+
+    for (int rIdx = 0; rIdx < routes.length; rIdx++) {
+      final List<LatLng> pts = routes[rIdx];
+      if (pts.length <= 2) {
+        placed.add(pts.isNotEmpty ? pts.first : _bulacanCenter);
+        continue;
+      }
+
+      final List<LatLng> candidates = samples[rIdx];
+      LatLng bestPt = candidates[candidates.length ~/ 2];
+      double bestScore = -1.0;
+      double bestOtherDist = 0.0;
+
+      for (final p in candidates) {
+        double minOtherDist = double.infinity;
+        for (int oIdx = 0; oIdx < samples.length; oIdx++) {
+          if (oIdx == rIdx) continue;
+          for (final q in samples[oIdx]) {
+            final double d = approxMeters(p, q);
+            if (d < minOtherDist) minOtherDist = d;
+          }
+        }
+        if (minOtherDist == double.infinity) minOtherDist = 0.0;
+
+        double minPlacedDist = double.infinity;
+        for (final prev in placed) {
+          final double d = approxMeters(p, prev);
+          if (d < minPlacedDist) minPlacedDist = d;
+        }
+        final double placedBonus = minPlacedDist == double.infinity
+            ? 0.0
+            : 0.6 * math.min(minPlacedDist, 1500.0);
+        final double score = minOtherDist + placedBonus;
+        if (score > bestScore) {
+          bestScore = score;
+          bestPt = p;
+          bestOtherDist = minOtherDist;
+        }
+      }
+
+      if (bestOtherDist < 30.0) {
+        final double frac =
+            fallbackFractions[rIdx % fallbackFractions.length];
+        bestPt = pts[(pts.length * frac).round().clamp(1, pts.length - 2)];
+      }
+      placed.add(bestPt);
+    }
+    return placed;
+  }
+
   double _getDynamicMarkerSize() {
     try {
       return RoadHazardMarker.sizeForZoom(_mapController.camera.zoom);
@@ -7575,11 +7878,13 @@ class MapScreenState extends State<MapScreen>
     String status = 'approved',
     String severity = 'medium',
     String primaryDefect = 'Pothole',
+    List<String> secondaryDefects = const [],
     int count = 1,
     double size = 38,
     bool isSelected = false,
   }) => RoadHazardMarker(
     primaryDefect: primaryDefect,
+    secondaryDefects: secondaryDefects,
     status: status,
     count: count,
     size: size,
@@ -7771,10 +8076,13 @@ class MapScreenState extends State<MapScreen>
     required bool isDark,
   }) => RoadHazardMarker(
     primaryDefect: pothole.primaryDefect,
+    secondaryDefects: DpwhStandards.extractDetectionClassNames(
+      pothole.detections,
+    ),
     status: pothole.status,
     size: 32,
     isSelected: isSelected,
-    compact: true,
+    compact: false,
   );
 
   int _countNearbyPlaceHazards(LatLng? target) {
@@ -7867,6 +8175,7 @@ class MapScreenState extends State<MapScreen>
       currentUid: widget.currentUid,
       isAdminUser: widget.isAdminUser,
       hasUserLocation: _currentPosition != null,
+      onEnableGps: () => unawaited(_activateWebGps()),
       isCloudLoading: widget.isCloudLoading,
       cloudError: widget.cloudError,
       onRetryCloud: widget.onRetryCloud ?? () {},
@@ -8054,16 +8363,18 @@ class MapScreenState extends State<MapScreen>
                   final entry = unifiedSuggestions[i];
                   if (entry.isReport && entry.report != null) {
                     final r = entry.report!;
+                    final cls =
+                        DpwhStandards.classForReport({
+                          'primaryDefect': r.primaryDefect,
+                          'primaryDpwhCode': r.primaryDpwhCode,
+                        }) ??
+                        DpwhStandards.pothole;
                     return ListTile(
                       dense: true,
-                      leading: Icon(
-                        WebDesign.defectIcon(
-                          DpwhStandards.classForReport({
-                                'primaryDefect': r.primaryDefect,
-                                'primaryDpwhCode': r.primaryDpwhCode,
-                              }) ??
-                              DpwhStandards.pothole,
-                        ),
+                      leading: RoadDefectGlyph(
+                        classId: cls.classId,
+                        size: 22,
+                        color: cls.color,
                       ),
                       title: Text(
                         '${r.primaryDefect} · #${r.shortId}',
@@ -8394,6 +8705,9 @@ class MapScreenState extends State<MapScreen>
           builder: (context, showPotholes, _) {
             final bool isDark = AppSettings.instance.isDarkMode;
             final double viewportWidth = MediaQuery.sizeOf(context).width;
+            final double viewportHeight = MediaQuery.sizeOf(context).height;
+            final bool isPhoneLandscape =
+                viewportWidth > viewportHeight && viewportHeight < 560;
             final bool isCompactViewport = viewportWidth < 420;
             final bool isCompactWorkspace = kIsWeb && viewportWidth < 900;
             final double sidePanelWidth = viewportWidth < 1180
@@ -8525,6 +8839,10 @@ class MapScreenState extends State<MapScreen>
                         onTap: (_, point) {
                           if (_isPlacingMarker) {
                             setState(() => _pendingMarkerLocation = point);
+                            _animatedMapMove(
+                              point,
+                              _mapController.camera.zoom,
+                            );
                           } else if (_isEditingDevLocation) {
                             setState(() => _pendingDevLocation = point);
                           } else if (_isRoutePlanningMode) {
@@ -8780,25 +9098,29 @@ class MapScreenState extends State<MapScreen>
                           PolylineLayer(
                             polylines: [
                               // 1. Draw unselected alternative routes as faint slate/grey lines
-                              ..._alternativeRoutes
-                                  .asMap()
-                                  .entries
-                                  .where((e) => e.key != _selectedRouteIndex)
-                                  .map((e) {
-                                    return Polyline(
-                                      points: e.value,
-                                      color: isDark
-                                          ? const Color(
-                                              0xFF475569,
-                                            ).withValues(alpha: 0.8)
-                                          : const Color(
-                                              0xFF94A3B8,
-                                            ).withValues(alpha: 0.85),
-                                      strokeWidth: 5.5,
-                                      strokeCap: StrokeCap.round,
-                                      strokeJoin: StrokeJoin.round,
-                                    );
-                                  }),
+                              if (!_isDraggingEndpoint)
+                                ..._alternativeRoutes
+                                    .asMap()
+                                    .entries
+                                    .where((e) => e.key != _selectedRouteIndex)
+                                    .map((e) {
+                                      return Polyline(
+                                        points: e.value,
+                                        color: isDark
+                                            ? const Color(
+                                                0xFF475569,
+                                              ).withValues(alpha: 0.8)
+                                            : const Color(
+                                                0xFF94A3B8,
+                                              ).withValues(alpha: 0.85),
+                                        strokeWidth: 5.5,
+                                        strokeCap: StrokeCap.round,
+                                        strokeJoin: StrokeJoin.round,
+                                      );
+                                    }),
+                              ..._buildEndpointConnectorPolylines(
+                                activeRoutePolyline,
+                              ),
                               // 2. Draw selected main route with Google Blue glow & core
                               Polyline(
                                 points: activeRoutePolyline,
@@ -8821,6 +9143,7 @@ class MapScreenState extends State<MapScreen>
                         else if (_routePoints.isNotEmpty)
                           PolylineLayer(
                             polylines: [
+                              ..._buildEndpointConnectorPolylines(_routePoints),
                               Polyline(
                                 points: _routePoints,
                                 color: AppDesign.accent(
@@ -8838,6 +9161,13 @@ class MapScreenState extends State<MapScreen>
                                 strokeJoin: StrokeJoin.round,
                               ),
                             ],
+                          ),
+                        if (_selectedStepIndex != null &&
+                            _selectedStepIndex! < _routeSteps.length &&
+                            activeRoutePolyline.length >= 2)
+                          ..._buildStepTurnArrowOverlay(
+                            activeRoutePolyline,
+                            _routeSteps[_selectedStepIndex!].location,
                           ),
                         if (_showHeatmap)
                           CircleLayer(
@@ -9015,6 +9345,10 @@ class MapScreenState extends State<MapScreen>
                                         status: pothole.status,
                                         severity: pothole.overallSeverity,
                                         primaryDefect: pothole.primaryDefect,
+                                        secondaryDefects: DpwhStandards
+                                            .extractDetectionClassNames(
+                                              pothole.detections,
+                                            ),
                                         count: pothole.potholeCount,
                                         size: dynamicSize,
                                         isSelected: isSelected,
@@ -9224,20 +9558,27 @@ class MapScreenState extends State<MapScreen>
 
                             // Google Maps Style Floating Route Duration & Selection Badges
                             if (_alternativeRoutes.length > 1) ...[
-                              for (
-                                int rIdx = 0;
-                                rIdx < _alternativeRoutes.length;
-                                rIdx++
-                              )
+                              for (final int rIdx in [
+                                for (
+                                  int i = 0;
+                                  i < _alternativeRoutes.length;
+                                  i++
+                                )
+                                  if (i != _selectedRouteIndex) i,
+                                if (_selectedRouteIndex >= 0 &&
+                                    _selectedRouteIndex <
+                                        _alternativeRoutes.length)
+                                  _selectedRouteIndex,
+                              ])
                                 if (_alternativeRoutes[rIdx].length > 2)
                                   Marker(
                                     key: ValueKey('route_eta_badge_$rIdx'),
-                                    point:
-                                        _alternativeRoutes[rIdx][_alternativeRoutes[rIdx]
-                                                .length ~/
-                                            2],
+                                    point: _computeDistinctRouteBadgePoints(
+                                      _alternativeRoutes,
+                                    )[rIdx],
                                     width: 158,
                                     height: 38,
+                                    rotate: true,
                                     child: Builder(
                                       builder: (context) {
                                         final int rHazards =
@@ -9423,25 +9764,6 @@ class MapScreenState extends State<MapScreen>
                                   ),
                             ],
 
-                            if (_isPlacingMarker &&
-                                _pendingMarkerLocation != null)
-                              Marker(
-                                key: const ValueKey('pending_marker_placement'),
-                                point: _pendingMarkerLocation!,
-                                width: 42,
-                                height: 42,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(0xFF0B6E4F),
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: _buildUnifiedPotholeIcon(),
-                                ),
-                              ),
-
                             if (_isEditingDevLocation &&
                                 _pendingDevLocation != null)
                               Marker(
@@ -9526,15 +9848,27 @@ class MapScreenState extends State<MapScreen>
                   ),
                 if (kIsWeb && widget.isMapActive && isCompactWorkspace)
                   Positioned(
-                    top: 12,
+                    top: isPhoneLandscape ? 8 : 12,
                     left: 12,
-                    right: 12,
-                    child: _buildCompactTopBar(
-                      isDark: isDark,
-                      queryResult: queryResult,
-                      unifiedSuggestions: unifiedSuggestions,
-                      routePlannerContent: routePlannerWidget,
-                    ),
+                    right: isPhoneLandscape ? null : 12,
+                    child: isPhoneLandscape
+                        ? ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: math.min(360.0, viewportWidth * 0.48),
+                            ),
+                            child: _buildCompactTopBar(
+                              isDark: isDark,
+                              queryResult: queryResult,
+                              unifiedSuggestions: unifiedSuggestions,
+                              routePlannerContent: routePlannerWidget,
+                            ),
+                          )
+                        : _buildCompactTopBar(
+                            isDark: isDark,
+                            queryResult: queryResult,
+                            unifiedSuggestions: unifiedSuggestions,
+                            routePlannerContent: routePlannerWidget,
+                          ),
                   ),
 
                 // Explicit user-driven spatial bounds refresh ("Search this area")
@@ -9588,11 +9922,16 @@ class MapScreenState extends State<MapScreen>
                             _alternativeRoutes.isNotEmpty)))
                   Positioned(
                     top:
-                        (_reportFilter.onlyInMapBounds && _hasUnsearchedMapMove)
-                        ? (isCompactWorkspace ? 122 : 66)
-                        : (isCompactWorkspace ? 72 : 16),
+                        (isPhoneLandscape && isCompactWorkspace)
+                        ? 8
+                        : ((_reportFilter.onlyInMapBounds &&
+                                  _hasUnsearchedMapMove)
+                              ? (isCompactWorkspace ? 122 : 66)
+                              : (isCompactWorkspace ? 72 : 16)),
                     left: isCompactWorkspace
-                        ? 12
+                        ? (isPhoneLandscape
+                              ? (12 + math.min(360.0, viewportWidth * 0.48) + 10)
+                              : 12)
                         : (_isSidePanelCollapsed ? 228 : 16),
                     right: isCompactWorkspace
                         ? 12
@@ -9649,100 +9988,10 @@ class MapScreenState extends State<MapScreen>
                       ),
                     ),
                   ),
-                if (_isPlacingMarker && _pendingMarkerLocation != null)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: _isSearchVisible
-                        ? (_showWarningBanner ? 186 : 130)
-                        : (_showWarningBanner ? 76 : 20),
-                    child: SafeArea(
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                        decoration: BoxDecoration(
-                          color: _inProximityWarning
-                              ? const Color(0xF2B72A2A)
-                              : const Color(0xF20F2C25),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: _inProximityWarning
-                                ? const Color(0x80FFFFFF)
-                                : const Color(0x803EC9A7),
-                            width: 1,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black45,
-                              blurRadius: 12,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'Move map or tap to place marker',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Lat ${_pendingMarkerLocation!.latitude.toStringAsFixed(6)} • Lng ${_pendingMarkerLocation!.longitude.toStringAsFixed(6)}',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.82),
-                                fontSize: 12,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton(
-                                    onPressed: _isSavingPlacedMarker
-                                        ? null
-                                        : _cancelMarkerPlacement,
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      side: const BorderSide(
-                                        color: Color(0x80FFFFFF),
-                                      ),
-                                    ),
-                                    child: const Text('Cancel'),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed: _isSavingPlacedMarker
-                                        ? null
-                                        : _confirmMarkerPlacement,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2563EB),
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    child: _isSavingPlacedMarker
-                                        ? const SizedBox(
-                                            height: 16,
-                                            width: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                        : const Text('OK'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                if (_isPlacingMarker)
+                  ..._buildManualPinPickerOverlays(
+                    isDark: isDark,
+                    isCompactWorkspace: isCompactWorkspace,
                   ),
 
                 if (_isEditingDevLocation && _pendingDevLocation != null)
@@ -10326,16 +10575,30 @@ class MapScreenState extends State<MapScreen>
         color: surface,
         elevation: 6,
         borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: border),
-          ),
-          constraints: BoxConstraints(
-            maxHeight: _isCompactRouteDrawerExpanded
-                ? (MediaQuery.sizeOf(context).height * 0.58).clamp(240.0, 520.0)
-                : 64.0,
-          ),
+        child: Builder(
+          builder: (context) {
+            final size = MediaQuery.sizeOf(context);
+            final bool isPhoneLandscape =
+                size.width > size.height && size.height < 560;
+            return Align(
+              alignment: Alignment.bottomLeft,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: border),
+                ),
+                constraints: BoxConstraints(
+                  maxWidth: isPhoneLandscape
+                      ? math.min(360.0, size.width * 0.48)
+                      : double.infinity,
+                  maxHeight: isPhoneLandscape
+                      ? (_isCompactRouteDrawerExpanded
+                            ? (size.height * 0.46).clamp(140.0, 220.0)
+                            : 52.0)
+                      : (_isCompactRouteDrawerExpanded
+                            ? (size.height * 0.58).clamp(240.0, 520.0)
+                            : 64.0),
+                ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -10395,6 +10658,9 @@ class MapScreenState extends State<MapScreen>
                 Expanded(child: routePlannerWidget),
             ],
           ),
+        ),
+            );
+          },
         ),
       ),
     );

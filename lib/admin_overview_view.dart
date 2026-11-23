@@ -6,6 +6,7 @@ import 'admin_forecast_metrics.dart';
 import 'admin_report_query.dart';
 import 'approval_priority.dart';
 import 'dpwh_standards.dart';
+import 'road_hazard_marker.dart';
 import 'web_components.dart';
 import 'web_design.dart';
 
@@ -122,7 +123,7 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
                           ),
                           TextSpan(
                             text:
-                                'Live Firestore scope: ${widget.activeRows.length} active reports '
+                                'Brgy. Poblacion, Santa Maria • ${widget.activeRows.length} active reports '
                                 '(${widget.trashedRows.length} in Trash excluded) • Refreshed $hh:$mm',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: WebDesign.textPrimary(isDark),
@@ -154,7 +155,7 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
 
             // Reconciled KPI Tiles (Pending + Approved + Rejected == Active)
             MetricGrid(
-              desktopColumns: 5,
+              desktopColumns: 4,
               children: [
                 _ClickableKpiTile(
                   label: 'Pending Review',
@@ -165,9 +166,9 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
                   onTap: widget.onNavigateQueuePending,
                 ),
                 _ClickableKpiTile(
-                  label: 'SLA Breached',
+                  label: 'Needs Urgent Review',
                   value: '$slaBreached',
-                  hint: 'Pending past DPWH response window',
+                  hint: 'Pending past priority review window',
                   icon: Icons.timer_off_outlined,
                   accent: WebDesign.danger(isDark),
                   onTap: widget.onNavigateQueueSlaBreached,
@@ -260,49 +261,6 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
 
             const SizedBox(height: WebDesign.space6),
 
-            // Municipal Coverage Summary CTA
-            WebCard(
-              child: Wrap(
-                spacing: WebDesign.space4,
-                runSpacing: WebDesign.space3,
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 720),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Eyebrow('BARANGAY COVERAGE & FORECASTING'),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${widget.barangayInsights.coveredSantaMariaCount} of 24 Santa Maria barangays have active reports '
-                          '(${widget.barangayInsights.forecastReadySantaMariaCount} meet >= 8 verified reports / >= 4 weeks for forecasting)',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Missing or sparse barangays indicate reporting coverage gaps—not verified safe pavement.',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: WebDesign.brand(isDark),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: widget.onNavigateBarangayInsights,
-                    icon: const Icon(Icons.location_city_rounded, size: 16),
-                    label: const Text('Open Barangay Insights'),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: WebDesign.space6),
-
             // Scoped, Clearly Labeled Static Offline Benchmark Reference (Never Mixed With Live KPIs)
             WebCard(
               padding: EdgeInsets.zero,
@@ -329,14 +287,14 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Model Reference — YOLOv8s Package 6 Offline Test Set (Static Benchmark)',
+                          'Model Reference — YOLOv8s v3 Offline Test Set (Static Benchmark)',
                           style: theme.textTheme.titleSmall,
                         ),
                       ),
                     ],
                   ),
                   subtitle: Text(
-                    'Academic offline evaluation on 7,454 test instances — separate from live field telemetry.',
+                    'Academic offline evaluation on 883 test instances (413 images) — separate from live field telemetry.',
                     style: theme.textTheme.bodySmall,
                   ),
                   children: [
@@ -641,8 +599,8 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SectionHeading(
-            eyebrow: 'DPWH CLASS TAXONOMY',
-            title: 'Distress Type & Statutory SLAs',
+            eyebrow: 'DEFECT CLASS TAXONOMY',
+            title: 'Road Defect Types',
             subtitle: 'Select any defect class to filter Review Queue records.',
           ),
           const SizedBox(height: WebDesign.space4),
@@ -657,9 +615,9 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
                   children: [
                     Row(
                       children: [
-                        Icon(
-                          WebDesign.defectIcon(cls),
-                          size: 16,
+                        RoadDefectGlyph(
+                          classId: cls.classId,
+                          size: 18,
                           color: cls.color,
                         ),
                         const SizedBox(width: 8),
@@ -691,6 +649,14 @@ class _AdminOverviewViewState extends State<AdminOverviewView> {
                       borderRadius: BorderRadius.circular(999),
                       backgroundColor: WebDesign.sunken(isDark),
                       color: cls.color,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Recommended solution: ${cls.correctiveMeasure}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 11.5,
+                        color: WebDesign.textSecondary(isDark),
+                      ),
                     ),
                   ],
                 ),

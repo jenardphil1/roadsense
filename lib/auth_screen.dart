@@ -710,108 +710,62 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   ),
                 ),
 
-                // Map Explore / Sign In Toggle Button (hidden while pending verification)
-                if (!_showVerificationView)
-                  Positioned(
-                    top: 16,
-                    right: 16,
-                    child: SafeArea(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(20),
-                          onTap: () {
-                            setState(
-                              () => _isMapExploreMode = !_isMapExploreMode,
-                            );
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: cardBg.withValues(alpha: 0.92),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: cardBorder),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Colors.black26,
-                                  blurRadius: 10,
-                                  offset: Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isMapExploreMode
-                                      ? Icons.login_rounded
-                                      : Icons.explore_rounded,
-                                  size: 16,
-                                  color: AppDesign.accent(isDark),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _isMapExploreMode
-                                      ? 'Show Sign In'
-                                      : 'Explore Map',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: isDark
-                                        ? Colors.white
-                                        : const Color(0xFF0F172A),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
                 // Auth Card (collapsible when exploring map, always shown for email verification)
                 if (!_isMapExploreMode || _showVerificationView)
                   SafeArea(
                     child: Center(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 28,
-                        ),
-                        child: Container(
-                          constraints: const BoxConstraints(maxWidth: 460),
-                          decoration: BoxDecoration(
-                            color: cardBg.withValues(
-                              alpha: isDark ? 0.90 : 0.94,
+                      child: Builder(
+                        builder: (context) {
+                          final size = MediaQuery.sizeOf(context);
+                          final bool isPhoneLandscape =
+                              size.width > size.height && size.height < 560;
+                          return SingleChildScrollView(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isPhoneLandscape ? 16 : 20,
+                              vertical: isPhoneLandscape ? 12 : 28,
                             ),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: cardBorder, width: 1.2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(
-                                  alpha: isDark ? 0.35 : 0.08,
+                            child: Container(
+                              constraints: BoxConstraints(
+                                maxWidth: isPhoneLandscape ? 520 : 460,
+                              ),
+                              decoration: BoxDecoration(
+                                color: cardBg.withValues(
+                                  alpha: isDark ? 0.90 : 0.94,
                                 ),
-                                blurRadius: 32,
-                                offset: const Offset(0, 10),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: cardBorder,
+                                  width: 1.2,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(
+                                      alpha: isDark ? 0.35 : 0.08,
+                                    ),
+                                    blurRadius: 32,
+                                    offset: const Offset(0, 10),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(24),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                              child: Padding(
-                                padding: const EdgeInsets.all(28),
-                                child: _buildAuthForm(isDark),
+                              clipBehavior: Clip.antiAlias,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: BackdropFilter(
+                                  filter: ImageFilter.blur(
+                                    sigmaX: 16,
+                                    sigmaY: 16,
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      isPhoneLandscape ? 16 : 28,
+                                    ),
+                                    child: _buildAuthForm(isDark),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
                   )
@@ -840,6 +794,63 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                               borderRadius: BorderRadius.circular(14),
                             ),
                             elevation: 6,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Map Explore Button (rendered above the card so it is never obscured)
+                if (!_isMapExploreMode && !_showVerificationView)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: SafeArea(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () {
+                            setState(() => _isMapExploreMode = true);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cardBg.withValues(alpha: 0.94),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: cardBorder),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 10,
+                                  offset: Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.explore_rounded,
+                                  size: 16,
+                                  color: AppDesign.accent(isDark),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Explore Map',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1459,7 +1470,14 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               ],
             ),
 
-            const SizedBox(height: 22),
+            SizedBox(
+              height:
+                  (MediaQuery.sizeOf(context).width >
+                          MediaQuery.sizeOf(context).height &&
+                      MediaQuery.sizeOf(context).height < 560)
+                  ? 10
+                  : 22,
+            ),
 
             // Header Title with smooth transition
             AnimatedSwitcher(
@@ -1478,56 +1496,75 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 _isSignUp ? 'Create Account' : 'Welcome Back',
                 key: ValueKey<bool>(_isSignUp),
                 style: TextStyle(
-                  fontSize: 26,
+                  fontSize:
+                      (MediaQuery.sizeOf(context).width >
+                              MediaQuery.sizeOf(context).height &&
+                          MediaQuery.sizeOf(context).height < 560)
+                      ? 21
+                      : 26,
                   fontWeight: FontWeight.w800,
                   color: titleColor,
                   height: 1.15,
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            Container(
-              width: 46,
-              height: 4,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: LinearGradient(
-                  colors: [AppDesign.brand, AppDesign.accent(isDark)],
+            if (!(MediaQuery.sizeOf(context).width >
+                    MediaQuery.sizeOf(context).height &&
+                MediaQuery.sizeOf(context).height < 560)) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: 46,
+                height: 4,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  gradient: LinearGradient(
+                    colors: [AppDesign.brand, AppDesign.accent(isDark)],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              transitionBuilder: (child, animation) =>
-                  FadeTransition(opacity: animation, child: child),
-              child: Text(
-                _isSignUp
-                    ? 'Create your surveyor account to get started.'
-                    : 'Sign in to access Live Road Inspection & GIS Analytics',
-                key: ValueKey<bool>(_isSignUp),
-                style: TextStyle(
-                  color: subtitleColor,
-                  fontSize: 13,
-                  height: 1.45,
+              const SizedBox(height: 12),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 260),
+                transitionBuilder: (child, animation) =>
+                    FadeTransition(opacity: animation, child: child),
+                child: Text(
+                  _isSignUp
+                      ? 'Create your surveyor account to get started.'
+                      : 'Sign in to access Live Road Inspection & GIS Analytics',
+                  key: ValueKey<bool>(_isSignUp),
+                  style: TextStyle(
+                    color: subtitleColor,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // Quick feature bullets
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _featureChip(Icons.camera_alt_rounded, 'AI Detection', isDark),
+                  _featureChip(Icons.route_rounded, 'Safe Routing', isDark),
+                  _featureChip(
+                    Icons.insights_rounded,
+                    'Live Analytics',
+                    isDark,
+                  ),
+                ],
+              ),
+            ],
+
+            SizedBox(
+              height:
+                  (MediaQuery.sizeOf(context).width >
+                          MediaQuery.sizeOf(context).height &&
+                      MediaQuery.sizeOf(context).height < 560)
+                  ? 12
+                  : 18,
             ),
-
-            const SizedBox(height: 16),
-
-            // Quick feature bullets
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                _featureChip(Icons.camera_alt_rounded, 'AI Detection', isDark),
-                _featureChip(Icons.route_rounded, 'Safe Routing', isDark),
-                _featureChip(Icons.insights_rounded, 'Live Analytics', isDark),
-              ],
-            ),
-
-            const SizedBox(height: 18),
 
             // Segmented Switcher — fluid hardware-accelerated animated slider
             Container(

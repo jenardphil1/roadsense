@@ -2928,6 +2928,292 @@ extension _WebMapScreenCards on MapScreenState {
     _applyMapState(() => _isDraggingEndpoint = false);
   }
 
+  List<Polyline> _buildEndpointConnectorPolylines(List<LatLng> route) {
+    if (_isDraggingEndpoint || route.length < 2) return const [];
+    final connectors = <Polyline>[];
+    final LatLng? startPin = _customOrigin ?? _currentPosition;
+    if (startPin != null) {
+      final d = Geolocator.distanceBetween(
+        startPin.latitude,
+        startPin.longitude,
+        route.first.latitude,
+        route.first.longitude,
+      );
+      if (d > 2.0 && d < 5000.0) {
+        connectors.add(
+          Polyline(
+            points: [startPin, route.first],
+            color: const Color(0xFF0284C7),
+            strokeWidth: 4.5,
+            pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+            strokeCap: StrokeCap.round,
+          ),
+        );
+      }
+    }
+    final LatLng? endPin = _destination;
+    if (endPin != null) {
+      final d = Geolocator.distanceBetween(
+        route.last.latitude,
+        route.last.longitude,
+        endPin.latitude,
+        endPin.longitude,
+      );
+      if (d > 2.0 && d < 5000.0) {
+        connectors.add(
+          Polyline(
+            points: [route.last, endPin],
+            color: const Color(0xFFE11D48),
+            strokeWidth: 4.5,
+            pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+            strokeCap: StrokeCap.round,
+          ),
+        );
+      }
+    }
+    return connectors;
+  }
+
+  List<Widget> _buildManualPinPickerOverlays({
+    required bool isDark,
+    required bool isCompactWorkspace,
+  }) {
+    final LatLng displayLoc =
+        _pendingMarkerLocation ?? MapScreenState._bulacanCenter;
+    return [
+      Positioned(
+        top: isCompactWorkspace ? 72 : 16,
+        left: 16,
+        right: 16,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Container(
+              height: 50,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: WebDesign.surface(isDark),
+                borderRadius: BorderRadius.circular(25),
+                border: Border.all(
+                  color: WebDesign.border(isDark),
+                  width: 1.2,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    color: WebDesign.textPrimary(isDark),
+                    tooltip: 'Cancel pin placement',
+                    onPressed: _cancelMarkerPlacement,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Place hazard pin on map',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: WebDesign.textPrimary(isDark),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      Center(
+        child: IgnorePointer(
+          child: SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF10B981),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black38, blurRadius: 4),
+                    ],
+                  ),
+                ),
+                Transform.translate(
+                  offset: const Offset(0, -34),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Place pin here',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.location_on,
+                        color: Color(0xFF10B981),
+                        size: 44,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        left: 16,
+        right: 16,
+        bottom: isCompactWorkspace ? 96 : 24,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: WebDesign.surface(isDark),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: WebDesign.border(isDark),
+                  width: 1.2,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black38,
+                    blurRadius: 16,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final cls in DpwhStandards.allClasses)
+                        ChoiceChip(
+                          avatar: RoadDefectGlyph(
+                            classId: cls.classId,
+                            size: 14,
+                            color: cls.color,
+                          ),
+                          label: Text(
+                            cls.name,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          selected: _pendingMarkerDefect == cls.name,
+                          onSelected: (_) => _setPendingMarkerDefect(cls.name),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.touch_app_rounded,
+                        color: Color(0xFF10B981),
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Move map or click to choose location',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: WebDesign.textPrimary(isDark),
+                              ),
+                            ),
+                            Text(
+                              '${displayLoc.latitude.toStringAsFixed(5)}, ${displayLoc.longitude.toStringAsFixed(5)}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: WebDesign.textSecondary(isDark),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _cancelMarkerPlacement,
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 4),
+                      ElevatedButton(
+                        onPressed: _confirmMarkerPlacement,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'OK',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   Marker _buildDraggableEndpointPin({
     required LatLng point,
     required int kind,
@@ -2945,12 +3231,26 @@ extension _WebMapScreenCards on MapScreenState {
         ? const Color(0xFF0C4A6E)
         : const Color(0xFF881337);
 
+    const double markerW = 48.0;
+    const double markerH = 54.0;
+    const double tipTop = 46.0;
+    const Alignment tipTransformAlignment = Alignment(
+      0.0,
+      (tipTop * 2.0 / markerH) - 1.0,
+    );
+
     return Marker(
       key: ValueKey('endpoint_pin_$kind'),
       point: point,
-      width: 48,
-      height: 64,
-      alignment: Alignment.topCenter,
+      width: markerW,
+      height: markerH,
+      rotate: true,
+      alignment: Marker.computePixelAlignment(
+        width: markerW,
+        height: markerH,
+        left: markerW / 2,
+        top: tipTop,
+      ),
       child: Listener(
         onPointerCancel: (_) => _onEndpointPanCancel(),
         child: MouseRegion(
@@ -2974,8 +3274,10 @@ extension _WebMapScreenCards on MapScreenState {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOutCubic,
-              transform: Matrix4.translationValues(0, active ? -8 : 0, 0)
-                ..scale(active ? 1.14 : 1.0, active ? 1.14 : 1.0, 1.0),
+              transformAlignment: tipTransformAlignment,
+              transform: active
+                  ? Matrix4.diagonal3Values(1.08, 1.08, 1.0)
+                  : Matrix4.identity(),
               child: Stack(
                 clipBehavior: Clip.none,
                 alignment: Alignment.topCenter,
@@ -3022,6 +3324,20 @@ extension _WebMapScreenCards on MapScreenState {
                       isLifted: active,
                     ),
                   ),
+
+                  if (active)
+                    Positioned(
+                      top: tipTop - 3,
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: gradient[1],
+                          border: Border.all(color: Colors.white, width: 1.2),
+                        ),
+                      ),
+                    ),
 
                   // Gleaming White Inner Emblem with Bold High-Contrast Letter
                   Positioned(
@@ -3347,7 +3663,7 @@ extension _WebMapScreenCards on MapScreenState {
                                     ),
                                   ),
                                   child: Text(
-                                    'SLA: ${pothole.responseTime}',
+                                    pothole.correctiveMeasure,
                                     style: const TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w800,
@@ -3495,7 +3811,7 @@ extension _WebMapScreenCards on MapScreenState {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'DPWH Action: ${pothole.correctiveMeasure}',
+                              'Recommended Action: ${pothole.correctiveMeasure}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

@@ -211,7 +211,7 @@ class AdminPriorityBadge extends StatelessWidget {
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              '${p.score.round()} • ${p.bandLabel}${p.isSlaBreached ? ' (SLA)' : ''}',
+              '${p.score.round()} • ${p.bandLabel}',
               maxLines: dense ? 1 : null,
               overflow: dense ? TextOverflow.ellipsis : TextOverflow.clip,
               style: WebDesign.tabular(
@@ -316,7 +316,14 @@ class AdminDefectPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: compact ? 12 : 13, color: color),
+          if (cls != null)
+            RoadDefectGlyph(
+              classId: cls.classId,
+              size: compact ? 13 : 15,
+              color: color,
+            )
+          else
+            Icon(icon, size: compact ? 12 : 13, color: color),
           const SizedBox(width: 5),
           Flexible(
             child: Text(
@@ -670,7 +677,7 @@ class _AdminEditReportDialogState extends State<_AdminEditReportDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'DPWH Defect Class',
+                'Road Defect Class',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 6),
@@ -683,7 +690,7 @@ class _AdminEditReportDialogState extends State<_AdminEditReportDialog> {
                     DropdownMenuItem(
                       value: std.name,
                       child: Text(
-                        '${std.code}: ${std.name} (${std.responseTime})',
+                        '${std.code}: ${std.name}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),

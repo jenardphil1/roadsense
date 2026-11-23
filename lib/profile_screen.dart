@@ -859,6 +859,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (mounted) setState(() {});
         },
         onReplayTour: widget.onReplayTour,
+        onPlacePinOnMap: widget.onSwitchToMap,
       ),
     );
   }
@@ -1038,21 +1039,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Navigator.of(context).maybePop();
             }
           },
-          child: Scaffold(
-            backgroundColor: bgColor,
-            appBar: PreferredSize(
-              preferredSize: const Size.fromHeight(68),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  border: Border(
-                    bottom: BorderSide(color: cardBorder, width: 1),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+          child: Builder(
+            builder: (context) {
+              final appBarSize = MediaQuery.sizeOf(context);
+              final bool isAppBarLandscape =
+                  appBarSize.width > appBarSize.height &&
+                  appBarSize.height < 560;
+              return Scaffold(
+                backgroundColor: bgColor,
+                appBar: PreferredSize(
+                  preferredSize: Size.fromHeight(isAppBarLandscape ? 52 : 64),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      border: Border(
+                        bottom: BorderSide(color: cardBorder, width: 1),
+                      ),
+                    ),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          isAppBarLandscape ? 4 : 8,
+                          12,
+                          isAppBarLandscape ? 4 : 8,
+                        ),
                     child: Row(
                       children: [
                         RoadSenseLogo(size: 28, isDarkOverride: isDark),
@@ -1105,18 +1117,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ? Builder(
                     builder: (context) {
                       final media = MediaQuery.of(context);
+                      final bool isLandscape =
+                          media.size.width > media.size.height &&
+                          media.size.height < 560;
                       final bool isMobile = media.size.width < 680;
-                      final double bottomScrollPad = media.padding.bottom + 112;
+                      final double bottomScrollPad =
+                          media.padding.bottom + (isLandscape ? 68 : 112);
                       return SingleChildScrollView(
                         padding: EdgeInsets.fromLTRB(
-                          isMobile ? 16 : 24,
-                          isMobile ? 16 : 24,
-                          isMobile ? 16 : 24,
+                          (isMobile ? 16 : 24) + media.padding.left,
+                          isLandscape ? 12 : (isMobile ? 16 : 24),
+                          (isMobile ? 16 : 24) + media.padding.right,
                           bottomScrollPad,
                         ),
                         child: Center(
                           child: Container(
-                            constraints: const BoxConstraints(maxWidth: 960),
+                            constraints: BoxConstraints(
+                              maxWidth: isLandscape ? 760 : 960,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1189,19 +1207,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       }
 
                       final media = MediaQuery.of(context);
+                      final bool isLandscape =
+                          media.size.width > media.size.height &&
+                          media.size.height < 560;
                       final bool isMobile = media.size.width < 680;
-                      final double bottomScrollPad = media.padding.bottom + 112;
+                      final double bottomScrollPad =
+                          media.padding.bottom + (isLandscape ? 68 : 112);
 
                       return SingleChildScrollView(
                         padding: EdgeInsets.fromLTRB(
-                          isMobile ? 16 : 24,
-                          isMobile ? 16 : 24,
-                          isMobile ? 16 : 24,
+                          (isMobile ? 16 : 24) + media.padding.left,
+                          isLandscape ? 12 : (isMobile ? 16 : 24),
+                          (isMobile ? 16 : 24) + media.padding.right,
                           bottomScrollPad,
                         ),
                         child: Center(
                           child: Container(
-                            constraints: const BoxConstraints(maxWidth: 960),
+                            constraints: BoxConstraints(
+                              maxWidth: isLandscape ? 760 : 960,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1242,6 +1266,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     },
                   ),
+          );
+            },
           ),
         );
       },
@@ -1597,8 +1623,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         // 3. Preferences, Tour & Account Actions
         MobileSectionCard(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              children: [
               ValueListenableBuilder<String>(
                 valueListenable:
                     AppSettings.instance.mobileNavVehicleModeNotifier,
@@ -1823,6 +1851,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => _confirmSignOut(context, isDark),
               ),
             ],
+            ),
           ),
         ),
       ],
@@ -3202,7 +3231,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'DPWH Response Target: ${cls.responseTime} • ${cls.correctiveMeasure}',
+                          'Recommended Action: ${cls.correctiveMeasure}',
                           style: TextStyle(
                             fontSize: 13,
                             height: 1.4,

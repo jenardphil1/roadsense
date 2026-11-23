@@ -294,7 +294,7 @@ class _AdminUsersSettingsViewState extends State<AdminUsersSettingsView> {
                           style: TextStyle(fontSize: 13.5),
                         ),
                         subtitle: const Text(
-                          'Only enable for internal municipal audits; omit for external DPWH/public briefs.',
+                          'Only enable for internal municipal audits; omit for external public briefs.',
                           style: TextStyle(fontSize: 12),
                         ),
                         onChanged: (v) =>
