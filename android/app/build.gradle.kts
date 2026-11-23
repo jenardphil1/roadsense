@@ -38,6 +38,7 @@ android {
     // memory-mapped by the TFLite runtime, causing silent zero-detection failures.
     aaptOptions {
         noCompress("tflite")
+        noCompress("pmtiles")
     }
 
     buildTypes {

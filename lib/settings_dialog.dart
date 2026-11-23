@@ -1687,6 +1687,55 @@ class _MobileSettingsSheetState extends State<MobileSettingsSheet> {
                               Divider(color: borderColor, height: 20),
                               Row(
                                 children: [
+                                  Icon(
+                                    Icons.view_in_ar_rounded,
+                                    color: accentColor,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '3D Vector Map (MapLibre)',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        Text(
+                                          'GPU-accelerated 3D buildings & dark vector tiles (off = Raster fallback)',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: subtextColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable:
+                                        settings.useVectorMapNotifier,
+                                    builder: (context, useVector, _) {
+                                      return Switch(
+                                        value: useVector,
+                                        activeTrackColor: accentColor,
+                                        onChanged: (val) {
+                                          settings.useVectorMapNotifier.value =
+                                              val;
+                                          widget.onSettingsChanged?.call();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(color: borderColor, height: 20),
+                              Row(
+                                children: [
                                   const Icon(
                                     Icons.warning_amber_rounded,
                                     color: Color(0xFFEF4444),

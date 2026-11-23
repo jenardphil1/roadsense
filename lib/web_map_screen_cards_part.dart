@@ -4084,10 +4084,56 @@ extension _WebMapScreenCards on MapScreenState {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_shouldUseWebVectorMap) ...[
+            ValueListenableBuilder<({double bearing, double pitch})>(
+              valueListenable: _mlCameraTelemetry,
+              builder: (context, cam, _) {
+                final b = ((cam.bearing % 360) + 360) % 360;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '${b.round()}°·${cam.pitch.round()}°',
+                    style: WebDesign.tabular(
+                      TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        color: iconSecondary,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            dockItem(
+              icon: Icon(
+                AppSettings.instance.map3dTiltEnabledNotifier.value
+                    ? Icons.view_in_ar_rounded
+                    : Icons.map_outlined,
+                color: AppSettings.instance.map3dTiltEnabledNotifier.value
+                    ? accentColor
+                    : iconSecondary,
+                size: 19,
+              ),
+              tooltip: AppSettings.instance.map3dTiltEnabledNotifier.value
+                  ? 'Switch to 2D Top-Down'
+                  : 'Switch to 3D Tilt (50°)',
+              isActive: AppSettings.instance.map3dTiltEnabledNotifier.value,
+              onTap: _toggleWeb3dPitch,
+            ),
+            dockDivider(),
+          ],
           dockItem(
             icon: Icon(Icons.add_rounded, color: iconSecondary, size: 20),
             tooltip: 'Zoom in',
             onTap: () {
+              if (_shouldUseWebVectorMap && _mlController != null) {
+                final cam = _mlController!.getCamera();
+                _animatedMapMove(
+                  LatLng(cam.center.lat, cam.center.lon),
+                  (cam.zoom + 1.0).clamp(3.0, 19.0),
+                );
+                return;
+              }
               try {
                 final c = _mapController.camera;
                 _animatedMapMove(c.center, (c.zoom + 1.0).clamp(3.0, 19.0));
@@ -4098,6 +4144,14 @@ extension _WebMapScreenCards on MapScreenState {
             icon: Icon(Icons.remove_rounded, color: iconSecondary, size: 20),
             tooltip: 'Zoom out',
             onTap: () {
+              if (_shouldUseWebVectorMap && _mlController != null) {
+                final cam = _mlController!.getCamera();
+                _animatedMapMove(
+                  LatLng(cam.center.lat, cam.center.lon),
+                  (cam.zoom - 1.0).clamp(3.0, 19.0),
+                );
+                return;
+              }
               try {
                 final c = _mapController.camera;
                 _animatedMapMove(c.center, (c.zoom - 1.0).clamp(3.0, 19.0));

@@ -16,7 +16,9 @@ import 'app_design.dart';
 import 'dpwh_standards.dart';
 
 import 'package:flutter_map/flutter_map.dart';
+import 'package:maplibre/maplibre.dart' as ml;
 import 'package:latlong2/latlong.dart' hide Path;
+import 'maplibre_style.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -635,6 +637,297 @@ class MapScreenState extends State<MapScreen>
       _startSubPageTour(_MapSubPageTour.driving, force: force);
 
   final MapController _mapController = MapController();
+  ml.MapController? _mlController;
+  ml.StyleController? _mlStyle;
+  bool _mlStyleReady = false;
+  bool? _mlLastIsDark;
+  final ValueNotifier<({double bearing, double pitch})> _mlCameraTelemetry =
+      ValueNotifier<({double bearing, double pitch})>((
+        bearing: 0.0,
+        pitch: 50.0,
+      ));
+
+  bool get _shouldUseVectorMap =>
+      !kIsWeb &&
+      !io.Platform.environment.containsKey('FLUTTER_TEST') &&
+      AppSettings.instance.useVectorMapNotifier.value;
+
+  String _colorHex(Color c) {
+    final argb = c.toARGB32() & 0x00FFFFFF;
+    return '#${argb.toRadixString(16).padLeft(6, '0')}';
+  }
+
+  Future<void> _syncMapLibreLayers(bool isDark) async {
+    final style = _mlStyle;
+    if (style == null || !_mlStyleReady || !mounted) return;
+    try {
+      final showMarkers = AppSettings.instance.showPotholesNotifier.value;
+      final filtered = showMarkers
+          ? _getFilteredActiveMarkers()
+          : const <PotholeMarker>[];
+
+      final hazardItems = filtered.map((p) {
+        final cls = DpwhStandards.classifyByName(p.primaryDefect);
+        final color = p.status == 'pending'
+            ? const Color(0xFFF59E0B)
+            : (p.status == 'rejected'
+                  ? const Color(0xFF94A3B8)
+                  : cls.color);
+        return <String, Object?>{
+          'id': p.id,
+          'lat': p.location.latitude,
+          'lng': p.location.longitude,
+          'color': _colorHex(color),
+          'defect': p.primaryDefect,
+          'status': p.status,
+        };
+      });
+      final hazardsGeoJson = RoadSenseMapLibreStyle.buildHazardsGeoJson(
+        hazardItems,
+      );
+
+      final routes = <List<List<double>>>[
+        for (final r in _alternativeRoutes)
+          <List<double>>[
+            for (final pt in r) <double>[pt.longitude, pt.latitude],
+          ],
+      ];
+      final routesGeoJson = RoadSenseMapLibreStyle.buildRoutesGeoJson(
+        routes,
+        _selectedRouteIndex,
+      );
+
+      final puckPos = _animatedPuckPositionNotifier.value ?? _currentPosition;
+      final puckGeoJson = RoadSenseMapLibreStyle.buildUserPuckGeoJson(
+        puckPos?.latitude,
+        puckPos?.longitude,
+      );
+
+      Future<void> upsertGeoJsonSource(String id, String data) async {
+        final existing = style.sources[id];
+        if (existing is ml.GeoJsonSource) {
+          await style.sources.updateGeoJsonData(id, ml.GeoJsonData.text(data));
+        } else {
+          await style.sources.add(
+            ml.GeoJsonSource.data(id: id, data: ml.GeoJsonData.text(data)),
+          );
+        }
+      }
+
+      if (style.sources['rs-poblacion-src'] == null) {
+        await style.sources.add(
+          ml.GeoJsonSource.data(
+            id: 'rs-poblacion-src',
+            data: ml.GeoJsonData.text(
+              RoadSenseMapLibreStyle.buildPoblacionBoundaryGeoJson(),
+            ),
+          ),
+        );
+      }
+      await upsertGeoJsonSource('rs-routes-src', routesGeoJson);
+      await upsertGeoJsonSource('rs-hazards-src', hazardsGeoJson);
+      await upsertGeoJsonSource('rs-puck-src', puckGeoJson);
+
+      if (style.layers['rs-poblacion-fill'] == null) {
+        await style.layers.add(
+          ml.FillStyleLayer(
+            id: 'rs-poblacion-fill',
+            sourceId: 'rs-poblacion-src',
+            color: const ml.Expression.literal(Color(0x14DC2626)),
+          ),
+        );
+      }
+
+      if (style.layers['rs-poblacion-outline'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-poblacion-outline',
+            sourceId: 'rs-poblacion-src',
+            color: const ml.Expression.literal(Color(0xFFDC2626)),
+            width: const ml.Expression.literal(2.2),
+            dasharray: const ml.Expression.literal([2.5, 2.0]),
+          ),
+        );
+      }
+
+      if (style.layers['rs-routes-alt'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-routes-alt',
+            sourceId: 'rs-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 0]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: ml.Expression.literal(
+              isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8),
+            ),
+            width: const ml.Expression.literal(4.5),
+            opacity: const ml.Expression.literal(0.75),
+          ),
+        );
+      }
+
+      if (style.layers['rs-routes-casing'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-routes-casing',
+            sourceId: 'rs-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 1]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: const ml.Expression.literal(Color(0xFF1E3A8A)),
+            width: const ml.Expression.literal(10.0),
+          ),
+        );
+      }
+
+      if (style.layers['rs-routes-active'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-routes-active',
+            sourceId: 'rs-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 1]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: const ml.Expression.literal(Color(0xFF38BDF8)),
+            width: const ml.Expression.literal(6.0),
+          ),
+        );
+      }
+
+      if (style.layers['rs-hazards-circles'] == null) {
+        await style.layers.add(
+          ml.CircleStyleLayer(
+            id: 'rs-hazards-circles',
+            sourceId: 'rs-hazards-src',
+            radius: const ml.Expression.literal(8.5),
+            color: const ml.Expression.raw(['get', 'color']),
+            strokeColor: const ml.Expression.literal(Colors.white),
+            strokeWidth: const ml.Expression.literal(2.0),
+            onClick: (event) {
+              final id = event.feature.properties['id']?.toString();
+              if (id == null || id.isEmpty) return;
+              final match = _effectivePotholes.where(
+                (p) => p.id.toString() == id,
+              );
+              if (match.isNotEmpty && mounted) {
+                setState(() {
+                  _selectedPothole = match.first;
+                  _searchedPlace = null;
+                });
+              }
+            },
+          ),
+        );
+      }
+
+      if (style.layers['rs-puck-halo'] == null) {
+        await style.layers.add(
+          ml.CircleStyleLayer(
+            id: 'rs-puck-halo',
+            sourceId: 'rs-puck-src',
+            radius: const ml.Expression.literal(16.0),
+            color: const ml.Expression.literal(Color(0x4438BDF8)),
+          ),
+        );
+      }
+
+      if (style.layers['rs-puck-core'] == null) {
+        await style.layers.add(
+          ml.CircleStyleLayer(
+            id: 'rs-puck-core',
+            sourceId: 'rs-puck-src',
+            radius: const ml.Expression.literal(7.5),
+            color: const ml.Expression.literal(Color(0xFF2563EB)),
+            strokeColor: const ml.Expression.literal(Colors.white),
+            strokeWidth: const ml.Expression.literal(2.5),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggle3dPitch() async {
+    final next3d = !AppSettings.instance.map3dTiltEnabledNotifier.value;
+    AppSettings.instance.map3dTiltEnabledNotifier.value = next3d;
+    final double targetPitch = next3d ? 50.0 : 0.0;
+    final ctrl = _mlController;
+    if (ctrl != null) {
+      try {
+        await ctrl.animateCamera(
+          ml.CameraUpdate.position(pitch: targetPitch),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 380),
+          ),
+        );
+      } catch (_) {}
+    }
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildMobileMapLibreMap(bool isDark) {
+    final center = _currentPosition ?? _bulacanCenter;
+    final initPitch = AppSettings.instance.map3dTiltEnabledNotifier.value
+        ? 50.0
+        : 0.0;
+    if (_mlLastIsDark != null && _mlLastIsDark != isDark) {
+      _mlStyleReady = false;
+    }
+    _mlLastIsDark = isDark;
+    if (_mlStyleReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_syncMapLibreLayers(isDark));
+        }
+      });
+    }
+    return ml.MapLibreMap(
+      options: ml.MapOptions(
+        style: ml.MapStyle.json(
+          RoadSenseMapLibreStyle.buildStyleJson(isDark: isDark),
+        ),
+        initCamera: ml.CameraUpdate.position(
+          center: ml.Geographic(lon: center.longitude, lat: center.latitude),
+          zoom: 15.0,
+          pitch: initPitch,
+        ),
+        minZoom: 3.0,
+        maxZoom: 20.0,
+        maxPitch: 60.0,
+      ),
+      onMapCreated: (ctrl) {
+        _mlController = ctrl;
+      },
+      onStyleLoaded: (style) {
+        _mlStyle = style;
+        _mlStyleReady = true;
+        unawaited(_syncMapLibreLayers(isDark));
+      },
+      onCameraMove: (event) {
+        _mlCameraTelemetry.value = (
+          bearing: event.camera.bearing,
+          pitch: event.camera.pitch,
+        );
+        _currentMapRotation = event.camera.bearing;
+        _mapRotationNotifier.value = event.camera.bearing;
+      },
+      onClick: (event) {
+        if (_isNavigating) return;
+        final point = LatLng(event.point.lat, event.point.lon);
+        if (_isPlacingMarker) {
+          setState(() => _pendingMarkerLocation = point);
+          _animatedMapMove(point, _mlController?.camera?.zoom ?? 16.0);
+        } else if (_isEditingDevLocation) {
+          setState(() => _pendingDevLocation = point);
+        } else if (_selectedPothole != null || _searchedPlace != null) {
+          setState(() {
+            _selectedPothole = null;
+            _searchedPlace = null;
+          });
+        }
+      },
+    );
+  }
   double _lastMarkerZoom = 15;
   final GlobalKey _mapViewportKey = GlobalKey();
   LatLng? _currentPosition;
@@ -882,6 +1175,23 @@ class MapScreenState extends State<MapScreen>
 
   /// Smoothly glides the GIS map camera to a target location and zoom level
   void _animatedMapMove(LatLng destLocation, double destZoom) {
+    final mlCtrl = _mlController;
+    if (_shouldUseVectorMap && mlCtrl != null) {
+      unawaited(
+        mlCtrl.animateCamera(
+          ml.CameraUpdate.position(
+            center: ml.Geographic(
+              lon: destLocation.longitude,
+              lat: destLocation.latitude,
+            ),
+            zoom: destZoom,
+          ),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 550),
+          ),
+        ),
+      );
+    }
     try {
       final startLat = _mapController.camera.center.latitude;
       final startLng = _mapController.camera.center.longitude;
@@ -4387,11 +4697,33 @@ class MapScreenState extends State<MapScreen>
             right: 52,
           );
 
+    final safePadding = _safeCameraFitPadding(desiredPadding);
+    final mlCtrl = _mlController;
+    if (_shouldUseVectorMap && mlCtrl != null) {
+      unawaited(
+        mlCtrl.animateCamera(
+          ml.CameraUpdate.bounds(
+            ml.GeoBox(
+              west: minLng,
+              south: minLat,
+              east: maxLng,
+              north: maxLat,
+            ),
+            padding: safePadding,
+            maxZoom: 17.5,
+          ),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 550),
+          ),
+        ),
+      );
+    }
+
     try {
       _mapController.fitCamera(
         CameraFit.bounds(
           bounds: bounds,
-          padding: _safeCameraFitPadding(desiredPadding),
+          padding: safePadding,
           maxZoom: 17.5,
         ),
       );
@@ -8564,7 +8896,9 @@ class MapScreenState extends State<MapScreen>
                             );
                           },
                           child: RepaintBoundary(
-                            child: FlutterMap(
+                            child: _shouldUseVectorMap
+                                ? _buildMobileMapLibreMap(isDark)
+                                : FlutterMap(
                         mapController: _mapController,
                         options: MapOptions(
                           initialCenter: _currentPosition ?? _bulacanCenter,
@@ -10317,6 +10651,63 @@ class MapScreenState extends State<MapScreen>
 
                           const SizedBox(height: 8),
 
+                          if (_shouldUseVectorMap) ...[
+                            ValueListenableBuilder<({double bearing, double pitch})>(
+                              valueListenable: _mlCameraTelemetry,
+                              builder: (context, cam, _) {
+                                final b = ((cam.bearing % 360) + 360) % 360;
+                                final p = cam.pitch;
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppDesign.surface(isDark),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: AppDesign.border(isDark),
+                                      width: 1.1,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '${b.round()}° · ${p.round()}°',
+                                    style: AppDesign.tabular(
+                                      TextStyle(
+                                        color: AppDesign.textPrimary(isDark),
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            MobileTouchIconButton(
+                              icon: AppSettings
+                                      .instance
+                                      .map3dTiltEnabledNotifier
+                                      .value
+                                  ? Icons.view_in_ar_rounded
+                                  : Icons.map_outlined,
+                              tooltip: AppSettings
+                                      .instance
+                                      .map3dTiltEnabledNotifier
+                                      .value
+                                  ? 'Switch to 2D Top-Down'
+                                  : 'Switch to 3D Tilt (50°)',
+                              foregroundColor: AppSettings
+                                      .instance
+                                      .map3dTiltEnabledNotifier
+                                      .value
+                                  ? AppDesign.accent(isDark)
+                                  : AppDesign.textPrimary(isDark),
+                              onPressed: () => unawaited(_toggle3dPitch()),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+
                           // 2. Zoom Controls Connected Vertical Pill (>= 48dp each)
                           Container(
                             width: 48,
@@ -10352,6 +10743,15 @@ class MapScreenState extends State<MapScreen>
                                     size: 22,
                                   ),
                                   onPressed: () {
+                                    if (_shouldUseVectorMap &&
+                                        _mlController != null) {
+                                      final cam = _mlController!.getCamera();
+                                      _animatedMapMove(
+                                        LatLng(cam.center.lat, cam.center.lon),
+                                        cam.zoom + 1,
+                                      );
+                                      return;
+                                    }
                                     final currentZoom =
                                         _mapController.camera.zoom;
                                     _animatedMapMove(
@@ -10379,6 +10779,15 @@ class MapScreenState extends State<MapScreen>
                                     size: 22,
                                   ),
                                   onPressed: () {
+                                    if (_shouldUseVectorMap &&
+                                        _mlController != null) {
+                                      final cam = _mlController!.getCamera();
+                                      _animatedMapMove(
+                                        LatLng(cam.center.lat, cam.center.lon),
+                                        cam.zoom - 1,
+                                      );
+                                      return;
+                                    }
                                     final currentZoom =
                                         _mapController.camera.zoom;
                                     _animatedMapMove(

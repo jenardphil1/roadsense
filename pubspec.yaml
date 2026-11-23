@@ -39,6 +39,7 @@ dependencies:
   flutter_vision:
     path: third_party/flutter_vision
   flutter_map: ^8.3.0
+  maplibre: ^0.4.0
   latlong2: ^0.9.1
   geolocator: ^14.0.2
   path_provider: ^2.1.4

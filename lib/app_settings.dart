@@ -40,6 +40,14 @@ class AppSettings {
   /// Active Navigation Route State Notifier
   final ValueNotifier<bool> isRouteActiveNotifier = ValueNotifier<bool>(false);
 
+  /// Mobile Map Engine Notifier: true = MapLibre Vector 3D, false = Raster Fallback
+  final ValueNotifier<bool> useVectorMapNotifier = ValueNotifier<bool>(true);
+
+  /// Mobile 3D Map Tilt Notifier: true = 50° 3D tilt, false = 0° 2D top-down
+  final ValueNotifier<bool> map3dTiltEnabledNotifier = ValueNotifier<bool>(
+    true,
+  );
+
   bool get isBlackAndWhite => highContrastMonochromeNotifier.value;
 
   bool get isDarkMode {

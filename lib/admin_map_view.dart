@@ -1,15 +1,19 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:maplibre/maplibre.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'admin_report_inspector.dart';
 import 'admin_report_query.dart';
 import 'admin_shared_widgets.dart';
+import 'app_settings.dart';
 import 'approval_priority.dart';
 import 'dpwh_standards.dart';
+import 'maplibre_style.dart';
 import 'road_hazard_marker.dart';
 import 'web_components.dart';
 import 'web_design.dart';
@@ -62,6 +66,188 @@ class _AdminMapViewState extends State<AdminMapView>
     with TickerProviderStateMixin {
   static const LatLng _santaMariaCenter = LatLng(14.8194, 120.9565);
   late final MapController _mapCtrl;
+  ml.MapController? _mlController;
+  ml.StyleController? _mlStyle;
+  bool _mlStyleReady = false;
+  bool? _mlLastIsDark;
+  final ValueNotifier<({double bearing, double pitch})> _mlCameraTelemetry =
+      ValueNotifier<({double bearing, double pitch})>((
+        bearing: 0.0,
+        pitch: 50.0,
+      ));
+
+  bool get _shouldUseAdminVectorMap =>
+      kIsWeb && AppSettings.instance.useVectorMapNotifier.value;
+
+  String _colorHex(Color c) {
+    final argb = c.toARGB32() & 0x00FFFFFF;
+    return '#${argb.toRadixString(16).padLeft(6, '0')}';
+  }
+
+  Future<void> _syncAdminMapLibreLayers(
+    bool isDark,
+    List<AdminReportRow> displaySet,
+  ) async {
+    final style = _mlStyle;
+    if (style == null || !_mlStyleReady || !mounted) return;
+    try {
+      final hazardItems = displaySet.where((r) => r.hasValidCoordinates).map((
+        r,
+      ) {
+        final cls = DpwhStandards.classifyByName(r.defectLabel);
+        final color = r.status == AdminReportStatus.pending
+            ? const Color(0xFFF59E0B)
+            : (r.status == AdminReportStatus.rejected
+                  ? const Color(0xFF94A3B8)
+                  : cls.color);
+        return <String, Object?>{
+          'id': r.id,
+          'lat': r.location!.latitude,
+          'lng': r.location!.longitude,
+          'color': _colorHex(color),
+          'defect': r.defectLabel,
+          'status': r.status.wireValue,
+        };
+      });
+      final geoJson = RoadSenseMapLibreStyle.buildHazardsGeoJson(hazardItems);
+      if (style.sources['rs-admin-poblacion-src'] == null) {
+        await style.sources.add(
+          ml.GeoJsonSource.data(
+            id: 'rs-admin-poblacion-src',
+            data: ml.GeoJsonData.text(
+              RoadSenseMapLibreStyle.buildPoblacionBoundaryGeoJson(),
+            ),
+          ),
+        );
+      }
+      final existing = style.sources['rs-admin-hazards-src'];
+      if (existing is ml.GeoJsonSource) {
+        await style.sources.updateGeoJsonData(
+          'rs-admin-hazards-src',
+          ml.GeoJsonData.text(geoJson),
+        );
+      } else {
+        await style.sources.add(
+          ml.GeoJsonSource.data(
+            id: 'rs-admin-hazards-src',
+            data: ml.GeoJsonData.text(geoJson),
+          ),
+        );
+      }
+
+      if (style.layers['rs-admin-poblacion-fill'] == null) {
+        await style.layers.add(
+          ml.FillStyleLayer(
+            id: 'rs-admin-poblacion-fill',
+            sourceId: 'rs-admin-poblacion-src',
+            color: const ml.Expression.literal(Color(0x14DC2626)),
+          ),
+        );
+      }
+
+      if (style.layers['rs-admin-poblacion-outline'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-admin-poblacion-outline',
+            sourceId: 'rs-admin-poblacion-src',
+            color: const ml.Expression.literal(Color(0xFFDC2626)),
+            width: const ml.Expression.literal(2.2),
+            dasharray: const ml.Expression.literal([2.5, 2.0]),
+          ),
+        );
+      }
+
+      if (style.layers['rs-admin-hazards-circles'] == null) {
+        await style.layers.add(
+          ml.CircleStyleLayer(
+            id: 'rs-admin-hazards-circles',
+            sourceId: 'rs-admin-hazards-src',
+            radius: const ml.Expression.literal(8.5),
+            color: const ml.Expression.raw(['get', 'color']),
+            strokeColor: const ml.Expression.literal(Colors.white),
+            strokeWidth: const ml.Expression.literal(2.0),
+            onClick: (event) {
+              final id = event.feature.properties['id']?.toString();
+              if (id != null && id.isNotEmpty) {
+                widget.onSelectReportId(id);
+              }
+            },
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleAdmin3dPitch() async {
+    final next3d = !AppSettings.instance.map3dTiltEnabledNotifier.value;
+    AppSettings.instance.map3dTiltEnabledNotifier.value = next3d;
+    final ctrl = _mlController;
+    if (ctrl != null) {
+      try {
+        await ctrl.animateCamera(
+          ml.CameraUpdate.position(pitch: next3d ? 50.0 : 0.0),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 380),
+          ),
+        );
+      } catch (_) {}
+    }
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildAdminMapLibreMap(
+    bool isDark,
+    LatLng initialCenter,
+    List<AdminReportRow> displaySet,
+  ) {
+    final initPitch = AppSettings.instance.map3dTiltEnabledNotifier.value
+        ? 50.0
+        : 0.0;
+    if (_mlLastIsDark != null && _mlLastIsDark != isDark) {
+      _mlStyleReady = false;
+    }
+    _mlLastIsDark = isDark;
+    if (_mlStyleReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _syncAdminMapLibreLayers(isDark, displaySet);
+        }
+      });
+    }
+    return ml.MapLibreMap(
+      options: ml.MapOptions(
+        style: ml.MapStyle.json(
+          RoadSenseMapLibreStyle.buildStyleJson(isDark: isDark),
+        ),
+        initCamera: ml.CameraUpdate.position(
+          center: ml.Geographic(
+            lon: initialCenter.longitude,
+            lat: initialCenter.latitude,
+          ),
+          zoom: widget.requestedFocusLocation != null ? 16.5 : 13.0,
+          pitch: initPitch,
+        ),
+        minZoom: 4.0,
+        maxZoom: 20.0,
+        maxPitch: 60.0,
+      ),
+      onMapCreated: (ctrl) {
+        _mlController = ctrl;
+        _mapReady = true;
+      },
+      onStyleLoaded: (style) {
+        _mlStyle = style;
+        _mlStyleReady = true;
+        _syncAdminMapLibreLayers(isDark, displaySet);
+      },
+      onCameraMove: (event) {
+        _mlCameraTelemetry.value = (
+          bearing: event.camera.bearing,
+          pitch: event.camera.pitch,
+        );
+      },
+    );
+  }
 
   String? _expandedClusterId;
   double _zoom = 13.0;
@@ -121,6 +307,18 @@ class _AdminMapViewState extends State<AdminMapView>
   }
 
   void _animateTo(LatLng target, double targetZoom) {
+    final mlCtrl = _mlController;
+    if (_shouldUseAdminVectorMap && mlCtrl != null) {
+      mlCtrl.animateCamera(
+        ml.CameraUpdate.position(
+          center: ml.Geographic(lon: target.longitude, lat: target.latitude),
+          zoom: targetZoom,
+        ),
+        animation: const ml.CameraAnimation.ease(
+          duration: Duration(milliseconds: 550),
+        ),
+      );
+    }
     _cameraAnimation?.dispose();
     _cameraAnimation = null;
     try {
@@ -169,6 +367,25 @@ class _AdminMapViewState extends State<AdminMapView>
     if (pts.length == 1) {
       _animateTo(pts.first, 17.0);
       return;
+    }
+    final mlCtrl = _mlController;
+    if (_shouldUseAdminVectorMap && mlCtrl != null) {
+      final bounds = LatLngBounds.fromPoints(pts);
+      mlCtrl.animateCamera(
+        ml.CameraUpdate.bounds(
+          ml.GeoBox(
+            west: bounds.west,
+            south: bounds.south,
+            east: bounds.east,
+            north: bounds.north,
+          ),
+          padding: const EdgeInsets.fromLTRB(48, 146, 72, 110),
+          maxZoom: 16.5,
+        ),
+        animation: const ml.CameraAnimation.ease(
+          duration: Duration(milliseconds: 550),
+        ),
+      );
     }
     try {
       _mapCtrl.fitCamera(
@@ -506,7 +723,9 @@ class _AdminMapViewState extends State<AdminMapView>
 
         final mapStack = Stack(
           children: [
-            FlutterMap(
+            _shouldUseAdminVectorMap
+                ? _buildAdminMapLibreMap(isDark, initialCenter, displaySet)
+                : FlutterMap(
               mapController: _mapCtrl,
               options: MapOptions(
                 initialCenter: initialCenter,
@@ -725,6 +944,55 @@ class _AdminMapViewState extends State<AdminMapView>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (_shouldUseAdminVectorMap) ...[
+                      ValueListenableBuilder<({double bearing, double pitch})>(
+                        valueListenable: _mlCameraTelemetry,
+                        builder: (context, cam, _) {
+                          final b = ((cam.bearing % 360) + 360) % 360;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Text(
+                              '${b.round()}°·${cam.pitch.round()}°',
+                              style: WebDesign.tabular(
+                                TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: WebDesign.textSecondary(isDark),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        tooltip: AppSettings
+                                .instance
+                                .map3dTiltEnabledNotifier
+                                .value
+                            ? 'Switch to 2D'
+                            : 'Switch to 3D (50°)',
+                        visualDensity: isWide ? null : VisualDensity.compact,
+                        constraints: isWide
+                            ? null
+                            : const BoxConstraints.tightFor(
+                                width: 38,
+                                height: 38,
+                              ),
+                        iconSize: isWide ? 22 : 18,
+                        onPressed: _toggleAdmin3dPitch,
+                        icon: Icon(
+                          AppSettings.instance.map3dTiltEnabledNotifier.value
+                              ? Icons.view_in_ar_rounded
+                              : Icons.map_outlined,
+                          color: AppSettings
+                                  .instance
+                                  .map3dTiltEnabledNotifier
+                                  .value
+                              ? WebDesign.brand(isDark)
+                              : null,
+                        ),
+                      ),
+                    ],
                     IconButton(
                       tooltip: 'Zoom in',
                       visualDensity: isWide ? null : VisualDensity.compact,
@@ -736,6 +1004,14 @@ class _AdminMapViewState extends State<AdminMapView>
                             ),
                       iconSize: isWide ? 24 : 19,
                       onPressed: () {
+                        if (_shouldUseAdminVectorMap && _mlController != null) {
+                          final cam = _mlController!.getCamera();
+                          _animateTo(
+                            LatLng(cam.center.lat, cam.center.lon),
+                            (cam.zoom + 1.2).clamp(4, 19),
+                          );
+                          return;
+                        }
                         try {
                           _animateTo(
                             _mapCtrl.camera.center,
@@ -756,6 +1032,14 @@ class _AdminMapViewState extends State<AdminMapView>
                             ),
                       iconSize: isWide ? 24 : 19,
                       onPressed: () {
+                        if (_shouldUseAdminVectorMap && _mlController != null) {
+                          final cam = _mlController!.getCamera();
+                          _animateTo(
+                            LatLng(cam.center.lat, cam.center.lon),
+                            (cam.zoom - 1.2).clamp(4, 19),
+                          );
+                          return;
+                        }
                         try {
                           _animateTo(
                             _mapCtrl.camera.center,

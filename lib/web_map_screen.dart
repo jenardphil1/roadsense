@@ -22,7 +22,9 @@ import 'road_hazard_marker.dart';
 import 'developer_markers.dart';
 
 import 'package:flutter_map/flutter_map.dart';
+import 'package:maplibre/maplibre.dart' as ml;
 import 'package:latlong2/latlong.dart' hide Path;
+import 'maplibre_style.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -361,6 +363,246 @@ class MapScreenState extends State<MapScreen>
   bool get wantKeepAlive => true;
 
   final MapController _mapController = MapController();
+  ml.MapController? _mlController;
+  ml.StyleController? _mlStyle;
+  bool _mlStyleReady = false;
+  bool? _mlLastIsDark;
+  final ValueNotifier<({double bearing, double pitch})> _mlCameraTelemetry =
+      ValueNotifier<({double bearing, double pitch})>((
+        bearing: 0.0,
+        pitch: 50.0,
+      ));
+
+  bool get _shouldUseWebVectorMap =>
+      kIsWeb && AppSettings.instance.useVectorMapNotifier.value;
+
+  String _colorHex(Color c) {
+    final argb = c.toARGB32() & 0x00FFFFFF;
+    return '#${argb.toRadixString(16).padLeft(6, '0')}';
+  }
+
+  Future<void> _syncWebMapLibreLayers(bool isDark) async {
+    final style = _mlStyle;
+    if (style == null || !_mlStyleReady || !mounted) return;
+    try {
+      final showMarkers = AppSettings.instance.showPotholesNotifier.value;
+      final filtered = showMarkers
+          ? _effectivePotholes
+          : const <PotholeMarker>[];
+
+      final hazardItems = filtered.map((p) {
+        final cls = DpwhStandards.classifyByName(p.primaryDefect);
+        final color = p.status == 'pending'
+            ? const Color(0xFFF59E0B)
+            : (p.status == 'rejected'
+                  ? const Color(0xFF94A3B8)
+                  : cls.color);
+        return <String, Object?>{
+          'id': p.docId ?? p.id?.toString() ?? '',
+          'lat': p.location.latitude,
+          'lng': p.location.longitude,
+          'color': _colorHex(color),
+          'defect': p.primaryDefect,
+          'status': p.status,
+        };
+      });
+      final hazardsGeoJson = RoadSenseMapLibreStyle.buildHazardsGeoJson(
+        hazardItems,
+      );
+
+      final routes = <List<List<double>>>[
+        for (final r in _alternativeRoutes)
+          <List<double>>[
+            for (final pt in r) <double>[pt.longitude, pt.latitude],
+          ],
+      ];
+      final routesGeoJson = RoadSenseMapLibreStyle.buildRoutesGeoJson(
+        routes,
+        _selectedRouteIndex,
+      );
+
+      Future<void> upsertGeoJsonSource(String id, String data) async {
+        final existing = style.sources[id];
+        if (existing is ml.GeoJsonSource) {
+          await style.sources.updateGeoJsonData(id, ml.GeoJsonData.text(data));
+        } else {
+          await style.sources.add(
+            ml.GeoJsonSource.data(id: id, data: ml.GeoJsonData.text(data)),
+          );
+        }
+      }
+
+      if (style.sources['rs-web-poblacion-src'] == null) {
+        await style.sources.add(
+          ml.GeoJsonSource.data(
+            id: 'rs-web-poblacion-src',
+            data: ml.GeoJsonData.text(
+              RoadSenseMapLibreStyle.buildPoblacionBoundaryGeoJson(),
+            ),
+          ),
+        );
+      }
+      await upsertGeoJsonSource('rs-web-routes-src', routesGeoJson);
+      await upsertGeoJsonSource('rs-web-hazards-src', hazardsGeoJson);
+
+      if (style.layers['rs-web-poblacion-fill'] == null) {
+        await style.layers.add(
+          ml.FillStyleLayer(
+            id: 'rs-web-poblacion-fill',
+            sourceId: 'rs-web-poblacion-src',
+            color: const ml.Expression.literal(Color(0x14DC2626)),
+          ),
+        );
+      }
+
+      if (style.layers['rs-web-poblacion-outline'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-web-poblacion-outline',
+            sourceId: 'rs-web-poblacion-src',
+            color: const ml.Expression.literal(Color(0xFFDC2626)),
+            width: const ml.Expression.literal(2.2),
+            dasharray: const ml.Expression.literal([2.5, 2.0]),
+          ),
+        );
+      }
+
+      if (style.layers['rs-web-routes-alt'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-web-routes-alt',
+            sourceId: 'rs-web-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 0]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: ml.Expression.literal(
+              isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8),
+            ),
+            width: const ml.Expression.literal(4.5),
+            opacity: const ml.Expression.literal(0.75),
+          ),
+        );
+      }
+
+      if (style.layers['rs-web-routes-casing'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-web-routes-casing',
+            sourceId: 'rs-web-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 1]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: const ml.Expression.literal(Color(0xFF1E3A8A)),
+            width: const ml.Expression.literal(10.0),
+          ),
+        );
+      }
+
+      if (style.layers['rs-web-routes-active'] == null) {
+        await style.layers.add(
+          ml.LineStyleLayer(
+            id: 'rs-web-routes-active',
+            sourceId: 'rs-web-routes-src',
+            filter: const ml.Expression.raw(['==', ['get', 'isActive'], 1]),
+            cap: const ml.Expression.literal(ml.LineCap.round),
+            join: const ml.Expression.literal(ml.LineJoin.round),
+            color: const ml.Expression.literal(Color(0xFF38BDF8)),
+            width: const ml.Expression.literal(6.0),
+          ),
+        );
+      }
+
+      if (style.layers['rs-web-hazards-circles'] == null) {
+        await style.layers.add(
+          ml.CircleStyleLayer(
+            id: 'rs-web-hazards-circles',
+            sourceId: 'rs-web-hazards-src',
+            radius: const ml.Expression.literal(8.5),
+            color: const ml.Expression.raw(['get', 'color']),
+            strokeColor: const ml.Expression.literal(Colors.white),
+            strokeWidth: const ml.Expression.literal(2.0),
+            onClick: (event) {
+              final id = event.feature.properties['id']?.toString();
+              if (id == null || id.isEmpty) return;
+              final match = _effectivePotholes.where(
+                (p) => (p.docId ?? p.id?.toString() ?? '') == id,
+              );
+              if (match.isNotEmpty && mounted) {
+                setState(() {
+                  _selectedPothole = match.first;
+                  _searchedPlace = null;
+                });
+              }
+            },
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleWeb3dPitch() async {
+    final next3d = !AppSettings.instance.map3dTiltEnabledNotifier.value;
+    AppSettings.instance.map3dTiltEnabledNotifier.value = next3d;
+    final ctrl = _mlController;
+    if (ctrl != null) {
+      try {
+        await ctrl.animateCamera(
+          ml.CameraUpdate.position(pitch: next3d ? 50.0 : 0.0),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 380),
+          ),
+        );
+      } catch (_) {}
+    }
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildWebMapLibreMap(bool isDark) {
+    final center = _initialUrlCenter ?? _currentPosition ?? _bulacanCenter;
+    final initPitch = AppSettings.instance.map3dTiltEnabledNotifier.value
+        ? 50.0
+        : 0.0;
+    if (_mlLastIsDark != null && _mlLastIsDark != isDark) {
+      _mlStyleReady = false;
+    }
+    _mlLastIsDark = isDark;
+    if (_mlStyleReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_syncWebMapLibreLayers(isDark));
+        }
+      });
+    }
+    return ml.MapLibreMap(
+      options: ml.MapOptions(
+        style: ml.MapStyle.json(
+          RoadSenseMapLibreStyle.buildStyleJson(isDark: isDark),
+        ),
+        initCamera: ml.CameraUpdate.position(
+          center: ml.Geographic(lon: center.longitude, lat: center.latitude),
+          zoom: _initialUrlZoom ?? 15.0,
+          pitch: initPitch,
+        ),
+        minZoom: 3.0,
+        maxZoom: 20.0,
+        maxPitch: 60.0,
+      ),
+      onMapCreated: (ctrl) {
+        _mlController = ctrl;
+      },
+      onStyleLoaded: (style) {
+        _mlStyle = style;
+        _mlStyleReady = true;
+        unawaited(_syncWebMapLibreLayers(isDark));
+      },
+      onCameraMove: (event) {
+        _mlCameraTelemetry.value = (
+          bearing: event.camera.bearing,
+          pitch: event.camera.pitch,
+        );
+      },
+    );
+  }
   double _lastMarkerZoom = 15;
   LatLng? _currentPosition;
   bool _isLocationDisabled = false;
@@ -432,6 +674,23 @@ class MapScreenState extends State<MapScreen>
     double destZoom, {
     bool offsetForSidebar = false,
   }) {
+    final mlCtrl = _mlController;
+    if (_shouldUseWebVectorMap && mlCtrl != null) {
+      unawaited(
+        mlCtrl.animateCamera(
+          ml.CameraUpdate.position(
+            center: ml.Geographic(
+              lon: destLocation.longitude,
+              lat: destLocation.latitude,
+            ),
+            zoom: destZoom,
+          ),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 550),
+          ),
+        ),
+      );
+    }
     try {
       final startLat = _mapController.camera.center.latitude;
       final startLng = _mapController.camera.center.longitude;
@@ -3924,6 +4183,32 @@ class MapScreenState extends State<MapScreen>
     }
 
     final bounds = LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng));
+
+    final mlCtrl = _mlController;
+    if (_shouldUseWebVectorMap && mlCtrl != null) {
+      unawaited(
+        mlCtrl.animateCamera(
+          ml.CameraUpdate.bounds(
+            ml.GeoBox(
+              west: minLng,
+              south: minLat,
+              east: maxLng,
+              north: maxLat,
+            ),
+            padding: const EdgeInsets.only(
+              top: 140,
+              bottom: 180,
+              left: 60,
+              right: 60,
+            ),
+            maxZoom: 17.5,
+          ),
+          animation: const ml.CameraAnimation.ease(
+            duration: Duration(milliseconds: 550),
+          ),
+        ),
+      );
+    }
 
     try {
       _mapController.fitCamera(
@@ -8820,7 +9105,9 @@ class MapScreenState extends State<MapScreen>
                         setState(() => _isMapDragging = false);
                       }
                     },
-                    child: FlutterMap(
+                    child: _shouldUseWebVectorMap
+                        ? _buildWebMapLibreMap(isDark)
+                        : FlutterMap(
                       mapController: _mapController,
                       options: MapOptions(
                         initialCenter:
